@@ -381,9 +381,46 @@
       #sidebar .nav-text, #logo .company, #logo .title, #connection-status span,
       nav .nav-section, #sidebar-footer { display: none; }
     }
+
+    /* ── Login overlay ── */
+    #login-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+    }
+    #login-box {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 40px 36px; width: 340px; text-align: center;
+    }
+    #login-box .co  { font-size: 11px; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4px; }
+    #login-box .ttl { font-size: 26px; font-weight: 700; color: var(--text); margin-bottom: 28px; }
+    #login-box input {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); padding: 11px 14px;
+      font-size: 14px; text-align: center; letter-spacing: .06em; margin-bottom: 14px;
+    }
+    #login-box input:focus { outline: none; border-color: var(--accent); }
+    #login-box button {
+      width: 100%; background: var(--accent); color: #fff; border: none;
+      border-radius: 8px; padding: 11px; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: opacity .15s;
+    }
+    #login-box button:hover { opacity: .88; }
+    #login-error { color: var(--error); font-size: 12px; margin-top: 10px; min-height: 18px; }
   </style>
 </head>
 <body>
+
+<!-- ═══════════════ LOGIN ═══════════════ -->
+<div id="login-overlay">
+  <div id="login-box">
+    <div class="co">Intransit Technologies</div>
+    <div class="ttl">Hub</div>
+    <input type="password" id="login-secret" placeholder="Enter hub password" autocomplete="current-password">
+    <button onclick="doLogin()">Unlock</button>
+    <div id="login-error"></div>
+  </div>
+</div>
 
 <!-- ═══════════════ SIDEBAR ═══════════════ -->
 <aside id="sidebar">
@@ -628,7 +665,7 @@
 // ═══════════════════════════════════════════════════
 let CONFIG = {
   workerUrl: 'https://intransit-hub.intransit-sales.workers.dev',
-  secret: 'CXEzt4BVqliSmNwdorZf86DuKyceAxjn'
+  secret: ''
 };
 
 const APPS = [
@@ -661,15 +698,22 @@ const APPS = [
 // ─── Persist config ──────────────────────────────
 function loadConfig() {
   const saved = localStorage.getItem('hub_config');
-  if (saved) CONFIG = { ...CONFIG, ...JSON.parse(saved) };
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    CONFIG.workerUrl = parsed.workerUrl || CONFIG.workerUrl;
+  }
   document.getElementById('cfg-worker-url').value = CONFIG.workerUrl || '';
-  document.getElementById('cfg-secret').value     = CONFIG.secret     || '';
+  document.getElementById('cfg-secret').value     = '••••••••••••••••';
 }
 
 function saveConfig() {
   CONFIG.workerUrl = document.getElementById('cfg-worker-url').value.trim();
-  CONFIG.secret    = document.getElementById('cfg-secret').value.trim();
-  localStorage.setItem('hub_config', JSON.stringify(CONFIG));
+  const newSecret  = document.getElementById('cfg-secret').value.trim();
+  if (newSecret && newSecret !== '••••••••••••••••') {
+    CONFIG.secret = newSecret;
+    localStorage.setItem('hub_secret', newSecret);
+  }
+  localStorage.setItem('hub_config', JSON.stringify({ workerUrl: CONFIG.workerUrl }));
   testConnection();
 }
 
@@ -1026,10 +1070,45 @@ async function apiPost(path, body) {
   return res.json();
 }
 
+// ─── Login ───────────────────────────────────────
+function initApp() {
+  document.getElementById('login-overlay').style.display = 'none';
+  loadConfig();
+  testConnection();
+  loadDashboard();
+}
+
+async function doLogin() {
+  const input = document.getElementById('login-secret');
+  const errEl = document.getElementById('login-error');
+  const secret = input.value.trim();
+  if (!secret) { errEl.textContent = 'Enter the hub password.'; return; }
+  errEl.textContent = '';
+  CONFIG.secret = secret;
+  try {
+    await apiGet('/api/status');
+    localStorage.setItem('hub_secret', secret);
+    initApp();
+  } catch {
+    errEl.textContent = 'Wrong password — try again.';
+    CONFIG.secret = '';
+    input.value = '';
+    input.focus();
+  }
+}
+
+document.getElementById('login-secret').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+
 // ─── Init ────────────────────────────────────────
-loadConfig();
-testConnection();
-loadDashboard();
+const _savedSecret = localStorage.getItem('hub_secret');
+if (_savedSecret) {
+  CONFIG.secret = _savedSecret;
+  initApp();
+} else {
+  document.getElementById('login-secret').focus();
+}
 </script>
 </body>
 </html>
