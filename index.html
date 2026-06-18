@@ -302,6 +302,46 @@
     .draft-actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .btn.danger { color: var(--error); border-color: var(--error); }
     .btn.danger:hover { background: rgba(239,68,68,.1); }
+
+    /* ── Memory ── */
+    .mem-type-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    }
+    .mem-type-badge.user      { background: rgba(79,142,247,.15); color: var(--accent); }
+    .mem-type-badge.feedback  { background: rgba(245,158,11,.15); color: var(--warning); }
+    .mem-type-badge.project   { background: rgba(34,197,94,.15);  color: var(--success); }
+    .mem-type-badge.reference { background: rgba(168,85,247,.15); color: #a855f7; }
+    .mem-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px; margin-bottom: 10px; transition: border-color .2s;
+    }
+    .mem-card:hover { border-color: #3a3d52; }
+    .mem-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; cursor: pointer; }
+    .mem-card-name   { font-weight: 600; font-size: 13px; flex: 1; }
+    .mem-card-desc   { font-size: 12px; color: var(--text-dim); padding-left: 56px; }
+    .mem-card-time   { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .mem-body-wrap   { display: none; margin-top: 12px; }
+    .mem-body-wrap.open { display: block; }
+    .mem-body-wrap pre {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 12px; font-size: 12px; color: var(--text-dim); white-space: pre-wrap;
+      word-break: break-word; max-height: 280px; overflow-y: auto; font-family: inherit; margin-bottom: 10px;
+    }
+    .mem-body-wrap textarea {
+      width: 100%; min-height: 160px; background: var(--bg); border: 1px solid var(--accent);
+      border-radius: 6px; color: var(--text); padding: 10px; font-size: 12px;
+      font-family: inherit; resize: vertical; margin-bottom: 8px;
+    }
+    .mem-toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+    .mem-toolbar select { background: var(--card); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 5px 10px; font-size: 12px; }
+    .mem-toolbar input  { background: var(--card); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 5px 10px; font-size: 12px; flex: 1; min-width: 140px; }
+    #mem-new-form {
+      background: var(--card); border: 1px solid var(--accent); border-radius: 10px;
+      padding: 18px; margin-bottom: 16px; display: none;
+    }
+    #mem-new-form h4 { margin-bottom: 12px; font-size: 13px; color: var(--accent); }
+
     .triage-empty {
       text-align: center; padding: 48px; color: var(--muted); font-size: 13px;
       background: var(--card); border: 1px dashed var(--border); border-radius: 10px;
@@ -375,6 +415,10 @@
     </a>
 
     <div class="nav-section">System</div>
+    <a data-tab="memory">
+      <span class="icon">🧠</span>
+      <span class="nav-text">Memory</span>
+    </a>
     <a data-tab="settings">
       <span class="icon">⚙️</span>
       <span class="nav-text">Settings</span>
@@ -490,6 +534,54 @@
       </div>
       <div id="draft-list">
         <div class="triage-empty">Loading drafts…</div>
+      </div>
+    </div>
+
+    <!-- ── MEMORY TAB ── -->
+    <div class="tab-panel" id="tab-memory">
+      <div class="mem-toolbar">
+        <select id="mem-filter-type" onchange="loadMemory()">
+          <option value="">All types</option>
+          <option value="user">User</option>
+          <option value="feedback">Feedback</option>
+          <option value="project">Project</option>
+          <option value="reference">Reference</option>
+        </select>
+        <input type="text" id="mem-search" placeholder="Search…" oninput="loadMemory()">
+        <button class="btn sm primary" onclick="toggleNewMemForm()">+ New Memory</button>
+        <button class="btn sm" onclick="loadMemory()" style="margin-left:auto">↻ Refresh</button>
+      </div>
+
+      <div id="mem-new-form">
+        <h4>New Memory</h4>
+        <div class="settings-row">
+          <label style="width:120px;font-size:12px;color:var(--text-dim)">Slug</label>
+          <input type="text" id="mem-new-slug" placeholder="e.g. feedback-reply-style" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 11px;font-size:13px">
+        </div>
+        <div class="settings-row" style="margin-top:8px">
+          <label style="width:120px;font-size:12px;color:var(--text-dim)">Description</label>
+          <input type="text" id="mem-new-desc" placeholder="One-line summary" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 11px;font-size:13px">
+        </div>
+        <div class="settings-row" style="margin-top:8px">
+          <label style="width:120px;font-size:12px;color:var(--text-dim)">Type</label>
+          <select id="mem-new-type" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 11px;font-size:13px">
+            <option value="feedback">Feedback</option>
+            <option value="user">User</option>
+            <option value="project">Project</option>
+            <option value="reference">Reference</option>
+          </select>
+        </div>
+        <div style="margin-top:8px">
+          <textarea id="mem-new-body" placeholder="Memory content…" style="width:100%;min-height:120px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:10px;font-size:12px;font-family:inherit;resize:vertical"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn primary sm" onclick="saveNewMemory()">Save</button>
+          <button class="btn sm" onclick="toggleNewMemForm()">Cancel</button>
+        </div>
+      </div>
+
+      <div id="mem-list">
+        <div class="triage-empty">Loading memories…</div>
       </div>
     </div>
 
@@ -696,6 +788,7 @@ const TAB_TITLES = {
   'dashboard':    'Dashboard',
   'logs':         'Event Logs',
   'email-triage': 'Email Triage',
+  'memory':       'AI Memory',
   'settings':     'Settings'
 };
 
@@ -708,6 +801,7 @@ function showTab(id) {
   if (id === 'logs')         loadLogs();
   if (id === 'dashboard')    loadDashboard();
   if (id === 'email-triage') loadDrafts();
+  if (id === 'memory')       loadMemory();
 }
 
 document.querySelectorAll('nav a[data-tab]').forEach(a => {
@@ -816,6 +910,115 @@ async function deleteDraft(id) {
 async function apiPatch(path, body) {
   const res = await fetch(CONFIG.workerUrl + path, {
     method: 'PATCH',
+    headers: { 'Authorization': 'Bearer ' + CONFIG.secret, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+// ─── Memory ──────────────────────────────────────
+async function loadMemory() {
+  const type   = document.getElementById('mem-filter-type').value;
+  const search = document.getElementById('mem-search').value;
+  const list   = document.getElementById('mem-list');
+  list.innerHTML = '<div class="triage-empty">Loading…</div>';
+  try {
+    let url = '/api/memory';
+    const params = [];
+    if (type)   params.push('type='   + encodeURIComponent(type));
+    if (search) params.push('q='      + encodeURIComponent(search));
+    if (params.length) url += '?' + params.join('&');
+    const data = await apiGet(url);
+    const rows = (data && data.rows) || [];
+    if (!rows.length) { list.innerHTML = '<div class="triage-empty">No memories found.</div>'; return; }
+    list.innerHTML = rows.map(renderMemCard).join('');
+  } catch { list.innerHTML = '<div class="triage-empty">Worker not connected.</div>'; }
+}
+
+function renderMemCard(m) {
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const t = (m.updated_at || '').replace('T',' ').slice(0,16);
+  return `
+    <div class="mem-card" id="mem-${esc(m.slug)}">
+      <div class="mem-card-header" onclick="toggleMemBody('${esc(m.slug)}')">
+        <span class="mem-type-badge ${esc(m.type)}">${esc(m.type)}</span>
+        <span class="mem-card-name">${esc(m.slug)}</span>
+        <span class="mem-card-time">${t}</span>
+      </div>
+      <div class="mem-card-desc">${esc(m.description || '')}</div>
+      <div class="mem-body-wrap" id="mem-body-${esc(m.slug)}">
+        <div id="mem-view-${esc(m.slug)}">
+          <pre id="mem-pre-${esc(m.slug)}">Loading…</pre>
+          <div style="display:flex;gap:8px">
+            <button class="btn sm primary" onclick="startMemEdit('${esc(m.slug)}')">✏ Edit</button>
+            <button class="btn sm danger"  onclick="deleteMemory('${esc(m.slug)}')">✕ Delete</button>
+          </div>
+        </div>
+        <div id="mem-edit-${esc(m.slug)}" style="display:none">
+          <textarea id="mem-ta-${esc(m.slug)}"></textarea>
+          <div style="display:flex;gap:8px">
+            <button class="btn sm primary" onclick="saveMemEdit('${esc(m.slug)}','${esc(m.type)}','${esc(m.description||'')}')">Save</button>
+            <button class="btn sm" onclick="cancelMemEdit('${esc(m.slug)}')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function toggleMemBody(slug) {
+  const wrap = document.getElementById('mem-body-' + slug);
+  const isOpen = wrap.classList.toggle('open');
+  if (isOpen && document.getElementById('mem-pre-' + slug).textContent === 'Loading…') {
+    try {
+      const data = await apiGet('/api/memory/' + encodeURIComponent(slug));
+      document.getElementById('mem-pre-' + slug).textContent = data.body || '';
+      document.getElementById('mem-ta-'  + slug).value       = data.body || '';
+    } catch { document.getElementById('mem-pre-' + slug).textContent = 'Error loading.'; }
+  }
+}
+
+function startMemEdit(slug) {
+  document.getElementById('mem-view-' + slug).style.display = 'none';
+  document.getElementById('mem-edit-' + slug).style.display = 'block';
+}
+function cancelMemEdit(slug) {
+  document.getElementById('mem-view-' + slug).style.display = 'block';
+  document.getElementById('mem-edit-' + slug).style.display = 'none';
+}
+async function saveMemEdit(slug, type, description) {
+  const body = document.getElementById('mem-ta-' + slug).value;
+  await apiPost('/api/memory', { slug, type, description, body });
+  document.getElementById('mem-pre-' + slug).textContent = body;
+  cancelMemEdit(slug);
+}
+async function deleteMemory(slug) {
+  if (!confirm('Delete memory "' + slug + '"?')) return;
+  await fetch(CONFIG.workerUrl + '/api/memory/' + encodeURIComponent(slug), {
+    method: 'DELETE', headers: { 'Authorization': 'Bearer ' + CONFIG.secret }
+  });
+  document.getElementById('mem-' + slug).remove();
+}
+function toggleNewMemForm() {
+  const f = document.getElementById('mem-new-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+async function saveNewMemory() {
+  const slug = document.getElementById('mem-new-slug').value.trim();
+  const desc = document.getElementById('mem-new-desc').value.trim();
+  const type = document.getElementById('mem-new-type').value;
+  const body = document.getElementById('mem-new-body').value.trim();
+  if (!slug || !body) { alert('Slug and body are required.'); return; }
+  await apiPost('/api/memory', { slug, description: desc, type, body });
+  toggleNewMemForm();
+  document.getElementById('mem-new-slug').value = '';
+  document.getElementById('mem-new-desc').value = '';
+  document.getElementById('mem-new-body').value = '';
+  loadMemory();
+}
+async function apiPost(path, body) {
+  const res = await fetch(CONFIG.workerUrl + path, {
+    method: 'POST',
     headers: { 'Authorization': 'Bearer ' + CONFIG.secret, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });

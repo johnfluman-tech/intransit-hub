@@ -2,21 +2,20 @@
  * Intransit Hub — Cloudflare Worker
  *
  * Routes:
- *   GET  /api/status          — latest log entry per app
- *   GET  /api/logs            — paginated log entries
- *   POST /api/logs            — write a log entry
- *   GET  /api/drafts          — email drafts pending review
- *   POST /api/drafts          — create a draft record (called by email script)
- *   PATCH /api/drafts/:id     — update draft action/content
- *   POST /api/claude          — proxy Claude API
+ *   GET/POST     /api/status
+ *   GET/POST     /api/logs
+ *   GET/POST     /api/drafts
+ *   PATCH        /api/drafts/:id
+ *   GET/POST     /api/memory          — AI memory store
+ *   GET/DELETE   /api/memory/:slug
+ *   POST         /api/claude
  *
- * Secrets: HUB_SECRET, CLAUDE_API_KEY
- * D1 binding: DB (intransit-hub-db)
+ * Secrets: HUB_SECRET, CLAUDE_API_KEY   D1 binding: DB
  */
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -24,37 +23,30 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: CORS });
-    }
+    if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
 
     const auth = request.headers.get('Authorization') || '';
-    if (auth !== `Bearer ${env.HUB_SECRET}`) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
+    if (auth !== `Bearer ${env.HUB_SECRET}`) return json({ error: 'Unauthorized' }, 401);
 
     try {
-      if (url.pathname === '/api/status' && request.method === 'GET')
-        return handleStatus(env);
+      const p = url.pathname;
+      const m = request.method;
 
-      if (url.pathname === '/api/logs' && request.method === 'GET')
-        return handleGetLogs(url, env);
+      if (p === '/api/status'  && m === 'GET')  return handleStatus(env);
+      if (p === '/api/logs'    && m === 'GET')  return handleGetLogs(url, env);
+      if (p === '/api/logs'    && m === 'POST') return handlePostLog(request, env);
+      if (p === '/api/drafts'  && m === 'GET')  return handleGetDrafts(url, env);
+      if (p === '/api/drafts'  && m === 'POST') return handlePostDraft(request, env);
+      if (p === '/api/memory'  && m === 'GET')  return handleGetMemory(url, env);
+      if (p === '/api/memory'  && m === 'POST') return handlePostMemory(request, env);
+      if (p === '/api/claude'  && m === 'POST') return handleClaude(request, env);
 
-      if (url.pathname === '/api/logs' && request.method === 'POST')
-        return handlePostLog(request, env);
+      const draftId = p.match(/^\/api\/drafts\/(\d+)$/);
+      if (draftId && m === 'PATCH') return handlePatchDraft(request, env, parseInt(draftId[1]));
 
-      if (url.pathname === '/api/drafts' && request.method === 'GET')
-        return handleGetDrafts(url, env);
-
-      if (url.pathname === '/api/drafts' && request.method === 'POST')
-        return handlePostDraft(request, env);
-
-      const patchMatch = url.pathname.match(/^\/api\/drafts\/(\d+)$/);
-      if (patchMatch && request.method === 'PATCH')
-        return handlePatchDraft(request, env, parseInt(patchMatch[1]));
-
-      if (url.pathname === '/api/claude' && request.method === 'POST')
-        return handleClaude(request, env);
+      const memSlug = p.match(/^\/api\/memory\/([a-zA-Z0-9_-]+)$/);
+      if (memSlug && m === 'GET')    return handleGetMemorySingle(env, memSlug[1]);
+      if (memSlug && m === 'DELETE') return handleDeleteMemory(env, memSlug[1]);
 
       return json({ error: 'Not found' }, 404);
     } catch (err) {
@@ -63,7 +55,7 @@ export default {
   }
 };
 
-// ─── GET /api/status ────────────────────────────────
+// ─── /api/status ────────────────────────────────────
 async function handleStatus(env) {
   const apps = ['email_automation', 'tee_time_bot', 'icsource_checker', 'oem_excess'];
   const results = {};
@@ -81,12 +73,11 @@ async function handleStatus(env) {
   return json(results);
 }
 
-// ─── GET /api/logs ──────────────────────────────────
+// ─── /api/logs GET ──────────────────────────────────
 async function handleGetLogs(url, env) {
   const app   = url.searchParams.get('app')   || '';
   const type  = url.searchParams.get('type')  || '';
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
-
   let sql = 'SELECT * FROM app_logs';
   const binds = [], where = [];
   if (app)  { where.push('app_name = ?');   binds.push(app); }
@@ -94,24 +85,21 @@ async function handleGetLogs(url, env) {
   if (where.length) sql += ' WHERE ' + where.join(' AND ');
   sql += ' ORDER BY created_at DESC LIMIT ?';
   binds.push(limit);
-
   const { results: rows } = await env.DB.prepare(sql).bind(...binds).all();
   return json({ rows: rows || [] });
 }
 
-// ─── POST /api/logs ─────────────────────────────────
+// ─── /api/logs POST ─────────────────────────────────
 async function handlePostLog(request, env) {
-  const body = await request.json();
-  const { app_name, event_type, summary, details } = body;
+  const { app_name, event_type, summary, details } = await request.json();
   if (!app_name || !event_type) return json({ error: 'app_name and event_type are required' }, 400);
-  const detailsStr = details ? (typeof details === 'string' ? details : JSON.stringify(details)) : null;
-  await env.DB.prepare(
-    'INSERT INTO app_logs (app_name, event_type, summary, details) VALUES (?, ?, ?, ?)'
-  ).bind(app_name, event_type, summary || null, detailsStr).run();
+  const d = details ? (typeof details === 'string' ? details : JSON.stringify(details)) : null;
+  await env.DB.prepare('INSERT INTO app_logs (app_name, event_type, summary, details) VALUES (?, ?, ?, ?)')
+    .bind(app_name, event_type, summary || null, d).run();
   return json({ ok: true });
 }
 
-// ─── GET /api/drafts ────────────────────────────────
+// ─── /api/drafts GET ────────────────────────────────
 async function handleGetDrafts(url, env) {
   const status = url.searchParams.get('status') || 'pending';
   const limit  = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
@@ -121,10 +109,9 @@ async function handleGetDrafts(url, env) {
   return json({ rows: rows || [] });
 }
 
-// ─── POST /api/drafts ───────────────────────────────
+// ─── /api/drafts POST ───────────────────────────────
 async function handlePostDraft(request, env) {
-  const body = await request.json();
-  const { thread_id, mpn, sender, subject, draft_content } = body;
+  const { thread_id, mpn, sender, subject, draft_content } = await request.json();
   if (!draft_content) return json({ error: 'draft_content is required' }, 400);
   const { meta } = await env.DB.prepare(
     'INSERT INTO email_decisions (thread_id, mpn, sender, subject, action, draft_content) VALUES (?, ?, ?, ?, ?, ?)'
@@ -132,34 +119,67 @@ async function handlePostDraft(request, env) {
   return json({ ok: true, id: meta.last_row_id });
 }
 
-// ─── PATCH /api/drafts/:id ──────────────────────────
+// ─── /api/drafts/:id PATCH ──────────────────────────
 async function handlePatchDraft(request, env, id) {
-  const body = await request.json();
-  const { action, sent_content, draft_content } = body;
+  const { action, sent_content, draft_content } = await request.json();
   if (!action) return json({ error: 'action is required' }, 400);
-
   if (draft_content !== undefined) {
-    await env.DB.prepare(
-      'UPDATE email_decisions SET action = ?, sent_content = ?, draft_content = ? WHERE id = ?'
-    ).bind(action, sent_content || null, draft_content, id).run();
+    await env.DB.prepare('UPDATE email_decisions SET action=?, sent_content=?, draft_content=? WHERE id=?')
+      .bind(action, sent_content || null, draft_content, id).run();
   } else {
-    await env.DB.prepare(
-      'UPDATE email_decisions SET action = ?, sent_content = ? WHERE id = ?'
-    ).bind(action, sent_content || null, id).run();
+    await env.DB.prepare('UPDATE email_decisions SET action=?, sent_content=? WHERE id=?')
+      .bind(action, sent_content || null, id).run();
   }
   return json({ ok: true });
 }
 
-// ─── POST /api/claude ───────────────────────────────
+// ─── /api/memory GET (list) ─────────────────────────
+async function handleGetMemory(url, env) {
+  const type  = url.searchParams.get('type') || '';
+  const search = url.searchParams.get('q')   || '';
+  let sql = 'SELECT slug, description, type, updated_at FROM ai_memory';
+  const binds = [], where = [];
+  if (type)   { where.push('type = ?');                binds.push(type); }
+  if (search) { where.push('(slug LIKE ? OR description LIKE ? OR body LIKE ?)');
+                binds.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+  if (where.length) sql += ' WHERE ' + where.join(' AND ');
+  sql += ' ORDER BY type, slug';
+  const { results: rows } = await env.DB.prepare(sql).bind(...binds).all();
+  return json({ rows: rows || [] });
+}
+
+// ─── /api/memory/:slug GET ──────────────────────────
+async function handleGetMemorySingle(env, slug) {
+  const { results: rows } = await env.DB.prepare('SELECT * FROM ai_memory WHERE slug = ?').bind(slug).all();
+  if (!rows || !rows.length) return json({ error: 'Not found' }, 404);
+  return json(rows[0]);
+}
+
+// ─── /api/memory POST (upsert) ──────────────────────
+async function handlePostMemory(request, env) {
+  const { slug, description, type, body } = await request.json();
+  if (!slug || !body) return json({ error: 'slug and body are required' }, 400);
+  await env.DB.prepare(
+    `INSERT INTO ai_memory (slug, description, type, body, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(slug) DO UPDATE SET description=excluded.description,
+       type=excluded.type, body=excluded.body, updated_at=datetime('now')`
+  ).bind(slug, description || '', type || 'feedback', body).run();
+  return json({ ok: true });
+}
+
+// ─── /api/memory/:slug DELETE ───────────────────────
+async function handleDeleteMemory(env, slug) {
+  await env.DB.prepare('DELETE FROM ai_memory WHERE slug = ?').bind(slug).run();
+  return json({ ok: true });
+}
+
+// ─── /api/claude ────────────────────────────────────
 async function handleClaude(request, env) {
   const body = await request.json();
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'x-api-key':         env.CLAUDE_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'content-type':      'application/json',
-    },
+    headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model:      body.model      || 'claude-haiku-4-5-20251001',
       max_tokens: body.max_tokens || 1024,
@@ -167,14 +187,12 @@ async function handleClaude(request, env) {
       messages:   body.messages,
     }),
   });
-  const data = await res.json();
-  return json(data, res.status);
+  return json(await res.json(), res.status);
 }
 
 // ─── Response helper ────────────────────────────────
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...CORS, 'Content-Type': 'application/json' },
+    status, headers: { ...CORS, 'Content-Type': 'application/json' },
   });
 }
