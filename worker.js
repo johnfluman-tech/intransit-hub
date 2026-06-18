@@ -129,14 +129,22 @@ async function handlePostDraft(request, env) {
 
 // ─── /api/drafts/:id PATCH ──────────────────────────
 async function handlePatchDraft(request, env, id) {
-  const { action, sent_content, draft_content } = await request.json();
+  const body = await request.json();
+  const { action, draft_content } = body;
   if (!action) return json({ error: 'action is required' }, 400);
-  if (draft_content !== undefined) {
+  const hasSent = 'sent_content' in body;
+  if (draft_content !== undefined && hasSent) {
     await env.DB.prepare('UPDATE email_decisions SET action=?, sent_content=?, draft_content=? WHERE id=?')
-      .bind(action, sent_content || null, draft_content, id).run();
-  } else {
+      .bind(action, body.sent_content || null, draft_content, id).run();
+  } else if (draft_content !== undefined) {
+    await env.DB.prepare('UPDATE email_decisions SET action=?, draft_content=? WHERE id=?')
+      .bind(action, draft_content, id).run();
+  } else if (hasSent) {
     await env.DB.prepare('UPDATE email_decisions SET action=?, sent_content=? WHERE id=?')
-      .bind(action, sent_content || null, id).run();
+      .bind(action, body.sent_content || null, id).run();
+  } else {
+    await env.DB.prepare('UPDATE email_decisions SET action=? WHERE id=?')
+      .bind(action, id).run();
   }
   return json({ ok: true });
 }
