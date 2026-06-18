@@ -53,6 +53,9 @@ export default {
       if (cfgMatch && m === 'GET')  return handleGetConfig(env, cfgMatch[1]);
       if (cfgMatch && m === 'POST') return handlePostConfig(request, env, cfgMatch[1]);
 
+      if (p === '/api/inbox' && m === 'GET')  return handleGetInbox(env);
+      if (p === '/api/inbox' && m === 'POST') return handlePostInbox(request, env);
+
       return json({ error: 'Not found' }, 404);
     } catch (err) {
       return json({ error: err.message }, 500);
@@ -221,6 +224,33 @@ async function handleClaude(request, env) {
     }),
   });
   return json(await res.json(), res.status);
+}
+
+// ─── /api/inbox GET ─────────────────────────────────
+async function handleGetInbox(env) {
+  // Return preview rows for threads not yet reviewed or acted on
+  const { results: rows } = await env.DB.prepare(`
+    SELECT * FROM email_decisions
+    WHERE action = 'preview'
+    AND (thread_id IS NULL OR thread_id NOT IN (
+      SELECT thread_id FROM email_decisions
+      WHERE action IN ('correct','wrong','ignored','pending') AND thread_id IS NOT NULL
+    ))
+    ORDER BY created_at DESC LIMIT 100
+  `).all();
+  return json({ rows: rows || [] });
+}
+
+// ─── /api/inbox POST ─────────────────────────────────
+async function handlePostInbox(request, env) {
+  const { thread_id, mpn, sender, subject, draft_content } = await request.json();
+  if (!thread_id) return json({ error: 'thread_id is required' }, 400);
+  await env.DB.prepare("DELETE FROM email_decisions WHERE thread_id = ? AND action = 'preview'")
+    .bind(thread_id).run();
+  const { meta } = await env.DB.prepare(
+    "INSERT INTO email_decisions (thread_id, mpn, sender, subject, action, draft_content) VALUES (?, ?, ?, ?, 'preview', ?)"
+  ).bind(thread_id, mpn || null, sender || null, subject || null, draft_content || '').run();
+  return json({ ok: true, id: meta.last_row_id });
 }
 
 // ─── Response helper ────────────────────────────────

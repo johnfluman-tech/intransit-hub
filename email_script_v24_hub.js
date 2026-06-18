@@ -54,6 +54,109 @@ function hubPostDraft(threadId, mpn, sender, subject, draftContent) {
   } catch(e) { Logger.log('hubPostDraft error: ' + e); }
 }
 
+function hubPostInbox(threadId, mpn, sender, subject, prediction) {
+  try {
+    UrlFetchApp.fetch(HUB_URL + '/api/inbox', {
+      method: 'post', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ thread_id: threadId, mpn: mpn, sender: sender,
+                                subject: subject, draft_content: prediction }),
+      muteHttpExceptions: true,
+    });
+  } catch(e) { Logger.log('hubPostInbox error: ' + e); }
+}
+
+// Pre-loaded OEM data variant — avoids repeated sheet reads inside a scan loop
+function searchOEMExcessFromData(oemData, mpn) {
+  if (!mpn || !oemData) return [];
+  var searchNorm = normalize(mpn);
+  var results = [];
+  for (var i = 1; i < oemData.length; i++) {
+    var cellNorm = normalize(String(oemData[i][0]));
+    var reverseOk = searchNorm.startsWith(cellNorm) && cellNorm.length >= Math.ceil(searchNorm.length * 0.75);
+    if (cellNorm.length >= 3 && (cellNorm === searchNorm || cellNorm.startsWith(searchNorm) || reverseOk)) {
+      results.push({ row: i+1, mpn: oemData[i][0], man: oemData[i][1], dc: oemData[i][2], qty: oemData[i][3], notes: String(oemData[i][4]) });
+    }
+  }
+  return results;
+}
+
+// Scans in:inbox, classifies each thread, posts predictions to D1 /api/inbox
+// Called at the start of checkInboxForNewRFQs — no drafts created here, read-only + D1 post
+function scanInboxForPreview() {
+  try {
+    var rfqQuery = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock"))) -from:intransittech.com -label:oem-rfq-incoming-processed newer_than:7d';
+    var tpQuery  = 'in:inbox "minimum line requirement" -label:oem-tp-processed newer_than:7d';
+    var rfqThreads = GmailApp.search(rfqQuery, 0, 20);
+    var tpThreads  = GmailApp.search(tpQuery,  0, 10);
+    if (!rfqThreads.length && !tpThreads.length) return;
+
+    // Load OEM EXCESS sheet once for all threads
+    var oemData = SpreadsheetApp.openById(SPREADSHEET_ID)
+      .getSheetByName(MAIN_SHEET_NAME).getDataRange().getValues();
+
+    var seen = {}, count = 0;
+
+    function classifyAndPost(thread, isTP) {
+      var id = thread.getId();
+      if (seen[id]) return;
+      seen[id] = true;
+      var messages = thread.getMessages();
+      var lastMsg  = messages[messages.length - 1];
+      var subject  = thread.getFirstMessageSubject();
+      var mpn      = extractMPN(subject);
+      var fullBody = lastMsg.getPlainBody();
+      if (!fullBody || fullBody.trim().length < 30) {
+        fullBody = lastMsg.getBody().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      }
+      if (!mpn || !/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)) {
+        var bodyMpn = extractMPNFromRFQBody(fullBody);
+        if (bodyMpn) mpn = bodyMpn.replace(/#\w+$/, '');
+      }
+      var firstMsg = messages[0];
+      var icsource = isICSouceEmail(firstMsg.getFrom(), firstMsg.getSubject());
+      var sender = icsource
+        ? (extractICSourcBuyerEmail(lastMsg.getBody()) || extractBuyerEmail(lastMsg.getFrom()))
+        : extractBuyerEmail(lastMsg.getFrom());
+      var prediction;
+      if (!mpn) {
+        prediction = 'No action — could not extract MPN from subject/body';
+      } else {
+        var oemResults = searchOEMExcessFromData(oemData, mpn);
+        if (!oemResults.length) {
+          prediction = 'No action — ' + mpn + ' not found in OEM EXCESS';
+        } else {
+          var hasBillExt = oemResults.some(function(r){ return r.notes.indexOf('BILL EXT 117') >= 0; });
+          if (hasBillExt) {
+            prediction = 'Draft → MSG_BILL to ' + sender;
+          } else if (isTP) {
+            var tp = extractTargetPrice(stripQuotedLines(fullBody));
+            prediction = tp
+              ? 'Draft → MSG_CHECKING to ' + sender + ' (TP: ' + tp + ')'
+              : 'No action — TP thread but no price found yet';
+          } else {
+            var tp2 = extractTargetPrice(fullBody.split('OEM EXCESS')[0]);
+            if (tp2) {
+              prediction = 'Draft → MSG_CHECKING to ' + sender + ' (TP: ' + tp2 + ')';
+            } else {
+              var has2k = oemResults.some(function(r){ return r.notes.indexOf('$2000') >= 0; });
+              prediction = 'Draft → Need TP ($' + (has2k ? '2,000' : '500') + ' min) to ' + sender;
+            }
+          }
+        }
+      }
+      hubPostInbox(id, mpn, sender, subject, prediction);
+      count++;
+    }
+
+    rfqThreads.forEach(function(t) { classifyAndPost(t, false); });
+    tpThreads.forEach(function(t)  { classifyAndPost(t, true);  });
+    if (count > 0) Logger.log('scanInboxForPreview: ' + count + ' thread(s) posted');
+  } catch(e) {
+    Logger.log('scanInboxForPreview error: ' + e.toString());
+  }
+}
+
 function getRemoteConfig() {
   try {
     var resp = UrlFetchApp.fetch(HUB_URL + '/api/configs/email_automation', {
@@ -700,6 +803,8 @@ function checkInboxForTPReplies() {
 function checkInboxForNewRFQs() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkInboxForNewRFQs: disabled via hub config'); return; }
+  // Post inbox predictions to D1 for the Training tab (read-only, no drafts created)
+  try { scanInboxForPreview(); } catch(e) { Logger.log('scanInboxForPreview error: ' + e); }
   var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed';
   var threads = GmailApp.search(query,0,10);
   hubLog('run', 'checkInboxForNewRFQs: ' + threads.length + ' thread(s)');

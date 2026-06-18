@@ -388,51 +388,42 @@
     .cfg-saved-msg.show { opacity: 1; }
 
     /* ── Training ── */
-    .training-counter { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
-    .training-card {
-      background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 24px;
+    .tr-section { margin-bottom: 32px; }
+    .tr-section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+    .tr-section-title { font-size: 14px; font-weight: 700; color: var(--text); }
+    .tr-section-count { font-size: 12px; color: var(--muted); }
+    .tr-row {
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px 14px; margin-bottom: 6px;
     }
-    .training-nav {
-      display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;
+    .tr-row-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .tr-mpn { font-size: 13px; font-weight: 700; color: var(--accent); min-width: 150px; flex-shrink: 0; }
+    .tr-sender {
+      font-size: 12px; color: var(--text-dim); min-width: 160px; max-width: 210px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0;
     }
-    .training-pos { font-size: 13px; color: var(--text-dim); font-weight: 600; }
-    .training-meta { display: grid; gap: 10px; margin-bottom: 20px; }
-    .training-meta-row { display: flex; gap: 10px; align-items: baseline; }
-    .training-meta-label {
-      font-size: 11px; font-weight: 600; color: var(--muted);
-      text-transform: uppercase; letter-spacing: .06em; min-width: 62px; flex-shrink: 0;
+    .tr-tag {
+      display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 7px;
+      border-radius: 10px; text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0;
     }
-    .training-meta-value { font-size: 13px; color: var(--text); word-break: break-all; }
-    .training-draft-label {
-      font-size: 11px; font-weight: 600; color: var(--muted);
-      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px;
-    }
-    .training-draft {
-      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-      padding: 14px; font-size: 13px; white-space: pre-wrap; line-height: 1.6;
-      max-height: 280px; overflow-y: auto; margin-bottom: 20px; font-family: inherit;
-    }
-    .training-actions { display: flex; gap: 12px; margin-bottom: 4px; }
-    .training-wrong-panel { margin-top: 16px; }
-    .training-wrong-panel label {
-      display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 6px;
-    }
-    .training-wrong-panel textarea {
+    .tr-tag.inbox   { background: #1e3a5f; color: #60a5fa; }
+    .tr-tag.review  { background: #252836; color: var(--text-dim); }
+    .tr-tag.nomatch { background: #2d1818; color: #f87171; }
+    .tr-pred { font-size: 12px; color: var(--text); flex: 1; min-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tr-actions { display: flex; gap: 5px; flex-shrink: 0; margin-left: auto; }
+    .tr-wrong-area { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .tr-wrong-area textarea {
       width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-      color: var(--text); padding: 10px; font-size: 13px; font-family: inherit;
-      resize: vertical; min-height: 80px;
+      color: var(--text); padding: 8px 10px; font-size: 12px; font-family: inherit;
+      resize: vertical; min-height: 56px;
     }
-    .training-wrong-panel textarea:focus { outline: none; border-color: var(--accent); }
-    .training-saved-badge {
-      display: inline-block; background: var(--success); color: #000; border-radius: 20px;
-      padding: 2px 12px; font-size: 11px; font-weight: 700; opacity: 0; transition: opacity .3s;
+    .tr-wrong-area textarea:focus { outline: none; border-color: var(--accent); }
+    .tr-empty {
+      text-align: center; padding: 28px; color: var(--muted); font-size: 13px;
+      background: var(--card); border: 1px dashed var(--border); border-radius: 8px;
     }
     .btn.success { background: var(--success); color: #000; font-weight: 700; }
     .btn.success:hover { filter: brightness(1.1); }
-    .training-empty {
-      text-align: center; padding: 64px; color: var(--muted); font-size: 15px;
-      background: var(--card); border: 1px dashed var(--border); border-radius: 10px;
-    }
 
     /* ── Settings ── */
     .settings-group {
@@ -807,12 +798,24 @@
     <div class="tab-panel" id="tab-training">
       <div class="page-header">
         <h2>Email Training</h2>
-        <p class="page-sub">Review each email decision — mark correct or explain what went wrong.</p>
+        <p class="page-sub">Live inbox predictions + past decisions. Mark each correct, wrong, or ignore.</p>
       </div>
-      <div id="training-status" class="training-counter">Loading…</div>
-      <div id="training-card-wrap"></div>
-      <div id="training-empty" class="training-empty" style="display:none">
-        All caught up — no emails to review right now.
+
+      <div class="tr-section">
+        <div class="tr-section-header">
+          <span class="tr-section-title">📥 Inbox Now</span>
+          <span id="tr-inbox-count" class="tr-section-count">Loading…</span>
+          <span id="tr-inbox-age" class="tr-section-count"></span>
+        </div>
+        <div id="tr-inbox-list"></div>
+      </div>
+
+      <div class="tr-section">
+        <div class="tr-section-header">
+          <span class="tr-section-title">📋 Review Queue</span>
+          <span id="tr-queue-count" class="tr-section-count">Loading…</span>
+        </div>
+        <div id="tr-queue-list"></div>
       </div>
     </div>
 
@@ -1268,114 +1271,108 @@ async function apiPost(path, body) {
   return res.json();
 }
 
-// ─── Training ────────────────────────────────────
-let _trQueue = [];
-let _trIdx   = 0;
-
+// ─── Training ─────────────────────────────────────────────
 async function loadTraining() {
-  _trIdx = 0;
-  const statusEl = document.getElementById('training-status');
-  const wrap     = document.getElementById('training-card-wrap');
-  const emptyEl  = document.getElementById('training-empty');
-  statusEl.textContent = 'Loading…';
-  wrap.innerHTML = '';
-  emptyEl.style.display = 'none';
-  try {
-    const data = await apiGet('/api/drafts?status=pending&limit=100');
-    _trQueue = (data && data.rows) || [];
-    if (!_trQueue.length) {
-      statusEl.textContent = '';
-      emptyEl.style.display = 'block';
-      return;
-    }
-    statusEl.textContent = `${_trQueue.length} email${_trQueue.length > 1 ? 's' : ''} to review`;
-    renderTrainingCard();
-  } catch { statusEl.textContent = 'Worker not connected.'; }
+  loadInboxPreview();
+  loadTrainingQueue();
 }
 
-function renderTrainingCard() {
-  const wrap = document.getElementById('training-card-wrap');
-  const d = _trQueue[_trIdx];
-  if (!d) { wrap.innerHTML = ''; return; }
+async function loadInboxPreview() {
+  const countEl = document.getElementById('tr-inbox-count');
+  const listEl  = document.getElementById('tr-inbox-list');
+  const ageEl   = document.getElementById('tr-inbox-age');
+  countEl.textContent = 'Loading…'; ageEl.textContent = '';
+  try {
+    const data = await apiGet('/api/inbox');
+    const rows = (data && data.rows) || [];
+    countEl.textContent = `${rows.length} email${rows.length !== 1 ? 's' : ''}`;
+    if (rows.length && rows[0].created_at) ageEl.textContent = `· scanned ${timeAgo(rows[0].created_at)}`;
+    listEl.innerHTML = rows.length
+      ? rows.map(r => trRow(r, 'inbox')).join('')
+      : '<div class="tr-empty">No inbox emails to preview yet — runs automatically every 5 min once the Apps Script is active.</div>';
+  } catch { countEl.textContent = 'worker not connected'; listEl.innerHTML = ''; }
+}
+
+async function loadTrainingQueue() {
+  const countEl = document.getElementById('tr-queue-count');
+  const listEl  = document.getElementById('tr-queue-list');
+  countEl.textContent = 'Loading…';
+  try {
+    const data = await apiGet('/api/drafts?status=pending&limit=100');
+    const rows = (data && data.rows) || [];
+    countEl.textContent = `${rows.length} to review`;
+    listEl.innerHTML = rows.length
+      ? rows.map(r => trRow(r, 'queue')).join('')
+      : '<div class="tr-empty">All caught up — no past decisions to review.</div>';
+  } catch { countEl.textContent = 'worker not connected'; listEl.innerHTML = ''; }
+}
+
+function trRow(d, section) {
   const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  wrap.innerHTML = `
-    <div class="training-card">
-      <div class="training-nav">
-        <button class="btn sm" onclick="trainingPrev()" ${_trIdx === 0 ? 'disabled' : ''}>← Prev</button>
-        <span class="training-pos">${_trIdx + 1} / ${_trQueue.length}</span>
-        <button class="btn sm" onclick="trainingNext()" ${_trIdx === _trQueue.length - 1 ? 'disabled' : ''}>Next →</button>
-      </div>
-      <div class="training-meta">
-        <div class="training-meta-row">
-          <span class="training-meta-label">From</span>
-          <span class="training-meta-value">${esc(d.sender || '—')}</span>
-        </div>
-        <div class="training-meta-row">
-          <span class="training-meta-label">Subject</span>
-          <span class="training-meta-value">${esc(d.subject || '—')}</span>
-        </div>
-        <div class="training-meta-row">
-          <span class="training-meta-label">MPN</span>
-          <span class="training-meta-value" style="font-weight:700;color:var(--accent)">${esc(d.mpn || '—')}</span>
-        </div>
-        <div class="training-meta-row">
-          <span class="training-meta-label">Time</span>
-          <span class="training-meta-value">${timeAgo(d.created_at)}</span>
+  const pred = d.draft_content || '';
+  const isNoMatch = pred.startsWith('No action');
+  const tagClass = isNoMatch ? 'nomatch' : section === 'inbox' ? 'inbox' : 'review';
+  const tagLabel = isNoMatch ? 'no match' : section === 'inbox' ? 'inbox' : 'sent';
+  const shortPred = (() => { const s = pred.split('\n')[0].trim(); return s.length > 72 ? s.slice(0,69)+'…' : s; })();
+  return `
+    <div class="tr-row" id="tr-row-${section}-${d.id}">
+      <div class="tr-row-top">
+        <span class="tr-mpn" title="${esc(d.mpn||'')}">${esc(d.mpn||'—')}</span>
+        <span class="tr-sender" title="${esc(d.sender||'')}">${esc(d.sender||'—')}</span>
+        <span class="tr-tag ${tagClass}">${tagLabel}</span>
+        <span class="tr-pred" title="${esc(pred)}">${esc(shortPred)}</span>
+        <div class="tr-actions">
+          <button class="btn success sm" onclick="trMarkCorrect('${section}',${d.id})">✓ Correct</button>
+          <button class="btn danger sm" onclick="trShowWrong('${section}',${d.id})">✗ Wrong</button>
+          <button class="btn sm" onclick="trIgnore('${section}',${d.id})">⊘ Ignore</button>
         </div>
       </div>
-      <div class="training-draft-label">What the script drafted:</div>
-      <div class="training-draft">${esc(d.draft_content || '(empty)')}</div>
-      <div class="training-actions">
-        <button class="btn success" onclick="trainingMarkCorrect(${d.id})">✓ Correct</button>
-        <button class="btn danger" onclick="trainingShowWrong(${d.id})">✗ Wrong</button>
-      </div>
-      <div class="training-wrong-panel" id="tr-wrong-${d.id}" style="display:none">
-        <label>What should it have done? (wrong MPN? wrong reply type? wrong recipient? wrong message?)</label>
-        <textarea id="tr-correction-${d.id}" placeholder="e.g. Should have sent MSG_CHECKING not MSG_NEED_TP — part was in OEM stock. Replied to autosend@icsource.com instead of buyer@company.com..."></textarea>
-        <div style="display:flex;gap:10px;margin-top:8px;align-items:center">
-          <button class="btn primary sm" onclick="trainingSubmitWrong(${d.id})">Save Feedback</button>
-          <span class="training-saved-badge" id="tr-saved-${d.id}">Saved</span>
+      <div class="tr-wrong-area" id="tr-wrong-${section}-${d.id}" style="display:none">
+        <textarea id="tr-note-${section}-${d.id}" placeholder="What should it have done? (wrong MPN, wrong reply type, wrong recipient, wrong message…)"></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+          <button class="btn primary sm" onclick="trSubmitWrong('${section}',${d.id})">Save Feedback</button>
+          <span style="font-size:11px;color:var(--muted)">${esc(d.mpn||'—')} · ${timeAgo(d.created_at)}</span>
         </div>
       </div>
     </div>`;
 }
 
-function trainingPrev() { if (_trIdx > 0) { _trIdx--; renderTrainingCard(); } }
-function trainingNext() { if (_trIdx < _trQueue.length - 1) { _trIdx++; renderTrainingCard(); } }
-
-function trainingShowWrong(id) {
-  document.getElementById(`tr-wrong-${id}`).style.display = 'block';
-  document.getElementById(`tr-correction-${id}`).focus();
+function trShowWrong(section, id) {
+  const a = document.getElementById(`tr-wrong-${section}-${id}`);
+  if (a) { a.style.display = 'block'; a.querySelector('textarea').focus(); }
 }
 
-function _trainingAdvance() {
-  _trQueue.splice(_trIdx, 1);
-  if (_trIdx >= _trQueue.length) _trIdx = Math.max(0, _trQueue.length - 1);
-  const statusEl = document.getElementById('training-status');
-  statusEl.textContent = _trQueue.length ? `${_trQueue.length} email${_trQueue.length > 1 ? 's' : ''} to review` : '';
-  if (!_trQueue.length) {
-    document.getElementById('training-card-wrap').innerHTML = '';
-    document.getElementById('training-empty').style.display = 'block';
+function trRemove(section, id) {
+  const row = document.getElementById(`tr-row-${section}-${id}`);
+  if (row) row.remove();
+  const listEl  = document.getElementById(section === 'inbox' ? 'tr-inbox-list' : 'tr-queue-list');
+  const countEl = document.getElementById(section === 'inbox' ? 'tr-inbox-count' : 'tr-queue-count');
+  const n = listEl.querySelectorAll('.tr-row').length;
+  if (section === 'inbox') {
+    countEl.textContent = `${n} email${n !== 1 ? 's' : ''}`;
+    if (!n) listEl.innerHTML = '<div class="tr-empty">Inbox is clear.</div>';
   } else {
-    renderTrainingCard();
+    countEl.textContent = `${n} to review`;
+    if (!n) listEl.innerHTML = '<div class="tr-empty">All caught up.</div>';
   }
 }
 
-async function trainingMarkCorrect(id) {
-  try {
-    await apiPatch(`/api/drafts/${id}`, { action: 'correct' });
-    _trainingAdvance();
-  } catch(e) { alert('Save failed: ' + e.message); }
+async function trMarkCorrect(section, id) {
+  try { await apiPatch(`/api/drafts/${id}`, { action: 'correct' }); trRemove(section, id); }
+  catch(e) { alert('Save failed: ' + e.message); }
 }
 
-async function trainingSubmitWrong(id) {
-  const correction = (document.getElementById(`tr-correction-${id}`) || {}).value || '';
-  if (!correction.trim()) { alert('Please describe what went wrong before saving.'); return; }
+async function trIgnore(section, id) {
+  try { await apiPatch(`/api/drafts/${id}`, { action: 'ignored' }); trRemove(section, id); }
+  catch(e) { alert('Save failed: ' + e.message); }
+}
+
+async function trSubmitWrong(section, id) {
+  const note = (document.getElementById(`tr-note-${section}-${id}`) || {}).value || '';
+  if (!note.trim()) { alert('Please describe what went wrong.'); return; }
   try {
-    await apiPatch(`/api/drafts/${id}`, { action: 'wrong', sent_content: correction.trim() });
-    const saved = document.getElementById(`tr-saved-${id}`);
-    saved.style.opacity = '1';
-    setTimeout(() => { saved.style.opacity = '0'; _trainingAdvance(); }, 900);
+    await apiPatch(`/api/drafts/${id}`, { action: 'wrong', sent_content: note.trim() });
+    trRemove(section, id);
   } catch(e) { alert('Save failed: ' + e.message); }
 }
 
