@@ -48,6 +48,11 @@ export default {
       if (memSlug && m === 'GET')    return handleGetMemorySingle(env, memSlug[1]);
       if (memSlug && m === 'DELETE') return handleDeleteMemory(env, memSlug[1]);
 
+      if (p === '/api/configs' && m === 'GET') return handleGetConfigs(env);
+      const cfgMatch = p.match(/^\/api\/configs\/([a-zA-Z0-9_-]+)$/);
+      if (cfgMatch && m === 'GET')  return handleGetConfig(env, cfgMatch[1]);
+      if (cfgMatch && m === 'POST') return handlePostConfig(request, env, cfgMatch[1]);
+
       return json({ error: 'Not found' }, 404);
     } catch (err) {
       return json({ error: err.message }, 500);
@@ -171,6 +176,34 @@ async function handlePostMemory(request, env) {
 // ─── /api/memory/:slug DELETE ───────────────────────
 async function handleDeleteMemory(env, slug) {
   await env.DB.prepare('DELETE FROM ai_memory WHERE slug = ?').bind(slug).run();
+  return json({ ok: true });
+}
+
+// ─── /api/configs GET all ───────────────────────────
+async function handleGetConfigs(env) {
+  const { results: rows } = await env.DB.prepare(
+    'SELECT app_name, config, updated_at FROM app_configs ORDER BY app_name'
+  ).all();
+  return json({ rows: rows || [] });
+}
+
+// ─── /api/configs/:app GET ───────────────────────────
+async function handleGetConfig(env, app) {
+  const { results: rows } = await env.DB.prepare(
+    'SELECT * FROM app_configs WHERE app_name = ?'
+  ).bind(app).all();
+  if (!rows || !rows.length) return json({ app_name: app, config: '{}', updated_at: null });
+  return json(rows[0]);
+}
+
+// ─── /api/configs/:app POST ──────────────────────────
+async function handlePostConfig(request, env, app) {
+  const body = await request.json();
+  const config = typeof body.config === 'string' ? body.config : JSON.stringify(body.config, null, 2);
+  await env.DB.prepare(
+    `INSERT INTO app_configs (app_name, config, updated_at) VALUES (?, ?, datetime('now'))
+     ON CONFLICT(app_name) DO UPDATE SET config=excluded.config, updated_at=datetime('now')`
+  ).bind(app, config).run();
   return json({ ok: true });
 }
 

@@ -347,6 +347,46 @@
       background: var(--card); border: 1px dashed var(--border); border-radius: 10px;
     }
 
+    /* ── Apps ── */
+    .app-cfg-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 20px; margin-bottom: 16px;
+    }
+    .app-cfg-header {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+    }
+    .app-cfg-icon { font-size: 22px; }
+    .app-cfg-title { font-size: 15px; font-weight: 700; flex: 1; }
+    .app-cfg-updated { font-size: 11px; color: var(--muted); }
+    .cfg-field { margin-bottom: 14px; }
+    .cfg-field label {
+      display: block; font-size: 11px; font-weight: 600; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px;
+    }
+    .cfg-field input, .cfg-field textarea {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 8px 11px; font-size: 13px;
+      font-family: inherit;
+    }
+    .cfg-field input:focus, .cfg-field textarea:focus { outline: none; border-color: var(--accent); }
+    .cfg-field textarea { resize: vertical; min-height: 64px; }
+    .cfg-toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .cfg-toggle-row label { font-size: 13px; color: var(--text-dim); }
+    .cfg-toggle { width: 38px; height: 22px; position: relative; cursor: pointer; }
+    .cfg-toggle input { opacity: 0; width: 0; height: 0; }
+    .cfg-toggle-slider {
+      position: absolute; inset: 0; background: var(--border); border-radius: 22px; transition: .2s;
+    }
+    .cfg-toggle-slider:before {
+      content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+      background: white; border-radius: 50%; transition: .2s;
+    }
+    .cfg-toggle input:checked + .cfg-toggle-slider { background: var(--accent); }
+    .cfg-toggle input:checked + .cfg-toggle-slider:before { transform: translateX(16px); }
+    .cfg-save-row { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+    .cfg-saved-msg { font-size: 12px; color: var(--success); opacity: 0; transition: opacity .3s; }
+    .cfg-saved-msg.show { opacity: 1; }
+
     /* ── Settings ── */
     .settings-group {
       background: var(--card);
@@ -455,6 +495,10 @@
     <a data-tab="memory">
       <span class="icon">🧠</span>
       <span class="nav-text">Memory</span>
+    </a>
+    <a data-tab="apps">
+      <span class="icon">🛠</span>
+      <span class="nav-text">Apps</span>
     </a>
     <a data-tab="settings">
       <span class="icon">⚙️</span>
@@ -619,6 +663,92 @@
 
       <div id="mem-list">
         <div class="triage-empty">Loading memories…</div>
+      </div>
+    </div>
+
+    <!-- ── APPS TAB ── -->
+    <div class="tab-panel" id="tab-apps">
+      <div class="page-header">
+        <h2>App Configuration</h2>
+        <p class="page-sub">Edit settings for each app — changes take effect on the next run.</p>
+      </div>
+
+      <!-- Email Automation -->
+      <div class="app-cfg-card" id="cfg-card-email_automation">
+        <div class="app-cfg-header">
+          <span class="app-cfg-icon">✉️</span>
+          <span class="app-cfg-title">Email Automation</span>
+          <span class="app-cfg-updated" id="cfg-updated-email_automation"></span>
+        </div>
+        <div class="cfg-toggle-row">
+          <label class="cfg-toggle"><input type="checkbox" id="cfg-email_automation-enabled" checked><span class="cfg-toggle-slider"></span></label>
+          <label for="cfg-email_automation-enabled">Enabled</label>
+        </div>
+        <div class="cfg-field"><label>Need TP Reply ($500 min)</label><textarea id="cfg-email_automation-MSG_NEED_TP_500" rows="3"></textarea></div>
+        <div class="cfg-field"><label>Need TP Reply ($2,000 min)</label><textarea id="cfg-email_automation-MSG_NEED_TP_2000" rows="3"></textarea></div>
+        <div class="cfg-field"><label>Checking On It Reply</label><textarea id="cfg-email_automation-MSG_CHECKING" rows="4"></textarea></div>
+        <div class="cfg-field"><label>Bill Will Help Reply</label><input type="text" id="cfg-email_automation-MSG_BILL"></div>
+        <div class="cfg-field"><label>David Email</label><input type="email" id="cfg-email_automation-DAVID_EMAIL"></div>
+        <div class="cfg-field"><label>Bill Email</label><input type="email" id="cfg-email_automation-BILL_EMAIL"></div>
+        <div class="cfg-field"><label>Deb Email</label><input type="email" id="cfg-email_automation-DEB_EMAIL"></div>
+        <div class="cfg-save-row">
+          <button class="btn primary" onclick="saveAppConfig('email_automation')">Save</button>
+          <span class="cfg-saved-msg" id="cfg-saved-email_automation">Saved!</span>
+        </div>
+      </div>
+
+      <!-- Tee Time Bot -->
+      <div class="app-cfg-card" id="cfg-card-tee_time_bot">
+        <div class="app-cfg-header">
+          <span class="app-cfg-icon">⛳</span>
+          <span class="app-cfg-title">Tee Time Bot</span>
+          <span class="app-cfg-updated" id="cfg-updated-tee_time_bot"></span>
+        </div>
+        <div class="cfg-toggle-row">
+          <label class="cfg-toggle"><input type="checkbox" id="cfg-tee_time_bot-enabled" checked><span class="cfg-toggle-slider"></span></label>
+          <label for="cfg-tee_time_bot-enabled">Enabled</label>
+        </div>
+        <div class="cfg-field"><label>Booking Hour (0–23)</label><input type="number" id="cfg-tee_time_bot-booking_hour" min="0" max="23"></div>
+        <div class="cfg-field"><label>Booking Minute (0–59)</label><input type="number" id="cfg-tee_time_bot-booking_minute" min="0" max="59"></div>
+        <div class="cfg-field"><label>Days Out</label><input type="number" id="cfg-tee_time_bot-days_out" min="1" max="30"></div>
+        <div class="cfg-save-row">
+          <button class="btn primary" onclick="saveAppConfig('tee_time_bot')">Save</button>
+          <span class="cfg-saved-msg" id="cfg-saved-tee_time_bot">Saved!</span>
+        </div>
+      </div>
+
+      <!-- ICSSource Checker -->
+      <div class="app-cfg-card" id="cfg-card-icsource_checker">
+        <div class="app-cfg-header">
+          <span class="app-cfg-icon">🔍</span>
+          <span class="app-cfg-title">ICSSource Checker</span>
+          <span class="app-cfg-updated" id="cfg-updated-icsource_checker"></span>
+        </div>
+        <div class="cfg-toggle-row">
+          <label class="cfg-toggle"><input type="checkbox" id="cfg-icsource_checker-enabled" checked><span class="cfg-toggle-slider"></span></label>
+          <label for="cfg-icsource_checker-enabled">Enabled</label>
+        </div>
+        <div class="cfg-save-row">
+          <button class="btn primary" onclick="saveAppConfig('icsource_checker')">Save</button>
+          <span class="cfg-saved-msg" id="cfg-saved-icsource_checker">Saved!</span>
+        </div>
+      </div>
+
+      <!-- OEM EXCESS -->
+      <div class="app-cfg-card" id="cfg-card-oem_excess">
+        <div class="app-cfg-header">
+          <span class="app-cfg-icon">📊</span>
+          <span class="app-cfg-title">OEM EXCESS</span>
+          <span class="app-cfg-updated" id="cfg-updated-oem_excess"></span>
+        </div>
+        <div class="cfg-toggle-row">
+          <label class="cfg-toggle"><input type="checkbox" id="cfg-oem_excess-enabled" checked><span class="cfg-toggle-slider"></span></label>
+          <label for="cfg-oem_excess-enabled">Enabled</label>
+        </div>
+        <div class="cfg-save-row">
+          <button class="btn primary" onclick="saveAppConfig('oem_excess')">Save</button>
+          <span class="cfg-saved-msg" id="cfg-saved-oem_excess">Saved!</span>
+        </div>
       </div>
     </div>
 
@@ -833,6 +963,7 @@ const TAB_TITLES = {
   'logs':         'Event Logs',
   'email-triage': 'Email Triage',
   'memory':       'AI Memory',
+  'apps':         'App Configuration',
   'settings':     'Settings'
 };
 
@@ -846,6 +977,7 @@ function showTab(id) {
   if (id === 'dashboard')    loadDashboard();
   if (id === 'email-triage') loadDrafts();
   if (id === 'memory')       loadMemory();
+  if (id === 'apps')         loadApps();
 }
 
 document.querySelectorAll('nav a[data-tab]').forEach(a => {
@@ -1068,6 +1200,69 @@ async function apiPost(path, body) {
   });
   if (!res.ok) throw new Error(res.statusText);
   return res.json();
+}
+
+// ─── Apps Config ─────────────────────────────────
+const APP_FIELDS = {
+  email_automation: [
+    { key: 'MSG_NEED_TP_500',  tag: 'textarea' },
+    { key: 'MSG_NEED_TP_2000', tag: 'textarea' },
+    { key: 'MSG_CHECKING',     tag: 'textarea' },
+    { key: 'MSG_BILL',         tag: 'input' },
+    { key: 'DAVID_EMAIL',      tag: 'input' },
+    { key: 'BILL_EMAIL',       tag: 'input' },
+    { key: 'DEB_EMAIL',        tag: 'input' },
+  ],
+  tee_time_bot: [
+    { key: 'booking_hour',   tag: 'input' },
+    { key: 'booking_minute', tag: 'input' },
+    { key: 'days_out',       tag: 'input' },
+  ],
+  icsource_checker: [],
+  oem_excess: [],
+};
+
+async function loadApps() {
+  try {
+    const data = await apiGet('/api/configs');
+    const rows = (data && data.rows) || [];
+    for (const app of ['email_automation', 'tee_time_bot', 'icsource_checker', 'oem_excess']) {
+      const row = rows.find(r => r.app_name === app) || { config: '{}', updated_at: null };
+      let cfg = {};
+      try { cfg = JSON.parse(row.config); } catch {}
+      const fields = APP_FIELDS[app] || [];
+      for (const { key } of fields) {
+        const el = document.getElementById(`cfg-${app}-${key}`);
+        if (el) el.value = cfg[key] !== undefined ? cfg[key] : '';
+      }
+      const enabledEl = document.getElementById(`cfg-${app}-enabled`);
+      if (enabledEl) enabledEl.checked = cfg.enabled !== false;
+      const updEl = document.getElementById(`cfg-updated-${app}`);
+      if (updEl) updEl.textContent = row.updated_at ? 'Saved ' + timeAgo(row.updated_at) : 'Not yet saved';
+    }
+  } catch (e) {
+    console.error('loadApps failed', e);
+  }
+}
+
+async function saveAppConfig(app) {
+  const fields = APP_FIELDS[app] || [];
+  const cfg = {};
+  for (const { key } of fields) {
+    const el = document.getElementById(`cfg-${app}-${key}`);
+    if (el) cfg[key] = el.value;
+  }
+  const enabledEl = document.getElementById(`cfg-${app}-enabled`);
+  if (enabledEl) cfg.enabled = enabledEl.checked;
+  try {
+    await apiPost(`/api/configs/${app}`, { config: cfg });
+    const savedEl = document.getElementById(`cfg-saved-${app}`);
+    const updEl   = document.getElementById(`cfg-updated-${app}`);
+    if (savedEl) { savedEl.style.opacity = '1'; setTimeout(() => savedEl.style.opacity = '0', 2000); }
+    if (updEl)   updEl.textContent = 'Saved just now';
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
 }
 
 // ─── Login ───────────────────────────────────────
