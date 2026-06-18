@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intransit Hub</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --sidebar:   #1a1d27;
+      --card:      #1e2130;
+      --border:    #2a2d3e;
+      --accent:    #4f8ef7;
+      --success:   #22c55e;
+      --warning:   #f59e0b;
+      --error:     #ef4444;
+      --muted:     #6b7280;
+      --text:      #e2e8f0;
+      --text-dim:  #94a3b8;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: 220px;
+      min-width: 220px;
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+    }
+
+    #logo {
+      padding: 20px 18px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    #logo .company { font-size: 11px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+    #logo .title   { font-size: 18px; font-weight: 700; color: var(--text); margin-top: 2px; }
+
+    #connection-status {
+      padding: 8px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    #connection-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    #connection-dot.ok      { background: var(--success); }
+    #connection-dot.error   { background: var(--error); }
+
+    nav { flex: 1; padding: 10px 0; }
+    nav a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 18px;
+      color: var(--text-dim);
+      text-decoration: none;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+      border-left: 3px solid transparent;
+    }
+    nav a:hover  { background: rgba(255,255,255,.04); color: var(--text); }
+    nav a.active { background: rgba(79,142,247,.08); color: var(--accent); border-left-color: var(--accent); }
+    nav a .icon  { width: 16px; text-align: center; font-size: 15px; }
+
+    nav .nav-section {
+      padding: 14px 18px 4px;
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    #sidebar-footer {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ── Main ── */
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #topbar {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--sidebar);
+    }
+    #topbar h1  { font-size: 16px; font-weight: 600; }
+    #topbar .actions { display: flex; gap: 8px; }
+
+    btn, .btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      transition: background .15s;
+    }
+    .btn:hover      { background: #272b3c; }
+    .btn.primary    { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { background: #3d7aef; }
+    .btn.sm         { padding: 4px 10px; font-size: 12px; }
+
+    #content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    /* ── Tab panels ── */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Cards grid ── */
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .app-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      cursor: default;
+      transition: border-color .2s;
+    }
+    .app-card:hover { border-color: #3a3d52; }
+
+    .app-card .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+    .app-card .card-name { font-weight: 600; font-size: 14px; }
+    .app-card .card-desc { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .status-badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .status-badge.ok      { background: rgba(34,197,94,.12); color: var(--success); }
+    .status-badge.ok .dot { background: var(--success); }
+    .status-badge.error      { background: rgba(239,68,68,.12); color: var(--error); }
+    .status-badge.error .dot { background: var(--error); }
+    .status-badge.warn       { background: rgba(245,158,11,.12); color: var(--warning); }
+    .status-badge.warn .dot  { background: var(--warning); }
+    .status-badge.unknown    { background: rgba(107,114,128,.12); color: var(--muted); }
+    .status-badge.unknown .dot { background: var(--muted); }
+
+    .app-card .card-meta { font-size: 11px; color: var(--muted); margin-top: 10px; }
+    .app-card .card-last { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+    /* ── Section headers ── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .section-header h2 { font-size: 14px; font-weight: 600; }
+
+    /* ── Log table ── */
+    .log-table-wrap {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .log-filters {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .log-filters select, .log-filters input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      padding: 10px 16px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(255,255,255,.02); }
+    tbody td { padding: 10px 16px; font-size: 12px; color: var(--text-dim); }
+    tbody td.bold { color: var(--text); font-weight: 500; }
+    tbody td .tag {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      background: rgba(79,142,247,.12);
+      color: var(--accent);
+    }
+    tbody td .tag.error { background: rgba(239,68,68,.12); color: var(--error); }
+    tbody td .tag.success { background: rgba(34,197,94,.12); color: var(--success); }
+
+    #log-empty, #log-loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* ── Email Triage ── */
+    .triage-placeholder {
+      background: var(--card);
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      padding: 48px;
+      text-align: center;
+    }
+    .triage-placeholder h3 { font-size: 16px; margin-bottom: 8px; }
+    .triage-placeholder p  { color: var(--muted); font-size: 13px; max-width: 420px; margin: 0 auto; line-height: 1.6; }
+
+    /* ── Settings ── */
+    .settings-group {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .settings-group h3 { font-size: 13px; font-weight: 600; margin-bottom: 16px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; }
+    .settings-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .settings-row:last-child { margin-bottom: 0; }
+    .settings-row label { width: 160px; font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
+    .settings-row input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 7px 11px;
+      font-size: 13px;
+    }
+    .settings-row input:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Responsive ── */
+    @media (max-width: 700px) {
+      #sidebar { width: 56px; min-width: 56px; }
+      #sidebar .nav-text, #logo .company, #logo .title, #connection-status span,
+      nav .nav-section, #sidebar-footer { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<aside id="sidebar">
+  <div id="logo">
+    <div class="company">Intransit Technologies</div>
+    <div class="title">Hub</div>
+  </div>
+
+  <div id="connection-status">
+    <div id="connection-dot"></div>
+    <span id="connection-label">Connecting…</span>
+  </div>
+
+  <nav>
+    <div class="nav-section">Overview</div>
+    <a class="active" data-tab="dashboard">
+      <span class="icon">⬛</span>
+      <span class="nav-text">Dashboard</span>
+    </a>
+    <a data-tab="logs">
+      <span class="icon">📋</span>
+      <span class="nav-text">Logs</span>
+    </a>
+
+    <div class="nav-section">Tools</div>
+    <a data-tab="email-triage">
+      <span class="icon">✉️</span>
+      <span class="nav-text">Email Triage</span>
+    </a>
+
+    <div class="nav-section">System</div>
+    <a data-tab="settings">
+      <span class="icon">⚙️</span>
+      <span class="nav-text">Settings</span>
+    </a>
+  </nav>
+
+  <div id="sidebar-footer">
+    v1.0 skeleton
+  </div>
+</aside>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<div id="main">
+  <div id="topbar">
+    <h1 id="page-title">Dashboard</h1>
+    <div class="actions">
+      <button class="btn sm" onclick="refreshAll()">↻ Refresh</button>
+    </div>
+  </div>
+
+  <div id="content">
+
+    <!-- ── DASHBOARD TAB ── -->
+    <div class="tab-panel active" id="tab-dashboard">
+      <div class="section-header">
+        <h2>App Status</h2>
+        <span style="font-size:12px;color:var(--muted)" id="last-refreshed"></span>
+      </div>
+
+      <div class="grid-4" id="app-cards">
+        <!-- populated by JS -->
+      </div>
+
+      <div class="section-header">
+        <h2>Recent Activity</h2>
+        <button class="btn sm" onclick="showTab('logs')">View all →</button>
+      </div>
+      <div class="log-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>App</th>
+              <th>Event</th>
+              <th>Summary</th>
+            </tr>
+          </thead>
+          <tbody id="recent-log-body">
+            <tr><td colspan="4" id="log-loading">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── LOGS TAB ── -->
+    <div class="tab-panel" id="tab-logs">
+      <div class="section-header">
+        <h2>Event Log</h2>
+        <button class="btn sm" onclick="loadLogs()">↻ Refresh</button>
+      </div>
+      <div class="log-table-wrap">
+        <div class="log-filters">
+          <select id="log-filter-app" onchange="loadLogs()">
+            <option value="">All apps</option>
+            <option value="email_automation">Email Automation</option>
+            <option value="tee_time_bot">Tee Time Bot</option>
+            <option value="icsource_checker">ICSSource</option>
+            <option value="oem_excess">OEM EXCESS</option>
+          </select>
+          <select id="log-filter-type" onchange="loadLogs()">
+            <option value="">All events</option>
+            <option value="run">Run</option>
+            <option value="error">Error</option>
+            <option value="draft_created">Draft Created</option>
+            <option value="booking">Booking</option>
+            <option value="email_sent">Email Sent</option>
+          </select>
+          <select id="log-filter-limit" onchange="loadLogs()">
+            <option value="50">50 rows</option>
+            <option value="100">100 rows</option>
+            <option value="200">200 rows</option>
+          </select>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>App</th>
+              <th>Event</th>
+              <th>Summary</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="log-body">
+            <tr><td colspan="5" id="log-empty">No logs yet. Deploy the worker and connect your apps.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── EMAIL TRIAGE TAB ── -->
+    <div class="tab-panel" id="tab-email-triage">
+      <div class="triage-placeholder">
+        <h3>Email Triage — Coming Soon</h3>
+        <p>
+          This panel will show pending Gmail drafts for your review.
+          You'll be able to approve, edit, or delete each draft directly here,
+          and Claude will learn from your decisions to improve future replies.
+        </p>
+        <br>
+        <p style="font-size:12px;color:var(--muted)">
+          Requires: Worker connected · Supabase email_decisions table · Gmail API access
+        </p>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS TAB ── -->
+    <div class="tab-panel" id="tab-settings">
+      <div class="settings-group">
+        <h3>Worker Connection</h3>
+        <div class="settings-row">
+          <label>Worker URL</label>
+          <input type="text" id="cfg-worker-url" placeholder="https://intransit-hub.YOUR_SUBDOMAIN.workers.dev">
+        </div>
+        <div class="settings-row">
+          <label>Hub Secret</label>
+          <input type="password" id="cfg-secret" placeholder="your_hub_secret">
+        </div>
+        <div class="settings-row">
+          <label></label>
+          <button class="btn primary" onclick="saveConfig()">Save &amp; Test Connection</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h3>App Configs</h3>
+        <div class="settings-row">
+          <label>Email Script Interval</label>
+          <input type="text" id="cfg-email-interval" placeholder="Every 5 minutes (set in Apps Script)" disabled>
+        </div>
+        <div class="settings-row">
+          <label>Tee Time Book At</label>
+          <input type="text" id="cfg-tee-time" placeholder="5:30 AM daily (set in bot)" disabled>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--muted)">
+          App-level config editing will be added once each app exposes a config endpoint.
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<script>
+// ═══════════════════════════════════════════════════
+//  CONFIG  — fill in Settings tab or edit here
+// ═══════════════════════════════════════════════════
+let CONFIG = {
+  workerUrl: '',
+  secret: ''
+};
+
+const APPS = [
+  {
+    id: 'email_automation',
+    name: 'Email Automation',
+    desc: 'RFQ processing & draft generation',
+    icon: '✉️'
+  },
+  {
+    id: 'tee_time_bot',
+    name: 'Tee Time Bot',
+    desc: 'SC Muni booking — 5:30 AM daily',
+    icon: '⛳'
+  },
+  {
+    id: 'icsource_checker',
+    name: 'ICSSource Checker',
+    desc: 'IC part number lookup & auto-login',
+    icon: '🔍'
+  },
+  {
+    id: 'oem_excess',
+    name: 'OEM EXCESS',
+    desc: 'Sheet automation & MPN search API',
+    icon: '📊'
+  }
+];
+
+// ─── Persist config ──────────────────────────────
+function loadConfig() {
+  const saved = localStorage.getItem('hub_config');
+  if (saved) CONFIG = { ...CONFIG, ...JSON.parse(saved) };
+  document.getElementById('cfg-worker-url').value = CONFIG.workerUrl || '';
+  document.getElementById('cfg-secret').value     = CONFIG.secret     || '';
+}
+
+function saveConfig() {
+  CONFIG.workerUrl = document.getElementById('cfg-worker-url').value.trim();
+  CONFIG.secret    = document.getElementById('cfg-secret').value.trim();
+  localStorage.setItem('hub_config', JSON.stringify(CONFIG));
+  testConnection();
+}
+
+// ─── Worker API calls ────────────────────────────
+async function apiGet(path) {
+  if (!CONFIG.workerUrl) return null;
+  const res = await fetch(CONFIG.workerUrl + path, {
+    headers: { 'Authorization': 'Bearer ' + CONFIG.secret }
+  });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+async function testConnection() {
+  const dot   = document.getElementById('connection-dot');
+  const label = document.getElementById('connection-label');
+  dot.className = '';
+  label.textContent = 'Connecting…';
+  try {
+    await apiGet('/api/status');
+    dot.className   = 'ok';
+    label.textContent = 'Connected';
+  } catch {
+    dot.className   = 'error';
+    label.textContent = CONFIG.workerUrl ? 'Error' : 'Not configured';
+  }
+}
+
+// ─── Dashboard ───────────────────────────────────
+function renderAppCards(statusMap) {
+  const container = document.getElementById('app-cards');
+  container.innerHTML = APPS.map(app => {
+    const s = statusMap[app.id] || {};
+    const status  = s.status || 'unknown';
+    const lastRun = s.last_run ? timeAgo(s.last_run) : 'Never';
+    const lastMsg = s.summary || '—';
+    return `
+      <div class="app-card">
+        <div class="card-header">
+          <div class="card-name">${app.icon} ${app.name}</div>
+          <div class="status-badge ${status}">
+            <div class="dot"></div>${status}
+          </div>
+        </div>
+        <div class="card-desc">${app.desc}</div>
+        <div class="card-last">${lastMsg}</div>
+        <div class="card-meta">Last run: ${lastRun}</div>
+      </div>`;
+  }).join('');
+}
+
+async function loadDashboard() {
+  renderAppCards({});   // blank cards first
+  document.getElementById('last-refreshed').textContent = '';
+  try {
+    const data = await apiGet('/api/status');
+    if (data) {
+      renderAppCards(data);
+      document.getElementById('last-refreshed').textContent =
+        'Updated ' + new Date().toLocaleTimeString();
+    }
+  } catch { /* stay blank */ }
+  loadRecentLogs();
+}
+
+async function loadRecentLogs() {
+  const tbody = document.getElementById('recent-log-body');
+  try {
+    const data = await apiGet('/api/logs?limit=10');
+    if (!data || !data.rows || !data.rows.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--muted)">No events yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.rows.map(r => logRow(r, false)).join('');
+  } catch {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--muted)">Worker not connected.</td></tr>';
+  }
+}
+
+// ─── Logs tab ────────────────────────────────────
+async function loadLogs() {
+  const app   = document.getElementById('log-filter-app').value;
+  const type  = document.getElementById('log-filter-type').value;
+  const limit = document.getElementById('log-filter-limit').value;
+  const tbody = document.getElementById('log-body');
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Loading…</td></tr>';
+  try {
+    let url = `/api/logs?limit=${limit}`;
+    if (app)  url += `&app=${app}`;
+    if (type) url += `&type=${type}`;
+    const data = await apiGet(url);
+    if (!data || !data.rows || !data.rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">No logs found.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.rows.map(r => logRow(r, true)).join('');
+  } catch {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">Worker not connected.</td></tr>';
+  }
+}
+
+function logRow(r, showDetails) {
+  const tagClass = r.event_type === 'error' ? 'error' : r.event_type === 'email_sent' ? 'success' : '';
+  const details  = showDetails && r.details ? `<a href="#" onclick="alert(JSON.stringify(${JSON.stringify(r.details)},null,2));return false" style="color:var(--accent)">view</a>` : '—';
+  return `<tr>
+    <td>${timeAgo(r.created_at)}</td>
+    <td class="bold">${appLabel(r.app_name)}</td>
+    <td><span class="tag ${tagClass}">${r.event_type}</span></td>
+    <td>${r.summary || '—'}</td>
+    ${showDetails ? `<td>${details}</td>` : ''}
+  </tr>`;
+}
+
+// ─── Tab navigation ──────────────────────────────
+const TAB_TITLES = {
+  'dashboard':    'Dashboard',
+  'logs':         'Event Logs',
+  'email-triage': 'Email Triage',
+  'settings':     'Settings'
+};
+
+function showTab(id) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  document.querySelector(`nav a[data-tab="${id}"]`).classList.add('active');
+  document.getElementById('page-title').textContent = TAB_TITLES[id] || id;
+  if (id === 'logs') loadLogs();
+  if (id === 'dashboard') loadDashboard();
+}
+
+document.querySelectorAll('nav a[data-tab]').forEach(a => {
+  a.addEventListener('click', () => showTab(a.dataset.tab));
+});
+
+// ─── Helpers ─────────────────────────────────────
+function appLabel(id) {
+  return (APPS.find(a => a.id === id) || {}).name || id;
+}
+
+function timeAgo(iso) {
+  if (!iso) return '—';
+  const diff = (Date.now() - new Date(iso)) / 1000;
+  if (diff < 60)   return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+function refreshAll() {
+  const tab = document.querySelector('.tab-panel.active').id.replace('tab-', '');
+  if (tab === 'dashboard') loadDashboard();
+  if (tab === 'logs')      loadLogs();
+  testConnection();
+}
+
+// ─── Init ────────────────────────────────────────
+loadConfig();
+testConnection();
+loadDashboard();
+</script>
+</body>
+</html>

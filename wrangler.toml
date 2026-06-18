@@ -1,0 +1,20 @@
+name = "intransit-hub"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Secrets — set these with:
+#   wrangler secret put HUB_SECRET
+#   wrangler secret put SUPABASE_URL
+#   wrangler secret put SUPABASE_KEY
+#   wrangler secret put CLAUDE_API_KEY
+#
+# DO NOT put real values in this file — it goes into git.
+
+[vars]
+# Non-secret public vars can go here (none yet)
+
+# Local dev — copy this block to .dev.vars (gitignored) with real values
+# HUB_SECRET     = "dev_secret"
+# SUPABASE_URL   = "https://xxxx.supabase.co"
+# SUPABASE_KEY   = "eyJ..."
+# CLAUDE_API_KEY = "sk-ant-..."
