@@ -28,7 +28,7 @@ var MSG_BILL         = 'Bill will help with this request';
 // INTRANSIT HUB — Logging & Draft Sync
 // ============================================================
 var HUB_URL    = 'https://intransit-hub.intransit-sales.workers.dev';
-var HUB_SECRET = 'CXEzt4BVqliSmNwdorZf86DuKyceAxjn';
+var HUB_SECRET = 'InTransit!Hub#2026';
 
 function hubLog(eventType, summary, details) {
   try {
