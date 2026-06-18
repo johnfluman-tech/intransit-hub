@@ -1,50 +1,34 @@
--- Intransit Hub — Supabase schema
--- Run this in the Supabase SQL editor once.
+-- Intransit Hub — Cloudflare D1 schema
+-- Run with: wrangler d1 execute intransit-hub-db --file=schema.sql
 
--- ── App event logs ──────────────────────────────────────────────────────────
--- Every automation writes here via POST /api/logs
-create table if not exists app_logs (
-  id          bigserial primary key,
-  app_name    text not null,          -- email_automation | tee_time_bot | icsource_checker | oem_excess
-  event_type  text not null,          -- run | error | draft_created | email_sent | booking | no_stock | etc.
-  summary     text,                   -- short human-readable message
-  details     jsonb,                  -- any extra structured data
-  created_at  timestamptz default now()
+CREATE TABLE IF NOT EXISTS app_logs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  app_name    TEXT NOT NULL,
+  event_type  TEXT NOT NULL,
+  summary     TEXT,
+  details     TEXT,  -- JSON stored as text in SQLite
+  created_at  TEXT DEFAULT (datetime('now'))
 );
 
-create index if not exists app_logs_app_name_idx    on app_logs (app_name);
-create index if not exists app_logs_created_at_idx  on app_logs (created_at desc);
-create index if not exists app_logs_event_type_idx  on app_logs (event_type);
+CREATE INDEX IF NOT EXISTS idx_app_logs_app    ON app_logs (app_name);
+CREATE INDEX IF NOT EXISTS idx_app_logs_time   ON app_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_app_logs_type   ON app_logs (event_type);
 
--- ── App configs ─────────────────────────────────────────────────────────────
--- Key-value store for per-app configuration (future use)
-create table if not exists app_configs (
-  app_name    text primary key,
-  config      jsonb not null default '{}',
-  updated_at  timestamptz default now()
+CREATE TABLE IF NOT EXISTS app_configs (
+  app_name    TEXT PRIMARY KEY,
+  config      TEXT NOT NULL DEFAULT '{}',
+  updated_at  TEXT DEFAULT (datetime('now'))
 );
 
--- ── Email decisions ──────────────────────────────────────────────────────────
--- Records what John does with each draft: sent / archived / deleted / edited
--- Used to train the AI reply system over time.
-create table if not exists email_decisions (
-  id              bigserial primary key,
-  thread_id       text,               -- Gmail thread ID
-  mpn             text,               -- part number if applicable
-  sender          text,               -- who sent the original email
-  action          text not null,      -- sent | archived | deleted | edited
-  draft_content   text,               -- what Claude drafted
-  sent_content    text,               -- what John actually sent (null if archived/deleted)
-  edit_diff       text,               -- summary of edits made (future)
-  created_at      timestamptz default now()
+CREATE TABLE IF NOT EXISTS email_decisions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id       TEXT,
+  mpn             TEXT,
+  sender          TEXT,
+  action          TEXT NOT NULL,
+  draft_content   TEXT,
+  sent_content    TEXT,
+  created_at      TEXT DEFAULT (datetime('now'))
 );
 
-create index if not exists email_decisions_mpn_idx    on email_decisions (mpn);
-create index if not exists email_decisions_action_idx on email_decisions (action);
-
--- ── Row Level Security ───────────────────────────────────────────────────────
--- The Worker uses the service role key and bypasses RLS.
--- Enable RLS so the anon key can't read these tables directly.
-alter table app_logs         enable row level security;
-alter table app_configs      enable row level security;
-alter table email_decisions  enable row level security;
+CREATE INDEX IF NOT EXISTS idx_email_decisions_mpn ON email_decisions (mpn);

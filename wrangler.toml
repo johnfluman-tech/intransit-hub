@@ -5,8 +5,6 @@ account_id = "98f70530e18c5c72458bf52e4b31c80e"
 
 # Secrets — set these with:
 #   wrangler secret put HUB_SECRET
-#   wrangler secret put SUPABASE_URL
-#   wrangler secret put SUPABASE_KEY
 #   wrangler secret put CLAUDE_API_KEY
 #
 # DO NOT put real values in this file — it goes into git.
@@ -14,8 +12,11 @@ account_id = "98f70530e18c5c72458bf52e4b31c80e"
 [vars]
 # Non-secret public vars can go here (none yet)
 
+[[d1_databases]]
+binding = "DB"
+database_name = "intransit-hub-db"
+database_id = "7060a513-ffb5-48b8-982c-dd8edc639b70"
+
 # Local dev — copy this block to .dev.vars (gitignored) with real values
 # HUB_SECRET     = "dev_secret"
-# SUPABASE_URL   = "https://xxxx.supabase.co"
-# SUPABASE_KEY   = "eyJ..."
 # CLAUDE_API_KEY = "sk-ant-..."
