@@ -2,7 +2,7 @@
 import os, re, requests
 
 HUB = "https://intransit-hub.intransit-sales.workers.dev"
-SEC = "CXEzt4BVqliSmNwdorZf86DuKyceAxjn"
+SEC = "InTransit!Hub#2026"
 MEM_DIR = r"C:\Users\fluma\.claude\projects\C--Users-fluma\memory"
 HEADERS = {"Authorization": f"Bearer {SEC}"}
 
