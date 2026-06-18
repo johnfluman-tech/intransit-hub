@@ -387,6 +387,53 @@
     .cfg-saved-msg { font-size: 12px; color: var(--success); opacity: 0; transition: opacity .3s; }
     .cfg-saved-msg.show { opacity: 1; }
 
+    /* ── Training ── */
+    .training-counter { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+    .training-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 24px;
+    }
+    .training-nav {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;
+    }
+    .training-pos { font-size: 13px; color: var(--text-dim); font-weight: 600; }
+    .training-meta { display: grid; gap: 10px; margin-bottom: 20px; }
+    .training-meta-row { display: flex; gap: 10px; align-items: baseline; }
+    .training-meta-label {
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .06em; min-width: 62px; flex-shrink: 0;
+    }
+    .training-meta-value { font-size: 13px; color: var(--text); word-break: break-all; }
+    .training-draft-label {
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px;
+    }
+    .training-draft {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 14px; font-size: 13px; white-space: pre-wrap; line-height: 1.6;
+      max-height: 280px; overflow-y: auto; margin-bottom: 20px; font-family: inherit;
+    }
+    .training-actions { display: flex; gap: 12px; margin-bottom: 4px; }
+    .training-wrong-panel { margin-top: 16px; }
+    .training-wrong-panel label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 6px;
+    }
+    .training-wrong-panel textarea {
+      width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); padding: 10px; font-size: 13px; font-family: inherit;
+      resize: vertical; min-height: 80px;
+    }
+    .training-wrong-panel textarea:focus { outline: none; border-color: var(--accent); }
+    .training-saved-badge {
+      display: inline-block; background: var(--success); color: #000; border-radius: 20px;
+      padding: 2px 12px; font-size: 11px; font-weight: 700; opacity: 0; transition: opacity .3s;
+    }
+    .btn.success { background: var(--success); color: #000; font-weight: 700; }
+    .btn.success:hover { filter: brightness(1.1); }
+    .training-empty {
+      text-align: center; padding: 64px; color: var(--muted); font-size: 15px;
+      background: var(--card); border: 1px dashed var(--border); border-radius: 10px;
+    }
+
     /* ── Settings ── */
     .settings-group {
       background: var(--card);
@@ -489,6 +536,10 @@
     <a data-tab="email-triage">
       <span class="icon">✉️</span>
       <span class="nav-text">Email Triage</span>
+    </a>
+    <a data-tab="training">
+      <span class="icon">🎓</span>
+      <span class="nav-text">Training</span>
     </a>
 
     <div class="nav-section">System</div>
@@ -752,6 +803,19 @@
       </div>
     </div>
 
+    <!-- ── TRAINING TAB ── -->
+    <div class="tab-panel" id="tab-training">
+      <div class="page-header">
+        <h2>Email Training</h2>
+        <p class="page-sub">Review each email decision — mark correct or explain what went wrong.</p>
+      </div>
+      <div id="training-status" class="training-counter">Loading…</div>
+      <div id="training-card-wrap"></div>
+      <div id="training-empty" class="training-empty" style="display:none">
+        All caught up — no emails to review right now.
+      </div>
+    </div>
+
     <!-- ── SETTINGS TAB ── -->
     <div class="tab-panel" id="tab-settings">
       <div class="settings-group">
@@ -964,6 +1028,7 @@ const TAB_TITLES = {
   'email-triage': 'Email Triage',
   'memory':       'AI Memory',
   'apps':         'App Configuration',
+  'training':     'Email Training',
   'settings':     'Settings'
 };
 
@@ -978,6 +1043,7 @@ function showTab(id) {
   if (id === 'email-triage') loadDrafts();
   if (id === 'memory')       loadMemory();
   if (id === 'apps')         loadApps();
+  if (id === 'training')     loadTraining();
 }
 
 document.querySelectorAll('nav a[data-tab]').forEach(a => {
@@ -1200,6 +1266,117 @@ async function apiPost(path, body) {
   });
   if (!res.ok) throw new Error(res.statusText);
   return res.json();
+}
+
+// ─── Training ────────────────────────────────────
+let _trQueue = [];
+let _trIdx   = 0;
+
+async function loadTraining() {
+  _trIdx = 0;
+  const statusEl = document.getElementById('training-status');
+  const wrap     = document.getElementById('training-card-wrap');
+  const emptyEl  = document.getElementById('training-empty');
+  statusEl.textContent = 'Loading…';
+  wrap.innerHTML = '';
+  emptyEl.style.display = 'none';
+  try {
+    const data = await apiGet('/api/drafts?status=pending&limit=100');
+    _trQueue = (data && data.rows) || [];
+    if (!_trQueue.length) {
+      statusEl.textContent = '';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    statusEl.textContent = `${_trQueue.length} email${_trQueue.length > 1 ? 's' : ''} to review`;
+    renderTrainingCard();
+  } catch { statusEl.textContent = 'Worker not connected.'; }
+}
+
+function renderTrainingCard() {
+  const wrap = document.getElementById('training-card-wrap');
+  const d = _trQueue[_trIdx];
+  if (!d) { wrap.innerHTML = ''; return; }
+  const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  wrap.innerHTML = `
+    <div class="training-card">
+      <div class="training-nav">
+        <button class="btn sm" onclick="trainingPrev()" ${_trIdx === 0 ? 'disabled' : ''}>← Prev</button>
+        <span class="training-pos">${_trIdx + 1} / ${_trQueue.length}</span>
+        <button class="btn sm" onclick="trainingNext()" ${_trIdx === _trQueue.length - 1 ? 'disabled' : ''}>Next →</button>
+      </div>
+      <div class="training-meta">
+        <div class="training-meta-row">
+          <span class="training-meta-label">From</span>
+          <span class="training-meta-value">${esc(d.sender || '—')}</span>
+        </div>
+        <div class="training-meta-row">
+          <span class="training-meta-label">Subject</span>
+          <span class="training-meta-value">${esc(d.subject || '—')}</span>
+        </div>
+        <div class="training-meta-row">
+          <span class="training-meta-label">MPN</span>
+          <span class="training-meta-value" style="font-weight:700;color:var(--accent)">${esc(d.mpn || '—')}</span>
+        </div>
+        <div class="training-meta-row">
+          <span class="training-meta-label">Time</span>
+          <span class="training-meta-value">${timeAgo(d.created_at)}</span>
+        </div>
+      </div>
+      <div class="training-draft-label">What the script drafted:</div>
+      <div class="training-draft">${esc(d.draft_content || '(empty)')}</div>
+      <div class="training-actions">
+        <button class="btn success" onclick="trainingMarkCorrect(${d.id})">✓ Correct</button>
+        <button class="btn danger" onclick="trainingShowWrong(${d.id})">✗ Wrong</button>
+      </div>
+      <div class="training-wrong-panel" id="tr-wrong-${d.id}" style="display:none">
+        <label>What should it have done? (wrong MPN? wrong reply type? wrong recipient? wrong message?)</label>
+        <textarea id="tr-correction-${d.id}" placeholder="e.g. Should have sent MSG_CHECKING not MSG_NEED_TP — part was in OEM stock. Replied to autosend@icsource.com instead of buyer@company.com..."></textarea>
+        <div style="display:flex;gap:10px;margin-top:8px;align-items:center">
+          <button class="btn primary sm" onclick="trainingSubmitWrong(${d.id})">Save Feedback</button>
+          <span class="training-saved-badge" id="tr-saved-${d.id}">Saved</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function trainingPrev() { if (_trIdx > 0) { _trIdx--; renderTrainingCard(); } }
+function trainingNext() { if (_trIdx < _trQueue.length - 1) { _trIdx++; renderTrainingCard(); } }
+
+function trainingShowWrong(id) {
+  document.getElementById(`tr-wrong-${id}`).style.display = 'block';
+  document.getElementById(`tr-correction-${id}`).focus();
+}
+
+function _trainingAdvance() {
+  _trQueue.splice(_trIdx, 1);
+  if (_trIdx >= _trQueue.length) _trIdx = Math.max(0, _trQueue.length - 1);
+  const statusEl = document.getElementById('training-status');
+  statusEl.textContent = _trQueue.length ? `${_trQueue.length} email${_trQueue.length > 1 ? 's' : ''} to review` : '';
+  if (!_trQueue.length) {
+    document.getElementById('training-card-wrap').innerHTML = '';
+    document.getElementById('training-empty').style.display = 'block';
+  } else {
+    renderTrainingCard();
+  }
+}
+
+async function trainingMarkCorrect(id) {
+  try {
+    await apiPatch(`/api/drafts/${id}`, { action: 'correct' });
+    _trainingAdvance();
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+async function trainingSubmitWrong(id) {
+  const correction = (document.getElementById(`tr-correction-${id}`) || {}).value || '';
+  if (!correction.trim()) { alert('Please describe what went wrong before saving.'); return; }
+  try {
+    await apiPatch(`/api/drafts/${id}`, { action: 'wrong', sent_content: correction.trim() });
+    const saved = document.getElementById(`tr-saved-${id}`);
+    saved.style.opacity = '1';
+    setTimeout(() => { saved.style.opacity = '0'; _trainingAdvance(); }, 900);
+  } catch(e) { alert('Save failed: ' + e.message); }
 }
 
 // ─── Apps Config ─────────────────────────────────
