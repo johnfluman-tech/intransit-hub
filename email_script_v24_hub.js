@@ -54,6 +54,30 @@ function hubPostDraft(threadId, mpn, sender, subject, draftContent) {
   } catch(e) { Logger.log('hubPostDraft error: ' + e); }
 }
 
+function getRemoteConfig() {
+  try {
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/configs/email_automation', {
+      method: 'get',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) return {};
+    var row = JSON.parse(resp.getContentText());
+    return row.config ? JSON.parse(row.config) : {};
+  } catch(e) { Logger.log('getRemoteConfig error: ' + e); return {}; }
+}
+
+function applyRemoteConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object') return;
+  if (cfg.MSG_NEED_TP_500)  MSG_NEED_TP_500  = cfg.MSG_NEED_TP_500;
+  if (cfg.MSG_NEED_TP_2000) MSG_NEED_TP_2000 = cfg.MSG_NEED_TP_2000;
+  if (cfg.MSG_CHECKING)     MSG_CHECKING     = cfg.MSG_CHECKING;
+  if (cfg.MSG_BILL)         MSG_BILL         = cfg.MSG_BILL;
+  if (cfg.DAVID_EMAIL)      DAVID_EMAIL      = cfg.DAVID_EMAIL;
+  if (cfg.BILL_EMAIL)       BILL_EMAIL       = cfg.BILL_EMAIL;
+  if (cfg.DEB_EMAIL)        DEB_EMAIL        = cfg.DEB_EMAIL;
+}
+
 // ============================================================
 // GMAIL REST API — PROPER THREADED DRAFT CREATION
 // ============================================================
@@ -377,11 +401,24 @@ function isICSouceEmail(from, subject) {
 
 function extractICSourcBuyerEmail(htmlBody) {
   if (!htmlBody) return null;
+  // Primary: mailto: links, excluding icsource.com and intransittech.com
   var matches = htmlBody.match(/href=["']mailto:([^"']+)["']/gi);
-  if (!matches) return null;
-  for (var i = 0; i < matches.length; i++) {
-    var m = matches[i].match(/href=["']mailto:([^"']+)["']/i);
-    if (m && m[1] && m[1].toLowerCase().indexOf('intransittech') < 0) return m[1].trim();
+  if (matches) {
+    for (var i = 0; i < matches.length; i++) {
+      var m = matches[i].match(/href=["']mailto:([^"']+)["']/i);
+      if (m && m[1]) {
+        var addr = m[1].trim().toLowerCase();
+        if (addr.indexOf('intransittech') < 0 && addr.indexOf('icsource.com') < 0) return m[1].trim();
+      }
+    }
+  }
+  // Fallback: scan plain-text email addresses in the body
+  var emailMatches = htmlBody.match(/\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b/g);
+  if (emailMatches) {
+    for (var j = 0; j < emailMatches.length; j++) {
+      var e = emailMatches[j].trim().toLowerCase();
+      if (e.indexOf('intransittech') < 0 && e.indexOf('icsource.com') < 0) return emailMatches[j].trim();
+    }
   }
   return null;
 }
@@ -538,6 +575,8 @@ function deletePart(partNumber, emailSubject) {
 // TRIGGER 1 — David no-stock emails
 // ============================================================
 function checkDavidNoStockEmails() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'checkDavidNoStockEmails: disabled via hub config'); return; }
   var query = 'from:'+DAVID_EMAIL+' (subject:"no stk" OR subject:"no stock" OR subject:"removed" OR subject:"stock sold" OR "removed" OR "cant share") -label:'+INCOMING_LABEL+' in:inbox';
   var threads = GmailApp.search(query,0,20);
   hubLog('run', 'checkDavidNoStockEmails: ' + threads.length + ' thread(s)');
@@ -564,6 +603,8 @@ function checkDavidNoStockEmails() {
 // TRIGGER 2 — Sent "Removed - MPN:" → delete from OEM EXCESS
 // ============================================================
 function checkSentRemovals() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'checkSentRemovals: disabled via hub config'); return; }
   var query = 'in:sent to:'+DAVID_EMAIL+' "Removed - MPN:" -label:oem-removal-processed';
   var threads = GmailApp.search(query,0,20);
   hubLog('run', 'checkSentRemovals: ' + threads.length + ' thread(s)');
@@ -588,6 +629,8 @@ function checkSentRemovals() {
 // TRIGGER 3 — Inbox TP replies → threaded draft
 // ============================================================
 function checkInboxForTPReplies() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'checkInboxForTPReplies: disabled via hub config'); return; }
   var query = 'in:inbox "minimum line requirement" -label:oem-tp-processed';
   var threads = GmailApp.search(query,0,20);
   hubLog('run', 'checkInboxForTPReplies: ' + threads.length + ' thread(s)');
@@ -655,6 +698,8 @@ function checkInboxForTPReplies() {
 // TRIGGER 4 — New inbox RFQs → threaded draft
 // ============================================================
 function checkInboxForNewRFQs() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'checkInboxForNewRFQs: disabled via hub config'); return; }
   var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed';
   var threads = GmailApp.search(query,0,10);
   hubLog('run', 'checkInboxForNewRFQs: ' + threads.length + ' thread(s)');
@@ -848,6 +893,8 @@ function checkInboxForNewRFQs() {
 // TRIGGER 5 — Sent "checking on it now" → add to Forte
 // ============================================================
 function checkSentCheckingReplies() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'checkSentCheckingReplies: disabled via hub config'); return; }
   var query = 'in:sent "checking on it now" newer_than:2d -label:oem-rfq-sent-processed';
   var threads = GmailApp.search(query,0,20);
   hubLog('run', 'checkSentCheckingReplies: ' + threads.length + ' thread(s)');
@@ -939,6 +986,8 @@ function checkSentCheckingReplies() {
 // TRIGGER 6 — Payment Advice → forward to Deb
 // ============================================================
 function checkInboxForPaymentAdvice() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'checkInboxForPaymentAdvice: disabled via hub config'); return; }
   var query = 'in:inbox subject:"payment advice" -label:oem-payment-forwarded';
   var threads = GmailApp.search(query,0,10);
   hubLog('run', 'checkInboxForPaymentAdvice: ' + threads.length + ' thread(s)');
