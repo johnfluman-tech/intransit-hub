@@ -260,15 +260,52 @@
     }
 
     /* ── Email Triage ── */
-    .triage-placeholder {
-      background: var(--card);
-      border: 1px dashed var(--border);
-      border-radius: 10px;
-      padding: 48px;
-      text-align: center;
+    .triage-toolbar {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
     }
-    .triage-placeholder h3 { font-size: 16px; margin-bottom: 8px; }
-    .triage-placeholder p  { color: var(--muted); font-size: 13px; max-width: 420px; margin: 0 auto; line-height: 1.6; }
+    .triage-toolbar select {
+      background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); padding: 5px 10px; font-size: 12px;
+    }
+    #draft-count-badge {
+      background: var(--accent); color: #fff; border-radius: 20px;
+      padding: 2px 9px; font-size: 11px; font-weight: 700;
+    }
+    .draft-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 18px; margin-bottom: 14px; transition: border-color .2s;
+    }
+    .draft-card:hover { border-color: #3a3d52; }
+    .draft-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      margin-bottom: 10px; gap: 12px;
+    }
+    .draft-sender { font-weight: 600; font-size: 14px; }
+    .draft-subject { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    .draft-mpn {
+      display: inline-block; margin-top: 5px; padding: 2px 8px;
+      background: rgba(79,142,247,.12); color: var(--accent);
+      border-radius: 4px; font-size: 11px; font-weight: 600;
+    }
+    .draft-time { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .draft-body pre {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 12px; font-size: 12px; color: var(--text-dim); white-space: pre-wrap;
+      word-break: break-word; max-height: 200px; overflow-y: auto;
+      font-family: inherit; margin-bottom: 12px;
+    }
+    .draft-edit-area textarea {
+      width: 100%; min-height: 140px; background: var(--bg); border: 1px solid var(--accent);
+      border-radius: 6px; color: var(--text); padding: 10px; font-size: 12px;
+      font-family: inherit; resize: vertical; margin-bottom: 8px;
+    }
+    .draft-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn.danger { color: var(--error); border-color: var(--error); }
+    .btn.danger:hover { background: rgba(239,68,68,.1); }
+    .triage-empty {
+      text-align: center; padding: 48px; color: var(--muted); font-size: 13px;
+      background: var(--card); border: 1px dashed var(--border); border-radius: 10px;
+    }
 
     /* ── Settings ── */
     .settings-group {
@@ -440,17 +477,19 @@
 
     <!-- ── EMAIL TRIAGE TAB ── -->
     <div class="tab-panel" id="tab-email-triage">
-      <div class="triage-placeholder">
-        <h3>Email Triage — Coming Soon</h3>
-        <p>
-          This panel will show pending Gmail drafts for your review.
-          You'll be able to approve, edit, or delete each draft directly here,
-          and Claude will learn from your decisions to improve future replies.
-        </p>
-        <br>
-        <p style="font-size:12px;color:var(--muted)">
-          Requires: Worker connected · D1 email_decisions table · Gmail MCP access
-        </p>
+      <div class="triage-toolbar">
+        <select id="draft-filter-status" onchange="loadDrafts()">
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="edited">Edited</option>
+          <option value="deleted">Deleted</option>
+        </select>
+        <span id="draft-count-badge">0</span>
+        <span style="font-size:12px;color:var(--muted)">drafts</span>
+        <button class="btn sm" onclick="loadDrafts()" style="margin-left:auto">↻ Refresh</button>
+      </div>
+      <div id="draft-list">
+        <div class="triage-empty">Loading drafts…</div>
       </div>
     </div>
 
@@ -666,8 +705,9 @@ function showTab(id) {
   document.getElementById('tab-' + id).classList.add('active');
   document.querySelector(`nav a[data-tab="${id}"]`).classList.add('active');
   document.getElementById('page-title').textContent = TAB_TITLES[id] || id;
-  if (id === 'logs') loadLogs();
-  if (id === 'dashboard') loadDashboard();
+  if (id === 'logs')         loadLogs();
+  if (id === 'dashboard')    loadDashboard();
+  if (id === 'email-triage') loadDrafts();
 }
 
 document.querySelectorAll('nav a[data-tab]').forEach(a => {
@@ -693,6 +733,94 @@ function refreshAll() {
   if (tab === 'dashboard') loadDashboard();
   if (tab === 'logs')      loadLogs();
   testConnection();
+}
+
+// ─── Email Triage ────────────────────────────────
+async function loadDrafts() {
+  const status  = document.getElementById('draft-filter-status').value || 'pending';
+  const container = document.getElementById('draft-list');
+  const badge   = document.getElementById('draft-count-badge');
+  container.innerHTML = '<div class="triage-empty">Loading…</div>';
+  try {
+    const data = await apiGet(`/api/drafts?status=${status}&limit=50`);
+    const rows = (data && data.rows) || [];
+    badge.textContent = rows.length;
+    if (!rows.length) {
+      container.innerHTML = `<div class="triage-empty">No ${status} drafts.</div>`;
+      return;
+    }
+    container.innerHTML = rows.map(renderDraftCard).join('');
+  } catch {
+    container.innerHTML = '<div class="triage-empty">Worker not connected.</div>';
+  }
+}
+
+function renderDraftCard(d) {
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return `
+    <div class="draft-card" id="draft-${d.id}">
+      <div class="draft-header">
+        <div>
+          <div class="draft-sender">${esc(d.sender || '(unknown sender)')}</div>
+          <div class="draft-subject">${esc(d.subject || '(no subject)')}</div>
+          ${d.mpn ? `<span class="draft-mpn">${esc(d.mpn)}</span>` : ''}
+        </div>
+        <div class="draft-time">${timeAgo(d.created_at)}</div>
+      </div>
+      <div class="draft-body" id="draft-body-${d.id}">
+        <pre>${esc(d.draft_content || '')}</pre>
+      </div>
+      <div class="draft-edit-area" id="draft-edit-${d.id}" style="display:none">
+        <textarea id="draft-ta-${d.id}">${esc(d.draft_content || '')}</textarea>
+        <div style="display:flex;gap:8px">
+          <button class="btn primary sm" onclick="saveDraftEdit(${d.id})">Save</button>
+          <button class="btn sm" onclick="cancelDraftEdit(${d.id})">Cancel</button>
+        </div>
+      </div>
+      <div class="draft-actions">
+        <button class="btn primary sm" onclick="approveDraft(${d.id})">✓ Approve</button>
+        <button class="btn sm" onclick="startDraftEdit(${d.id})">✏ Edit</button>
+        <button class="btn sm danger" onclick="deleteDraft(${d.id})">✕ Delete</button>
+      </div>
+    </div>`;
+}
+
+function startDraftEdit(id) {
+  document.getElementById(`draft-body-${id}`).style.display = 'none';
+  document.getElementById(`draft-edit-${id}`).style.display = 'block';
+}
+function cancelDraftEdit(id) {
+  document.getElementById(`draft-body-${id}`).style.display = 'block';
+  document.getElementById(`draft-edit-${id}`).style.display = 'none';
+}
+async function saveDraftEdit(id) {
+  const content = document.getElementById(`draft-ta-${id}`).value;
+  await apiPatch(`/api/drafts/${id}`, { action: 'edited', draft_content: content });
+  document.getElementById(`draft-body-${id}`).querySelector('pre').textContent = content;
+  cancelDraftEdit(id);
+}
+async function approveDraft(id) {
+  await apiPatch(`/api/drafts/${id}`, { action: 'approved' });
+  document.getElementById(`draft-${id}`).remove();
+  const badge = document.getElementById('draft-count-badge');
+  badge.textContent = Math.max(0, parseInt(badge.textContent) - 1);
+}
+async function deleteDraft(id) {
+  if (!confirm('Delete this draft?')) return;
+  await apiPatch(`/api/drafts/${id}`, { action: 'deleted' });
+  document.getElementById(`draft-${id}`).remove();
+  const badge = document.getElementById('draft-count-badge');
+  badge.textContent = Math.max(0, parseInt(badge.textContent) - 1);
+}
+
+async function apiPatch(path, body) {
+  const res = await fetch(CONFIG.workerUrl + path, {
+    method: 'PATCH',
+    headers: { 'Authorization': 'Bearer ' + CONFIG.secret, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
 }
 
 // ─── Init ────────────────────────────────────────
