@@ -1,6 +1,7 @@
 name = "intransit-hub"
 main = "worker.js"
 compatibility_date = "2024-01-01"
+account_id = "98f70530e18c5c72458bf52e4b31c80e"
 
 # Secrets — set these with:
 #   wrangler secret put HUB_SECRET

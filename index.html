@@ -460,7 +460,7 @@
         <h3>Worker Connection</h3>
         <div class="settings-row">
           <label>Worker URL</label>
-          <input type="text" id="cfg-worker-url" placeholder="https://intransit-hub.YOUR_SUBDOMAIN.workers.dev">
+          <input type="text" id="cfg-worker-url" placeholder="https://intransit-hub.intransit-sales.workers.dev">
         </div>
         <div class="settings-row">
           <label>Hub Secret</label>
@@ -496,8 +496,8 @@
 //  CONFIG  — fill in Settings tab or edit here
 // ═══════════════════════════════════════════════════
 let CONFIG = {
-  workerUrl: '',
-  secret: ''
+  workerUrl: 'https://intransit-hub.intransit-sales.workers.dev',
+  secret: ''  // set this in Settings tab (secret: CXEzt4BVqliSmNwdorZf86DuKyceAxjn)
 };
 
 const APPS = [
