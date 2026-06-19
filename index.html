@@ -619,6 +619,9 @@
             <option value="tee_time_bot">Tee Time Bot</option>
             <option value="icsource_checker">ICSSource</option>
             <option value="oem_excess">OEM EXCESS</option>
+            <option value="sales_app">Sales App</option>
+            <option value="build_results">Build Results</option>
+            <option value="live_monitor">Live Monitor</option>
           </select>
           <select id="log-filter-type" onchange="loadLogs()">
             <option value="">All events</option>
@@ -720,8 +723,21 @@
     <!-- ── APPS TAB ── -->
     <div class="tab-panel" id="tab-apps">
       <div class="page-header">
-        <h2>App Configuration</h2>
-        <p class="page-sub">Edit settings for each app — changes take effect on the next run.</p>
+        <h2>Apps</h2>
+        <p class="page-sub">Live status for all apps + configuration editors.</p>
+      </div>
+
+      <!-- Status grid -->
+      <div class="section-header">
+        <h3 style="font-size:13px;font-weight:600;color:var(--text-dim)">Live Status</h3>
+        <button class="btn sm" onclick="loadApps()">↻ Refresh</button>
+      </div>
+      <div class="grid-4" id="apps-status-grid" style="margin-bottom:28px">
+        <div style="color:var(--muted);font-size:13px;padding:12px">Loading…</div>
+      </div>
+
+      <div class="section-header" style="margin-top:4px">
+        <h3 style="font-size:13px;font-weight:600;color:var(--text-dim)">Configuration</h3>
       </div>
 
       <!-- Email Automation -->
@@ -799,6 +815,58 @@
         <div class="cfg-save-row">
           <button class="btn primary" onclick="saveAppConfig('oem_excess')">Save</button>
           <span class="cfg-saved-msg" id="cfg-saved-oem_excess">Saved!</span>
+        </div>
+      </div>
+
+      <!-- Sales App -->
+      <div class="app-cfg-card" id="cfg-card-sales_app">
+        <div class="app-cfg-header">
+          <span class="app-cfg-icon">💼</span>
+          <span class="app-cfg-title">Sales App</span>
+          <span class="app-cfg-updated" id="cfg-updated-sales_app"></span>
+        </div>
+        <div class="cfg-toggle-row">
+          <label class="cfg-toggle"><input type="checkbox" id="cfg-sales_app-enabled" checked><span class="cfg-toggle-slider"></span></label>
+          <label for="cfg-sales_app-enabled">Enabled</label>
+        </div>
+        <div class="cfg-save-row">
+          <button class="btn primary" onclick="saveAppConfig('sales_app')">Save</button>
+          <span class="cfg-saved-msg" id="cfg-saved-sales_app">Saved!</span>
+        </div>
+      </div>
+
+      <!-- Build Results -->
+      <div class="app-cfg-card" id="cfg-card-build_results">
+        <div class="app-cfg-header">
+          <span class="app-cfg-icon">🔧</span>
+          <span class="app-cfg-title">Build Results</span>
+          <span class="app-cfg-updated" id="cfg-updated-build_results"></span>
+        </div>
+        <div class="cfg-toggle-row">
+          <label class="cfg-toggle"><input type="checkbox" id="cfg-build_results-enabled" checked><span class="cfg-toggle-slider"></span></label>
+          <label for="cfg-build_results-enabled">Enabled</label>
+        </div>
+        <div class="cfg-save-row">
+          <button class="btn primary" onclick="saveAppConfig('build_results')">Save</button>
+          <span class="cfg-saved-msg" id="cfg-saved-build_results">Saved!</span>
+        </div>
+      </div>
+
+      <!-- Live Monitor -->
+      <div class="app-cfg-card" id="cfg-card-live_monitor">
+        <div class="app-cfg-header">
+          <span class="app-cfg-icon">📺</span>
+          <span class="app-cfg-title">Live Monitor</span>
+          <span class="app-cfg-updated" id="cfg-updated-live_monitor"></span>
+        </div>
+        <div class="cfg-toggle-row">
+          <label class="cfg-toggle"><input type="checkbox" id="cfg-live_monitor-enabled" checked><span class="cfg-toggle-slider"></span></label>
+          <label for="cfg-live_monitor-enabled">Enabled</label>
+        </div>
+        <div class="cfg-field"><label>Port</label><input type="number" id="cfg-live_monitor-port" value="8787"></div>
+        <div class="cfg-save-row">
+          <button class="btn primary" onclick="saveAppConfig('live_monitor')">Save</button>
+          <span class="cfg-saved-msg" id="cfg-saved-live_monitor">Saved!</span>
         </div>
       </div>
     </div>
@@ -907,6 +975,24 @@ const APPS = [
     name: 'OEM EXCESS',
     desc: 'Sheet automation & MPN search API',
     icon: '📊'
+  },
+  {
+    id: 'sales_app',
+    name: 'Sales App',
+    desc: 'CRM, attribution & sales reporting',
+    icon: '💼'
+  },
+  {
+    id: 'build_results',
+    name: 'Build Results',
+    desc: 'Build pipeline output tracker',
+    icon: '🔧'
+  },
+  {
+    id: 'live_monitor',
+    name: 'Live Monitor',
+    desc: 'Tee bot live dashboard — localhost:8787',
+    icon: '📺'
   }
 ];
 
@@ -1048,7 +1134,7 @@ const TAB_TITLES = {
   'logs':         'Event Logs',
   'email-triage': 'Email Triage',
   'memory':       'AI Memory',
-  'apps':         'App Configuration',
+  'apps':         'Apps',
   'training':     'Email Training',
   'settings':     'Settings'
 };
@@ -1452,13 +1538,43 @@ const APP_FIELDS = {
   ],
   icsource_checker: [],
   oem_excess: [],
+  sales_app: [],
+  build_results: [],
+  live_monitor: [
+    { key: 'port', tag: 'input' },
+  ],
 };
 
 async function loadApps() {
+  const allApps = ['email_automation', 'tee_time_bot', 'icsource_checker', 'oem_excess', 'sales_app', 'build_results', 'live_monitor'];
+
+  // Load status cards
+  const grid = document.getElementById('apps-status-grid');
+  try {
+    const status = await apiGet('/api/apps');
+    if (status) {
+      grid.innerHTML = APPS.map(app => {
+        const s = status[app.id] || {};
+        const st = s.status || 'unknown';
+        const ver = s.version ? `<span style="font-size:11px;color:var(--muted)">v${s.version}</span>` : '';
+        return `<div class="app-card">
+          <div class="card-header">
+            <div class="card-name">${app.icon} ${app.name}</div>
+            <div class="status-badge ${st}"><div class="dot"></div>${st}</div>
+          </div>
+          <div class="card-desc">${app.desc} ${ver}</div>
+          <div class="card-last">${s.summary || '—'}</div>
+          <div class="card-meta">Last run: ${s.last_run ? timeAgo(s.last_run) : 'Never'}</div>
+        </div>`;
+      }).join('');
+    }
+  } catch { grid.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:12px">Could not load status.</div>'; }
+
+  // Load config fields
   try {
     const data = await apiGet('/api/configs');
     const rows = (data && data.rows) || [];
-    for (const app of ['email_automation', 'tee_time_bot', 'icsource_checker', 'oem_excess']) {
+    for (const app of allApps) {
       const row = rows.find(r => r.app_name === app) || { config: '{}', updated_at: null };
       let cfg = {};
       try { cfg = JSON.parse(row.config); } catch {}
