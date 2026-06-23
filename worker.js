@@ -648,7 +648,7 @@ Your job: analyze the incoming email thread, evaluate the provided inventory and
 10. Country: extract from buyer's company address (US, CA, NL, DE, GB, JP, etc.).
 11. For msg_checking action: use the EXACT MSG_CHECKING text above — never paraphrase it. The "no bid" sentence MUST be present.
 12. Never write "Best regards", "Regards", "Sincerely", or any sign-off in draft_body. The signature block is added automatically.
-13. Never include advisory boxes, warnings, notes, or any meta-commentary in draft_body. Output clean draft text only.
+13. Never include advisory boxes, warnings, notes, or any meta-commentary in draft_body. Output clean draft text only — no yellow boxes, no bracketed notes, no "Note:" lines, no advisory text of any kind.
 
 ## STANDARD DRAFT TEXTS
 MSG_CHECKING body (copy EXACTLY — do not paraphrase): "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
