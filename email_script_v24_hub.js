@@ -677,6 +677,7 @@ function extractTargetPrice(text) {
   }
   var patterns = [
     /\btp\s*([\d,.]+)/i,
+    /\btarget\s+price\s*[:\s]*\$?\s*([\d,.]+)/i,
     /\btarget[:\s]+\$?\s*([\d,.]+)/i,
     /USD\s*([\d,.]+)/i,
     /([\d,.]+)\s*USD/i,
@@ -954,9 +955,10 @@ function deletePart(partNumber, emailSubject) {
   var deletedSheet = getOrCreateDeletedSheet(ss);
   var data = mainSheet.getDataRange().getValues();
   var r = findMatches(data, partNumber), exact = r.exact, fuzzy = r.fuzzy;
-  if (exact.length===1){logDeletion(deletedSheet,exact[0].data,emailSubject);mainSheet.deleteRow(exact[0].row);return 'DELETED';}
+  var noStkStamp = 'NO STK ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+  if (exact.length===1){mainSheet.getRange(exact[0].row,5).setValue(noStkStamp);logDeletion(deletedSheet,exact[0].data,emailSubject);mainSheet.deleteRow(exact[0].row);return 'DELETED';}
   if (exact.length>1){sendReviewEmail(partNumber,emailSubject,exact);return 'MULTIPLE';}
-  if (!exact.length&&fuzzy.length===1&&fuzzy[0].type==='stripped'){logDeletion(deletedSheet,fuzzy[0].data,emailSubject);mainSheet.deleteRow(fuzzy[0].row);return 'FUZZY';}
+  if (!exact.length&&fuzzy.length===1&&fuzzy[0].type==='stripped'){mainSheet.getRange(fuzzy[0].row,5).setValue(noStkStamp);logDeletion(deletedSheet,fuzzy[0].data,emailSubject);mainSheet.deleteRow(fuzzy[0].row);return 'FUZZY';}
   if (fuzzy.length){sendReviewEmail(partNumber,emailSubject,fuzzy);return 'FUZZY_REVIEW';}
   sendReviewEmail(partNumber,emailSubject,[]);return 'NOT_FOUND';
 }
@@ -1109,15 +1111,47 @@ function checkInboxForTPReplies() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkInboxForTPReplies: disabled via hub config'); return; }
   var BLOCKED_DOMAINS = getBlockedDomains();
-  var query = 'in:inbox "minimum line requirement" -label:oem-tp-processed ' + BLOCKED_DOMAINS.map(function(d){return '-from:'+d;}).join(' ');
-  var threads = GmailApp.search(query,0,20);
-  hubLog('run', 'checkInboxForTPReplies: ' + threads.length + ' thread(s)');
-  if (!threads.length) return;
-  var label = GmailApp.getUserLabelByName('oem-tp-processed')||GmailApp.createLabel('oem-tp-processed');
-  threads.forEach(function(thread) {
+  var domainFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
+
+  // Q1: standard — threads where we sent "minimum line requirement" (MSG_NEED_TP_500)
+  var q1 = 'in:inbox "minimum line requirement" -label:oem-tp-processed ' + domainFilter;
+  // Q2: catch-all — threads where RFQ was already processed but buyer replied with TP using different wording
+  // Requires buyer to have replied at least once after John (enforced by buyerMsgCount >= 2 below)
+  var q2 = 'in:inbox label:oem-rfq-incoming-processed -label:oem-tp-processed newer_than:30d ' + domainFilter;
+
+  var threads1 = GmailApp.search(q1, 0, 20);
+  var threads2 = GmailApp.search(q2, 0, 20);
+
+  var q1Ids = {}, q2Ids = {};
+  threads1.forEach(function(t) { q1Ids[t.getId()] = true; });
+  threads2.forEach(function(t) { q2Ids[t.getId()] = true; });
+
+  var seen = {}, allThreads = [];
+  threads1.forEach(function(t) { seen[t.getId()] = true; allThreads.push(t); });
+  threads2.forEach(function(t) { if (!seen[t.getId()]) { seen[t.getId()] = true; allThreads.push(t); } });
+
+  hubLog('run', 'checkInboxForTPReplies: ' + allThreads.length + ' thread(s) (q1:' + threads1.length + ' q2-extra:' + (allThreads.length - threads1.length) + ')');
+  if (!allThreads.length) return;
+  var label = GmailApp.getUserLabelByName('oem-tp-processed') || GmailApp.createLabel('oem-tp-processed');
+
+  allThreads.forEach(function(thread) {
+    var isQ2Only = q2Ids[thread.getId()] && !q1Ids[thread.getId()];
     var messages = thread.getMessages();
-    var lastMsg = messages[messages.length-1];
-    if (lastMsg.getFrom().indexOf(JOHN_EMAIL)>=0){return;}
+    var lastMsg = messages[messages.length - 1];
+    if (lastMsg.getFrom().indexOf(JOHN_EMAIL) >= 0) { return; }
+
+    // Q2-only: require buyer to have replied after John (≥2 buyer msgs) to avoid
+    // re-processing the original RFQ before John has even sent a TP request
+    if (isQ2Only) {
+      var buyerMsgCount = 0;
+      for (var bmi = 0; bmi < messages.length; bmi++) {
+        if (messages[bmi].getFrom().indexOf(JOHN_EMAIL) < 0 && messages[bmi].getFrom().indexOf('intransittech') < 0) {
+          buyerMsgCount++;
+        }
+      }
+      if (buyerMsgCount < 2) { return; }
+    }
+
     var lastBuyerDate = null;
     var johnAlreadyReplied = false;
     for (var mi = 0; mi < messages.length; mi++) {
@@ -1128,10 +1162,17 @@ function checkInboxForTPReplies() {
         johnAlreadyReplied = true;
       }
     }
-    if (johnAlreadyReplied){thread.addLabel(label);return;}
+    if (johnAlreadyReplied) { thread.addLabel(label); return; }
+
     var body = lastMsg.getPlainBody();
     var tp = extractTargetPrice(stripQuotedLines(body));
-    if (!tp){thread.addLabel(label);return;}
+    if (!tp) {
+      // Q1: label to prevent infinite re-processing; Q2: leave unlabeled so we catch future TP reply
+      if (!isQ2Only) thread.addLabel(label);
+      return;
+    }
+    var tpNum = parseFloat(String(tp).replace(/[^0-9.]/g, '')) || 0;
+
     var mpn = extractMPN(thread.getFirstMessageSubject());
     if (!mpn || !/[0-9\-]/.test(mpn)) {
       var tpMsgs = thread.getMessages();
@@ -1142,11 +1183,52 @@ function checkInboxForTPReplies() {
         }
       }
     }
-    if (!mpn){thread.addLabel(label);return;}
+    if (!mpn) { thread.addLabel(label); return; }
+
+    // Extract qty and country from all buyer messages in the thread
+    var qty = '', country = 'USA';
+    for (var qi = 0; qi < messages.length; qi++) {
+      var qMsg = messages[qi];
+      if (qMsg.getFrom().indexOf(JOHN_EMAIL) >= 0 || qMsg.getFrom().indexOf('intransittech') >= 0) continue;
+      country = extractCountryFromEmail(qMsg.getFrom());
+      var qBody = qMsg.getPlainBody();
+      var qMatch = qBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[：:]\s*(\d[\d,]*)/i);
+      if (qMatch && !qty) {
+        var rawQty = qMatch[1] || qMatch[2] || qMatch[3] || '';
+        var qtyNum2 = parseQtyValue(rawQty, country);
+        if (qtyNum2 > 0) qty = String(qtyNum2);
+      }
+      if (!qty && isNetcompEmail(qMsg.getFrom(), qMsg.getSubject())) {
+        var ncQty = extractNetcompsQtyReq(qMsg.getBody());
+        if (ncQty) qty = ncQty;
+      }
+    }
+
+    // $500 minimum check — decline if line value is too low
+    if (qty && tpNum > 0) {
+      var lineValue = parseFloat(qty) * tpNum;
+      if (lineValue > 0 && lineValue < 500) {
+        var buyerEmailDec = extractBuyerEmail(lastMsg.getFrom());
+        var tpDisplay = tpNum < 1 ? tpNum.toFixed(4) : tpNum.toFixed(2);
+        var declineText = 'Thank you for your inquiry. Unfortunately, ' + qty + ' pcs at $' + tpDisplay + '/EA comes to $' + lineValue.toFixed(2) + ', which does not meet our $500 minimum line requirement. We appreciate the opportunity and hope to work with you on a larger quantity in the future.';
+        var declineHtml = buildSimpleHTML(declineText);
+        var declineSubj = 'Re: ' + thread.getFirstMessageSubject();
+        var declineDraftId = createThreadedDraft(buyerEmailDec, declineSubj, declineHtml, lastMsg.getId(), thread.getId(), null);
+        if (declineDraftId) {
+          var declineAdvice = 'Below MOV: ' + qty + ' × $' + tpDisplay + ' = $' + lineValue.toFixed(2) + ' < $500. Draft declines order.';
+          hubPostDraft(thread.getId(), mpn, buyerEmailDec, declineSubj, declineText, declineDraftId, declineAdvice);
+          hubLog('draft_created', 'TP below $500 MOV: ' + mpn, {mpn: mpn, tp: tp, qty: qty, lineValue: lineValue.toFixed(2)});
+          Logger.log('TP below MOV: ' + mpn + ' | ' + qty + 'x' + tp + '=$' + lineValue.toFixed(2));
+        }
+        thread.addLabel(label);
+        return;
+      }
+    }
+
     var buyerEmail = extractBuyerEmail(lastMsg.getFrom());
     var oemResults = searchOEMExcess(mpn);
-    if (!oemResults.length){thread.addLabel(label);return;}
-    var hasBillExt = oemResults.some(function(r){return r.notes.indexOf('BILL EXT 117')>=0;})
+    if (!oemResults.length) { thread.addLabel(label); return; }
+    var hasBillExt = oemResults.some(function(r) { return r.notes.indexOf('BILL EXT 117') >= 0; })
       || body.indexOf('BILL EXT 117') >= 0;
     var firstMsg = messages[0];
     var netcompTP = isNetcompEmail(firstMsg.getFrom(), firstMsg.getSubject());
@@ -1155,22 +1237,22 @@ function checkInboxForTPReplies() {
     if (netcompTP) replyTo = extractNetcompsBuyerEmail(body) || buyerEmail;
     else if (icsourceTP) replyTo = extractICSourcBuyerEmail(lastMsg.getBody()) || buyerEmail;
     var origMsg = null;
-    for (var i=0;i<messages.length;i++){
-      if (messages[i].getFrom().indexOf(JOHN_EMAIL)<0&&messages[i].getFrom().indexOf('intransittech')<0){origMsg=messages[i];break;}
+    for (var i = 0; i < messages.length; i++) {
+      if (messages[i].getFrom().indexOf(JOHN_EMAIL) < 0 && messages[i].getFrom().indexOf('intransittech') < 0) { origMsg = messages[i]; break; }
     }
     var replyText = hasBillExt ? MSG_BILL : MSG_CHECKING;
     var tpAdvice = hasBillExt
       ? 'Buyer provided TP for BILL EXT part ' + mpn + '. This routes to bill.pratt@intransittech.com — do NOT add to Forte. Bill will follow up directly with the buyer.'
       : 'Buyer replied with TP of ' + tp + ' for ' + mpn + ' (IS in OEM EXCESS). Sending triggers automatic Forte entry. Verify TP and QTY are correct in the thread before sending.';
     var htmlBody = origMsg ? buildDraftHTML(replyText, origMsg) : buildSimpleHTML(replyText);
-    var subj = 'Re: '+thread.getFirstMessageSubject();
+    var subj = 'Re: ' + thread.getFirstMessageSubject();
     var draftId = hasBillExt
-      ? createThreadedDraft(replyTo,subj,htmlBody,lastMsg.getId(),thread.getId(),BILL_EMAIL)
-      : createThreadedDraft(replyTo,subj,htmlBody,lastMsg.getId(),thread.getId(),null);
-    if (!draftId) { Logger.log('TP draft FAILED (no draftId) — skipping label: '+mpn+' | replyTo: '+replyTo); return; }
+      ? createThreadedDraft(replyTo, subj, htmlBody, lastMsg.getId(), thread.getId(), BILL_EMAIL)
+      : createThreadedDraft(replyTo, subj, htmlBody, lastMsg.getId(), thread.getId(), null);
+    if (!draftId) { Logger.log('TP draft FAILED (no draftId) — skipping label: ' + mpn + ' | replyTo: ' + replyTo); return; }
     hubPostDraft(thread.getId(), mpn, replyTo, subj, replyText, draftId, tpAdvice);
     hubLog('draft_created', 'TP reply: ' + mpn + ' | TP: ' + tp, {mpn: mpn, tp: tp, replyTo: replyTo});
-    Logger.log('TP reply draft: '+mpn+' | TP: '+tp);
+    Logger.log('TP reply draft: ' + mpn + ' | TP: ' + tp);
     thread.addLabel(label);
   });
 }
@@ -3225,6 +3307,12 @@ function processThreadWithAgent(thread, agentLabel) {
       deletePart(removeMpn, subject);
       hubLog('run', 'Agent removed from OEM EXCESS (David no-stock): ' + removeMpn, { mpn: removeMpn });
       Logger.log('Agent removed from OEM EXCESS: ' + removeMpn);
+      try {
+        var replyText = 'Removing ' + removeMpn + ' from OEM EXCESS.';
+        var replyHtml = '<div dir="ltr">' + replyText + getSignatureHTML() + '</div>';
+        lastMsg.createDraftReply(replyText, { htmlBody: replyHtml });
+        hubLog('run', 'Drafted David removal reply: ' + removeMpn);
+      } catch(replyErr) { Logger.log('remove_oem reply draft error: ' + replyErr); }
     }
     return;
   }
