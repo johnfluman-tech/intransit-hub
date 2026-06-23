@@ -398,7 +398,8 @@ async function handleChat(request, env) {
     // enriched context (sent by addonChat when available)
     mpn, full_thread, prior_quotes,
     oem_results, forte_results,
-    inbox_summary
+    inbox_summary,
+    agent_action, agent_reasoning
   } = await request.json();
   if (!message || !thread_id) return json({ error: 'thread_id and message required' }, 400);
 
@@ -461,7 +462,8 @@ Subject: ${subject || '(unknown)'}
 From: ${from_email || '(unknown)'}
 MPN: ${mpn || '(not extracted)'}
 ${full_thread ? `\nFULL THREAD:\n${full_thread}` : thread_snippet ? `Thread snippet: ${thread_snippet}` : ''}
-${draft_body ? `\nCurrent draft: "${draft_body}"` : ''}
+${agent_action ? `\nAGENT DECISION: action="${agent_action}"${agent_reasoning ? `\nAgent reasoning: ${agent_reasoning}` : ''}` : ''}
+${draft_body ? `\nDraft created by agent: "${draft_body}"` : ''}
 
 ## JOHN'S PRIOR SENT QUOTES for ${mpn || 'this part'}
 ${prior_quotes || 'No prior sent quotes found.'}

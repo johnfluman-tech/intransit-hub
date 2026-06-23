@@ -2550,20 +2550,38 @@ function addonChat(e) {
       }
     } catch(e4) { Logger.log('addonChat inbox scan error: ' + e4); }
 
+    // Last agent decision for this thread — tells Claude what draft was created and why
+    var agentDraftBody = '', agentReasoning = '', agentAction = '';
+    try {
+      var decResp = UrlFetchApp.fetch(HUB_URL + '/api/agent-decisions?thread_id=' + encodeURIComponent(threadId), {
+        headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+      });
+      var decData = JSON.parse(decResp.getContentText());
+      var decisions = decData.decisions || [];
+      if (decisions.length) {
+        agentDraftBody  = decisions[0].draft_body  || '';
+        agentReasoning  = decisions[0].reasoning   || '';
+        agentAction     = decisions[0].action      || '';
+      }
+    } catch(e5) { Logger.log('addonChat decision fetch error: ' + e5); }
+
     var chatResp = UrlFetchApp.fetch(HUB_URL + '/api/chat', {
       method: 'POST', contentType: 'application/json',
       headers: { Authorization: 'Bearer ' + HUB_SECRET },
       payload: JSON.stringify({
-        thread_id:     threadId,
-        message:       message,
-        subject:       subject,
-        from_email:    fromH,
-        mpn:           mpn || '',
-        full_thread:   fullThread,
-        prior_quotes:  priorQuotes,
-        oem_results:   oemResults,
-        forte_results: forteResults,
-        inbox_summary: inboxSummary || '(no other inbox threads)'
+        thread_id:        threadId,
+        message:          message,
+        subject:          subject,
+        from_email:       fromH,
+        mpn:              mpn || '',
+        full_thread:      fullThread,
+        prior_quotes:     priorQuotes,
+        oem_results:      oemResults,
+        forte_results:    forteResults,
+        inbox_summary:    inboxSummary || '(no other inbox threads)',
+        draft_body:       agentDraftBody,
+        agent_action:     agentAction,
+        agent_reasoning:  agentReasoning
       }),
       muteHttpExceptions: true
     });
