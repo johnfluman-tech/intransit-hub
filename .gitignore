@@ -1,3 +1,7 @@
 .dev.vars
 node_modules/
 .wrangler/
+*.jpg
+*.png
+*.jpeg
+

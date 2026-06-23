@@ -18,7 +18,7 @@ Phone: Toll (877) 677-5868 x101 · Local (949) 481-7935 x101
 6. **60-day duplicate check** before adding any MPN to Forte. If already there within 60 days, skip.
 7. **Skip @intransittech.com threads.** Internal emails need no draft help.
 8. **"Checking on it" sent = Forte entry required** — even if buyer gave no formal TP.
-9. **ALWAYS include an [ADVICE: ...] note** in every Gmail draft — even simple ones. Explain context, what action is needed, what to verify before sending, and any risks. Always end the advice with "Remove advice before sending." This is the standard process for all drafts.
+9. **No advice blocks in drafts.** Do not add yellow "Note for John" boxes or [ADVICE: ...] blocks to any email draft — John stopped using this feature.
 
 ---
 

@@ -1,7 +1,7 @@
 // ============================================================
-// COMPLETE SCRIPT v24 + HUB LOGGING — Replace ALL existing code with this
+// COMPLETE SCRIPT v25 + AI EMAIL AGENT — Replace ALL existing code with this
 // OEM EXCESS Automation — John Fluman / Intransit Technologies
-// Hub logging added: hubLog() tracks all runs, hubPostDraft() feeds Email Triage tab
+// v25: AI agent (Trigger 7) added — Claude reviews every inbox thread automatically
 // ============================================================
 
 var SPREADSHEET_ID    = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
@@ -12,6 +12,7 @@ var JOHN_EMAIL        = 'john.fluman@intransittech.com';
 var DAVID_EMAIL       = 'david@fortetechno.com';
 var BILL_EMAIL        = 'bill.pratt@intransittech.com';
 var DEB_EMAIL         = 'deb@intransittech.com';
+var BLOCKED_DOMAINS   = ['sourceschip.com', 'bulechip.com', 'feelchips.com'];
 var INCOMING_LABEL    = 'oem-nostock-seen';
 var FORTE_SHEET_ID    = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
 var IN_STOCK_ID       = '1iOFHUBiWRgA6EjtO2ujoGpz-8v1qTRkgCXSvCa2Gf54';
@@ -30,6 +31,132 @@ var MSG_BILL         = 'Bill will help with this request';
 var HUB_URL    = 'https://intransit-hub.intransit-sales.workers.dev';
 var HUB_SECRET = 'InTransit!Hub#2026';
 
+// ─── Dynamic blocked domains from D1 (5-min cache) ──────────
+function getBlockedDomains() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get('blocked_domains');
+  if (cached) return JSON.parse(cached);
+  try {
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/rules?type=blocked_domain', {
+      headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+    });
+    var data = JSON.parse(resp.getContentText());
+    var domains = (data.rules || []).map(function(r) { return r.key; });
+    if (domains.length) {
+      cache.put('blocked_domains', JSON.stringify(domains), 300);
+      return domains;
+    }
+  } catch(e) { Logger.log('getBlockedDomains error: ' + e); }
+  return BLOCKED_DOMAINS; // fallback to hardcoded
+}
+
+// ─── Sidebar action execution ────────────────────────────────
+// Dispatcher — routes action to the correct executor
+function executeAction(action, threadId, subject, fromH) {
+  var type = action.type || 'create_draft';
+  if (type === 'create_draft')      return executeCreateDraft(action, threadId, subject, fromH);
+  if (type === 'add_forte')         return executeAddForte(action);
+  if (type === 'remove_oem_excess') return executeRemoveOemExcess(action);
+  if (type === 'apply_label')       return executeApplyLabel(action, threadId);
+  if (type === 'update_rule')       return executeUpdateRule(action);
+  if (type === 'multi')             return executeMulti(action, threadId, subject, fromH);
+  return { ok: false, message: 'Unknown action type: ' + type };
+}
+
+function executeCreateDraft(action, threadId, subject, fromH) {
+  var thread = GmailApp.getThreadById(threadId);
+  if (!thread) return { ok: false, message: 'Thread not found.' };
+  var msgs = thread.getMessages();
+  var lastMsg = msgs[msgs.length - 1];
+  var htmlBody = '<div dir="ltr">' + action.body.replace(/\n/g, '<br>') + getSignatureHTML() + '</div>';
+  var draft = lastMsg.createDraftReply('', { htmlBody: htmlBody });
+  if (!draft) return { ok: false, message: 'Draft creation failed.' };
+  hubPostDraft(threadId, null, fromH || lastMsg.getFrom(), subject, action.body, draft.getId(), action.advice || '');
+  return { ok: true, message: '✅ Draft created', draftId: draft.getId() };
+}
+
+function executeCreateAndSendDraft(action, threadId, subject, fromH) {
+  var thread = GmailApp.getThreadById(threadId);
+  if (!thread) return { ok: false, message: 'Thread not found.' };
+  var msgs = thread.getMessages();
+  var lastMsg = msgs[msgs.length - 1];
+  // No advice block in outbound email
+  var htmlBody = '<div dir="ltr">' + action.body.replace(/\n/g, '<br>') + getSignatureHTML() + '</div>';
+  var draft = lastMsg.createDraftReply('', { htmlBody: htmlBody });
+  if (!draft) return { ok: false, message: 'Draft creation failed.' };
+  var draftId = draft.getId();
+  var token = ScriptApp.getOAuthToken();
+  var sendResp = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/send', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ id: draftId }),
+    muteHttpExceptions: true
+  });
+  var sendData = JSON.parse(sendResp.getContentText());
+  if (sendData.error) return { ok: false, message: 'Send failed: ' + (sendData.error.message || '') };
+  hubLog('run', 'executeCreateAndSendDraft: sent — ' + subject, {});
+  return { ok: true, message: '✅ Sent to ' + (fromH || lastMsg.getFrom()) };
+}
+
+function executeAddForte(action) {
+  if (!action.mpn) return { ok: false, message: 'add_forte requires mpn.' };
+  if (!action.qty) return { ok: false, message: 'add_forte requires qty — cardinal rule: never add without QTY.' };
+  try {
+    addToForteSheet(action.mpn, action.qty, action.tp || '', action.country || '', '');
+    hubLog('run', 'executeAddForte: ' + action.mpn, { qty: action.qty, tp: action.tp });
+    return { ok: true, message: '✅ Added ' + action.mpn + ' to Forte (QTY: ' + action.qty + ')' };
+  } catch(e) { return { ok: false, message: 'Forte error: ' + e }; }
+}
+
+function executeRemoveOemExcess(action) {
+  if (!action.mpn) return { ok: false, message: 'remove_oem_excess requires mpn.' };
+  try {
+    deletePart(action.mpn, 'sidebar-remove');
+    hubLog('run', 'executeRemoveOemExcess: ' + action.mpn, {});
+    return { ok: true, message: '✅ Removed ' + action.mpn + ' from OEM EXCESS' };
+  } catch(e) { return { ok: false, message: 'Remove error: ' + e }; }
+}
+
+function executeApplyLabel(action, threadId) {
+  if (!action.label) return { ok: false, message: 'apply_label requires label.' };
+  try {
+    var thread = GmailApp.getThreadById(threadId);
+    if (!thread) return { ok: false, message: 'Thread not found.' };
+    var lbl = GmailApp.getUserLabelByName(action.label) || GmailApp.createLabel(action.label);
+    thread.addLabel(lbl);
+    return { ok: true, message: '✅ Applied label: ' + action.label };
+  } catch(e) { return { ok: false, message: 'Label error: ' + e }; }
+}
+
+function executeUpdateRule(action) {
+  if (!action.rule_type || !action.key) return { ok: false, message: 'update_rule requires rule_type and key.' };
+  try {
+    var method = action.delete ? 'DELETE' : 'POST';
+    UrlFetchApp.fetch(HUB_URL + '/api/rules', {
+      method: method, contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ type: action.rule_type, key: action.key, value: action.value || 'true', notes: action.notes || '' }),
+      muteHttpExceptions: true
+    });
+    if (action.rule_type === 'blocked_domain') CacheService.getScriptCache().remove('blocked_domains');
+    return { ok: true, message: (action.delete ? '✅ Deleted rule: ' : '✅ Updated rule: ') + action.rule_type + '/' + action.key };
+  } catch(e) { return { ok: false, message: 'Rule update error: ' + e }; }
+}
+
+function executeMulti(action, threadId, subject, fromH) {
+  var actions = action.actions || [];
+  var messages = [];
+  for (var i = 0; i < actions.length; i++) {
+    var result = executeAction(actions[i], threadId, subject, fromH);
+    messages.push(result.message);
+    if (!result.ok) {
+      messages.push('⛔ Stopped at step ' + (i + 1));
+      return { ok: false, message: messages.join('\n') };
+    }
+  }
+  return { ok: true, message: messages.join('\n') };
+}
+
 function hubLog(eventType, summary, details) {
   try {
     UrlFetchApp.fetch(HUB_URL + '/api/logs', {
@@ -42,16 +169,50 @@ function hubLog(eventType, summary, details) {
   } catch(e) { Logger.log('hubLog error: ' + e); }
 }
 
-function hubPostDraft(threadId, mpn, sender, subject, draftContent) {
+function hubPostDraft(threadId, mpn, sender, subject, draftContent, gmailDraftId, adviceText) {
+  var content = draftContent || '';
+  if (adviceText) content += '\n\n[ADVICE_STORED]:' + adviceText;
+  if (gmailDraftId) content += '\n\n[GMAIL_DRAFT:' + gmailDraftId + ']';
   try {
     UrlFetchApp.fetch(HUB_URL + '/api/drafts', {
       method: 'post', contentType: 'application/json',
       headers: { Authorization: 'Bearer ' + HUB_SECRET },
       payload: JSON.stringify({ thread_id: threadId, mpn: mpn, sender: sender,
-                                subject: subject, draft_content: draftContent }),
+                                subject: subject, draft_content: content }),
       muteHttpExceptions: true,
     });
   } catch(e) { Logger.log('hubPostDraft error: ' + e); }
+}
+
+function hubLearn(feedback, draftBody, correctedBody, threadId, subject, sender, mpn, action) {
+  try {
+    UrlFetchApp.fetch(HUB_URL + '/api/learn', {
+      method: 'post', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        feedback: feedback || '',
+        draft_body: draftBody || '',
+        corrected_body: correctedBody || '',
+        thread_id: threadId || '',
+        subject: subject || '',
+        sender: sender || '',
+        mpn: mpn || '',
+        action: action || '',
+      }),
+      muteHttpExceptions: true,
+    });
+  } catch(e) { Logger.log('hubLearn error: ' + e); }
+}
+
+function hubPatchEntry(id, payload) {
+  try {
+    UrlFetchApp.fetch(HUB_URL + '/api/drafts/' + id, {
+      method: 'PATCH', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true,
+    });
+  } catch(e) { Logger.log('hubPatchEntry error: ' + e); }
 }
 
 function hubPostInbox(threadId, mpn, sender, subject, prediction) {
@@ -157,6 +318,99 @@ function scanInboxForPreview() {
   }
 }
 
+// Archive any inbox emails from blocked domains immediately
+function archiveBlockedDomains() {
+  var BLOCKED_DOMAINS = getBlockedDomains();
+  BLOCKED_DOMAINS.forEach(function(domain) {
+    var threads = GmailApp.search('in:inbox from:' + domain, 0, 50);
+    if (!threads.length) return;
+    threads.forEach(function(thread) {
+      thread.moveToArchive();
+      Logger.log('Blocked & archived: ' + domain + ' | ' + thread.getFirstMessageSubject());
+    });
+    hubLog('run', 'Blocked & archived ' + threads.length + ' email(s) from ' + domain);
+  });
+}
+
+// Auto-fix wrong drafts: fetch 'wrong' entries, call Claude to correct, replace Gmail draft
+function fixWrongDrafts() {
+  try {
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/drafts?status=wrong&limit=20', {
+      method: 'get', headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true,
+    });
+    if (resp.getResponseCode() !== 200) return;
+    var wrongEntries = JSON.parse(resp.getContentText()).rows || [];
+    if (!wrongEntries.length) return;
+    Logger.log('fixWrongDrafts: ' + wrongEntries.length + ' entries to fix');
+
+    wrongEntries.forEach(function(entry) {
+      try {
+        var correctionNote = entry.sent_content || '';
+        if (!correctionNote.trim()) { Logger.log('fixWrongDrafts: no correction note for #' + entry.id); return; }
+
+        var rawContent = entry.draft_content || '';
+        var draftIdMatch = rawContent.match(/\[GMAIL_DRAFT:([^\]]+)\]/);
+        var gmailDraftId = draftIdMatch ? draftIdMatch[1] : null;
+        var cleanContent = rawContent.replace(/\n*\[GMAIL_DRAFT:[^\]]+\][\s]*/g, '').trim();
+
+        // Ask Claude to generate corrected message body
+        var claudeResp = UrlFetchApp.fetch(HUB_URL + '/api/claude', {
+          method: 'post', contentType: 'application/json',
+          headers: { Authorization: 'Bearer ' + HUB_SECRET },
+          payload: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 600,
+            system: 'You are an email assistant for Intransit Technologies. Given the original draft body and a correction note, return ONLY the corrected message body — no greeting, no signature, no explanation. Include an [ADVICE: <what was corrected and why>. <what John should verify before sending>. Remove advice before sending.] block at the end.',
+            messages: [{ role: 'user', content: 'Original draft:\n' + cleanContent + '\n\nCorrection:\n' + correctionNote + '\n\nCorrected body:' }]
+          }),
+          muteHttpExceptions: true,
+        });
+        var claudeData = JSON.parse(claudeResp.getContentText());
+        var correctedText = (claudeData.content && claudeData.content[0] && claudeData.content[0].text) || '';
+        if (!correctedText.trim()) { Logger.log('fixWrongDrafts: Claude returned nothing for #' + entry.id); return; }
+
+        // Delete the wrong Gmail draft if we know its ID
+        if (gmailDraftId) {
+          UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + gmailDraftId, {
+            method: 'DELETE', headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true,
+          });
+          Logger.log('fixWrongDrafts: deleted draft ' + gmailDraftId);
+        }
+
+        // Get thread and build corrected draft
+        var thread = GmailApp.getThreadById(entry.thread_id);
+        if (!thread) { Logger.log('fixWrongDrafts: thread not found: ' + entry.thread_id); return; }
+        var messages = thread.getMessages();
+        var lastMsg = messages[messages.length - 1];
+        var origMsg = null;
+        for (var i = 0; i < messages.length; i++) {
+          if (messages[i].getFrom().indexOf(JOHN_EMAIL) < 0 && messages[i].getFrom().indexOf('intransittech') < 0) {
+            origMsg = messages[i]; break;
+          }
+        }
+        var fixAdvice = 'This draft was corrected based on your feedback: "' + correctionNote.substring(0, 120) + '". Verify it reads correctly before sending.';
+        var htmlBody = origMsg ? buildDraftHTML(correctedText, origMsg) : buildSimpleHTML(correctedText);
+        var replyTo = entry.sender || extractBuyerEmail(lastMsg.getFrom());
+        var subj = entry.subject || ('Re: ' + thread.getFirstMessageSubject());
+        var newDraftId = createThreadedDraft(replyTo, subj, htmlBody, lastMsg.getId(), entry.thread_id, null);
+
+        if (newDraftId) {
+          hubPostDraft(entry.thread_id, entry.mpn, replyTo, subj, correctedText, newDraftId, fixAdvice);
+          hubLog('draft_created', 'Auto-fixed: ' + (entry.mpn || subj), { mpn: entry.mpn, fixed_from: entry.id });
+          Logger.log('fixWrongDrafts: created new draft ' + newDraftId + ' for thread ' + entry.thread_id);
+        }
+
+        hubPatchEntry(entry.id, { action: 'fixed' });
+
+      } catch(eInner) {
+        Logger.log('fixWrongDrafts inner error #' + entry.id + ': ' + eInner.toString());
+      }
+    });
+  } catch(e) {
+    Logger.log('fixWrongDrafts outer error: ' + e.toString());
+  }
+}
+
 function getRemoteConfig() {
   try {
     var resp = UrlFetchApp.fetch(HUB_URL + '/api/configs/email_automation', {
@@ -233,6 +487,21 @@ function getSignatureHTML() {
     + '<div><i><span style="color:gray;font-family:Arial,sans-serif;font-size:7.5pt">An ISO 9001 Certified Company</span></i></div>'
     + '<div><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:8pt">Toll (877) 677-5868 x101 - Local (949) 481-7935 x101</span></div>'
     + '<br><div><span style="color:rgb(166,166,166);font-family:Calibri,sans-serif;font-size:8pt">The information contained in this communication and its attachment(s) is intended only for the use of the individual to whom it is addressed and may contain information that is privileged, confidential, or exempt from disclosure. If the reader of this message is not the intended recipient, you are hereby notified that any dissemination, distribution, or copying of this communication is strictly prohibited. If you have received this communication in error, please notify <a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a> and delete the communication without retaining any copies. Thank you.</span></div>';
+}
+
+// Returns a styled yellow ADVICE div for insertion into draft HTML body.
+// adviceText is the plain-text advice string (without [ADVICE: ...] wrapper is fine).
+function getAdviceHTML(adviceText) {
+  if (!adviceText) return '';
+  var clean = adviceText.replace(/^\[ADVICE:\s*/i, '').replace(/\]\s*$/, '').trim();
+  return '<div style="background:#fff3cd;border:1px solid #ffc107;border-left:4px solid #e6a817;padding:8px 14px;margin:14px 0 6px 0;font-family:Arial,sans-serif;font-size:10pt;color:#664d03;border-radius:3px;">'
+    + '<b style="font-size:10pt;">&#128161; Note for John (remove before sending):</b><br>'
+    + clean + '</div>';
+}
+
+// Builds simple HTML body without a quoted original (used when origMsg is not available).
+function buildSimpleHTML(bodyText) {
+  return '<div dir="ltr">' + bodyText + getSignatureHTML() + '</div>';
 }
 
 function buildDraftHTML(replyText, originalMessage) {
@@ -357,6 +626,7 @@ function extractNetcompsQtyReq(htmlBody) {
 }
 
 function extractNetcompsTgtPrice(plainBody, htmlBody) {
+  // 1. HTML table: look for class="partlist" or any table with the right column structure
   if (htmlBody) {
     var tableMatch = htmlBody.match(/class="partlist"[\s\S]*?<\/tr>([\s\S]*?)<\/table>/i);
     if (tableMatch) {
@@ -372,6 +642,23 @@ function extractNetcompsTgtPrice(plainBody, htmlBody) {
       }
     }
   }
+  // 2. Plain text table: find the header row, read TgtPrice column by position
+  if (plainBody) {
+    var lines = plainBody.split('\n');
+    for (var li = 0; li < lines.length - 1; li++) {
+      if (/PartNumber[\s\t]+Description[\s\t]+QtyListed[\s\t]+QtyReq[\s\t]+TgtPrice/i.test(lines[li])) {
+        var dataLine = lines[li + 1].trim();
+        var cols = dataLine.split(/\t|\s{2,}/);
+        if (cols.length >= 5) {
+          var tpRaw = cols[cols.length - 1].trim();
+          var tpPrice = parseFloat(tpRaw.replace(/[^0-9.]/g, ''));
+          if (tpPrice > 0 && tpPrice < 100000) return '$' + tpPrice;
+        }
+        break;
+      }
+    }
+  }
+  // 3. Explicit TP: label
   if (plainBody) {
     var m2 = plainBody.match(/\bTP[:\s]+\$?(\d+(?:\.\d+)?)\s*(?:usd|USD)?/i);
     if (m2 && parseFloat(m2[1]) > 0) return '$' + parseFloat(m2[1]);
@@ -690,7 +977,7 @@ function checkDavidNoStockEmails() {
     var subject = msg.getSubject();
     var mpn = extractMPN(subject);
     if (mpn) {
-      var davidBody = '<div dir="ltr">Removed - MPN: '+mpn+getSignatureHTML()+'</div>';
+      var davidBody = buildSimpleHTML('Removed - MPN: ' + mpn);
       createThreadedDraft(DAVID_EMAIL,'Re: '+subject,davidBody,msg.getId(),thread.getId(),null);
       hubLog('draft_created', 'David removal draft: ' + mpn, {mpn: mpn});
       Logger.log('David draft created: ' + mpn);
@@ -703,6 +990,93 @@ function checkDavidNoStockEmails() {
 }
 
 // ============================================================
+// ONE-TIME: find every thread with more than one draft, keep the non-agent one, delete the rest.
+// Handles IC Source and any other RFQ type that got double-drafted.
+function cleanDuplicateDrafts() {
+  var allDrafts = GmailApp.getDrafts();
+  hubLog('run', 'cleanDuplicateDrafts: checking ' + allDrafts.length + ' total drafts');
+
+  // Group drafts by thread ID
+  var byThread = {};
+  allDrafts.forEach(function(draft) {
+    try {
+      var tid = draft.getMessage().getThread().getId();
+      if (!byThread[tid]) byThread[tid] = [];
+      byThread[tid].push(draft);
+    } catch(e) {}
+  });
+
+  var deleted = 0, kept = 0;
+  Object.keys(byThread).forEach(function(tid) {
+    var drafts = byThread[tid];
+    if (drafts.length <= 1) return; // no duplicate
+
+    // Score each draft: prefer non-agent drafts (agent drafts contain "[AGENT:")
+    // Within same type, prefer the most recent (assume array order = creation order, keep last)
+    var nonAgent = drafts.filter(function(d) {
+      try { return d.getMessage().getPlainBody().indexOf('[AGENT:') < 0; } catch(e) { return false; }
+    });
+    var agentDrafts = drafts.filter(function(d) {
+      try { return d.getMessage().getPlainBody().indexOf('[AGENT:') >= 0; } catch(e) { return true; }
+    });
+
+    var toKeep   = nonAgent.length ? nonAgent[nonAgent.length - 1] : drafts[drafts.length - 1];
+    var toDelete = drafts.filter(function(d) { return d !== toKeep; });
+
+    toDelete.forEach(function(d) {
+      try {
+        var body = d.getMessage().getPlainBody().substring(0, 60).replace(/\n/g, ' ');
+        d.deleteDraft();
+        Logger.log('DELETED duplicate draft [' + tid + ']: "' + body + '"');
+        deleted++;
+      } catch(e) {
+        Logger.log('ERROR deleting draft: ' + e.toString());
+      }
+    });
+    kept++;
+  });
+
+  Logger.log('cleanDuplicateDrafts done — threads cleaned: ' + kept + ', drafts deleted: ' + deleted);
+  hubLog('run', 'cleanDuplicateDrafts: deleted ' + deleted + ' duplicate drafts across ' + kept + ' threads');
+}
+
+// ONE-TIME cleanup — create missing "Removed - MPN: X" drafts for any David no-stock
+// emails that the agent grabbed before checkDavidNoStockEmails could run.
+// Run once from the Apps Script editor after pasting this script.
+function fixMissedDavidEmails() {
+  var query = 'from:' + DAVID_EMAIL +
+    ' (subject:"no stk" OR subject:"no stock" OR subject:"removed" OR subject:"stock sold" OR "cant share" OR "can\'t share")' +
+    ' in:inbox newer_than:14d';
+  var threads = GmailApp.search(query, 0, 50);
+  var noStockLabel = GmailApp.getUserLabelByName(INCOMING_LABEL) || GmailApp.createLabel(INCOMING_LABEL);
+  var created = [], failed = [];
+
+  threads.forEach(function(thread) {
+    var labels = thread.getLabels().map(function(l) { return l.getName(); });
+    if (labels.indexOf(INCOMING_LABEL) >= 0) {
+      Logger.log('SKIP (already handled): ' + thread.getFirstMessageSubject());
+      return;
+    }
+    var msg     = thread.getMessages()[thread.getMessageCount() - 1];
+    var subject = msg.getSubject();
+    var mpn     = extractMPN(subject);
+    if (mpn) {
+      var body = buildSimpleHTML('Removed - MPN: ' + mpn);
+      createThreadedDraft(DAVID_EMAIL, 'Re: ' + subject, body, msg.getId(), thread.getId(), null);
+      hubLog('draft_created', 'fixMissedDavidEmails: ' + mpn, { mpn: mpn });
+      Logger.log('CREATED: Removed - MPN: ' + mpn);
+      created.push(mpn);
+    } else {
+      Logger.log('NO MPN: ' + subject);
+      failed.push(subject);
+    }
+    thread.addLabel(noStockLabel);
+  });
+
+  Logger.log('fixMissedDavidEmails done — created: [' + created.join(', ') + ']');
+  if (failed.length) Logger.log('Could not extract MPN from: ' + JSON.stringify(failed));
+}
+
 // TRIGGER 2 — Sent "Removed - MPN:" → delete from OEM EXCESS
 // ============================================================
 function checkSentRemovals() {
@@ -734,7 +1108,8 @@ function checkSentRemovals() {
 function checkInboxForTPReplies() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkInboxForTPReplies: disabled via hub config'); return; }
-  var query = 'in:inbox "minimum line requirement" -label:oem-tp-processed';
+  var BLOCKED_DOMAINS = getBlockedDomains();
+  var query = 'in:inbox "minimum line requirement" -label:oem-tp-processed ' + BLOCKED_DOMAINS.map(function(d){return '-from:'+d;}).join(' ');
   var threads = GmailApp.search(query,0,20);
   hubLog('run', 'checkInboxForTPReplies: ' + threads.length + ' thread(s)');
   if (!threads.length) return;
@@ -784,13 +1159,16 @@ function checkInboxForTPReplies() {
       if (messages[i].getFrom().indexOf(JOHN_EMAIL)<0&&messages[i].getFrom().indexOf('intransittech')<0){origMsg=messages[i];break;}
     }
     var replyText = hasBillExt ? MSG_BILL : MSG_CHECKING;
-    var htmlBody = origMsg ? buildDraftHTML(replyText,origMsg) : '<div dir="ltr">'+replyText+getSignatureHTML()+'</div>';
+    var tpAdvice = hasBillExt
+      ? 'Buyer provided TP for BILL EXT part ' + mpn + '. This routes to bill.pratt@intransittech.com — do NOT add to Forte. Bill will follow up directly with the buyer.'
+      : 'Buyer replied with TP of ' + tp + ' for ' + mpn + ' (IS in OEM EXCESS). Sending triggers automatic Forte entry. Verify TP and QTY are correct in the thread before sending.';
+    var htmlBody = origMsg ? buildDraftHTML(replyText, origMsg) : buildSimpleHTML(replyText);
     var subj = 'Re: '+thread.getFirstMessageSubject();
     var draftId = hasBillExt
       ? createThreadedDraft(replyTo,subj,htmlBody,lastMsg.getId(),thread.getId(),BILL_EMAIL)
       : createThreadedDraft(replyTo,subj,htmlBody,lastMsg.getId(),thread.getId(),null);
     if (!draftId) { Logger.log('TP draft FAILED (no draftId) — skipping label: '+mpn+' | replyTo: '+replyTo); return; }
-    hubPostDraft(thread.getId(), mpn, replyTo, subj, replyText);
+    hubPostDraft(thread.getId(), mpn, replyTo, subj, replyText, draftId, tpAdvice);
     hubLog('draft_created', 'TP reply: ' + mpn + ' | TP: ' + tp, {mpn: mpn, tp: tp, replyTo: replyTo});
     Logger.log('TP reply draft: '+mpn+' | TP: '+tp);
     thread.addLabel(label);
@@ -803,9 +1181,15 @@ function checkInboxForTPReplies() {
 function checkInboxForNewRFQs() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkInboxForNewRFQs: disabled via hub config'); return; }
+  // Archive blocked domains immediately
+  try { archiveBlockedDomains(); } catch(e) { Logger.log('archiveBlockedDomains error: ' + e); }
+  // Auto-fix any drafts John marked wrong since last run
+  try { fixWrongDrafts(); } catch(e) { Logger.log('fixWrongDrafts error: ' + e); }
   // Post inbox predictions to D1 for the Training tab (read-only, no drafts created)
   try { scanInboxForPreview(); } catch(e) { Logger.log('scanInboxForPreview error: ' + e); }
-  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed';
+  var BLOCKED_DOMAINS = getBlockedDomains();
+  var _blockedFromFilter = BLOCKED_DOMAINS.map(function(d){return '-from:'+d;}).join(' ');
+  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
   var threads = GmailApp.search(query,0,10);
   hubLog('run', 'checkInboxForNewRFQs: ' + threads.length + ' thread(s)');
   if (!threads.length) return;
@@ -875,7 +1259,7 @@ function checkInboxForNewRFQs() {
       oemResults.some(function(r){return r.notes.indexOf('BILL EXT 117')>=0;})
       || fullBody.indexOf('BILL EXT 117') >= 0
     );
-    var has2k = oemResults.length > 0 && oemResults.some(function(r){return r.notes.indexOf('$2000')>=0;});
+    var has2k = oemResults.length > 0 && oemResults.some(function(r){return r.notes.indexOf('$2000')>=0||r.notes.indexOf('$2,000')>=0;});
     var tpMsg = (has2k && !hasBillExt) ? MSG_NEED_TP_2000 : MSG_NEED_TP_500;
 
     // IN STOCK branch
@@ -900,9 +1284,10 @@ function checkInboxForNewRFQs() {
           + 'Price: $[FILL IN]<br><br>'
           + 'There is a $100 min on stock items'
           + priorQuotes;
-        var hbStock = origMsg?buildDraftHTML(stockInfo,origMsg):'<div dir="ltr">'+stockInfo+getSignatureHTML()+'</div>';
-        createThreadedDraft(replyTo,'Re: '+subject,hbStock,replyToId,threadId,null);
-        hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, stockInfo);
+        var stockAdvice = 'RFQ for ' + mpn + ' which is OWN STOCK. Fill in the price before sending — intentionally left as $[FILL IN]. There is a $100 minimum on stock items. Do not send until price is filled in.';
+        var hbStock = origMsg ? buildDraftHTML(stockInfo, origMsg) : buildSimpleHTML(stockInfo);
+        var draftId = createThreadedDraft(replyTo,'Re: '+subject,hbStock,replyToId,threadId,null);
+        hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, stockInfo, draftId, stockAdvice);
         hubLog('draft_created', 'In-stock draft: '+mpn, {mpn:mpn, type:'own_stock', qty:sr.qty});
         Logger.log('IN STOCK own draft: '+mpn);
         handled = true;
@@ -918,9 +1303,12 @@ function checkInboxForNewRFQs() {
           replyTextW3 = stanQuoteText;
           Logger.log('Stan QUOTED draft: '+mpn);
         }
-        htmlBodyW3 = origMsg?buildDraftHTML(replyTextW3,origMsg):'<div dir="ltr">'+replyTextW3+getSignatureHTML()+'</div>';
-        createThreadedDraft(replyTo,'Re: '+subject,htmlBodyW3,replyToId,threadId,null);
-        hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, replyTextW3);
+        var stanAdvice = oemResults.length
+          ? 'Warehouse#3 stock for ' + mpn + ' (Stan quoted) + OEM EXCESS match. Stan quote used as main reply. Verify Stan price is still current before sending.'
+          : 'Warehouse#3 stock for ' + mpn + ' using Stan\'s prior quoted price. Verify price is still valid before sending.';
+        htmlBodyW3 = origMsg ? buildDraftHTML(replyTextW3, origMsg) : buildSimpleHTML(replyTextW3);
+        var draftId = createThreadedDraft(replyTo,'Re: '+subject,htmlBodyW3,replyToId,threadId,null);
+        hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, replyTextW3, draftId, stanAdvice);
         hubLog('draft_created', 'Stan quoted draft: '+mpn, {mpn:mpn, type:'stan_quoted'});
         handled = true;
 
@@ -928,17 +1316,23 @@ function checkInboxForNewRFQs() {
         addToStanSheet(w3Mpn, country, qty, tp);
         if (oemResults.length) {
           var oemReplyText, oemHtmlBody;
+          var oemDraftId;
           if (tp) {
             oemReplyText = hasBillExt ? MSG_BILL : MSG_CHECKING;
-            oemHtmlBody = origMsg?buildDraftHTML(oemReplyText,origMsg):'<div dir="ltr">'+oemReplyText+getSignatureHTML()+'</div>';
-            if (hasBillExt) createThreadedDraft(replyTo,'Re: '+subject,oemHtmlBody,replyToId,threadId,BILL_EMAIL);
-            else createThreadedDraft(replyTo,'Re: '+subject,oemHtmlBody,replyToId,threadId,null);
+            var w3OemAdvice = hasBillExt
+              ? 'Buyer has TP for BILL EXT part ' + mpn + '. W3 added to Stan sheet. This routes to bill.pratt@intransittech.com — do NOT add to Forte.'
+              : 'Buyer has TP (' + tp + ') for ' + mpn + ' (W3 + OEM EXCESS). W3 added to Stan sheet. Sending triggers automatic Forte entry. Verify TP and QTY before sending.';
+            oemHtmlBody = origMsg ? buildDraftHTML(oemReplyText, origMsg) : buildSimpleHTML(oemReplyText);
+            if (hasBillExt) oemDraftId = createThreadedDraft(replyTo,'Re: '+subject,oemHtmlBody,replyToId,threadId,BILL_EMAIL);
+            else oemDraftId = createThreadedDraft(replyTo,'Re: '+subject,oemHtmlBody,replyToId,threadId,null);
           } else {
             oemReplyText = tpMsg;
-            oemHtmlBody = origMsg?buildDraftHTML(oemReplyText,origMsg):'<div dir="ltr">'+oemReplyText+getSignatureHTML()+'</div>';
-            createThreadedDraft(replyTo,'Re: '+subject,oemHtmlBody,replyToId,threadId,null);
+            var w3OemNoTpAdvice = 'New RFQ for ' + mpn + ' (W3 + OEM EXCESS). W3 added to Stan sheet. No TP from buyer yet — asking for target price (' + (has2k ? '$2,000' : '$500') + ' min). No Forte action needed yet.';
+            oemHtmlBody = origMsg ? buildDraftHTML(oemReplyText, origMsg) : buildSimpleHTML(oemReplyText);
+            oemDraftId = createThreadedDraft(replyTo,'Re: '+subject,oemHtmlBody,replyToId,threadId,null);
           }
-          hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, oemReplyText);
+          var w3AdviceForHub = tp ? w3OemAdvice : w3OemNoTpAdvice;
+          hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, oemReplyText, oemDraftId, w3AdviceForHub);
           hubLog('draft_created', 'W3+OEM draft: '+mpn, {mpn:mpn, type:'w3_oem', tp:tp||null});
           Logger.log('W3 not quoted + OEM draft for '+mpn);
           handled = true;
@@ -954,7 +1348,7 @@ function checkInboxForNewRFQs() {
       var forteMatches = checkForteForMPN(mpn,3650);
       var quotedEntry = null;
       for (var f=0;f<forteMatches.length;f++){if(forteMatches[f].status==='QUOTED'&&forteMatches[f].colH){quotedEntry=forteMatches[f];break;}}
-      var replyText2, htmlBody2, draftType;
+      var replyText2, htmlBody2, draftType, draftId2, oemAdvice;
       if (quotedEntry) {
         var quotedPrice = quotedEntry.colH;
         if (quotedPrice && !isNaN(parseFloat(quotedPrice))) {
@@ -962,25 +1356,29 @@ function checkInboxForNewRFQs() {
         }
         replyText2 = quotedPrice + (quotedEntry.colI?' | '+quotedEntry.colI:'');
         draftType = 'forte_quoted';
-        htmlBody2 = origMsg?buildDraftHTML(replyText2,origMsg):'<div dir="ltr">'+replyText2+getSignatureHTML()+'</div>';
-        createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,null);
+        oemAdvice = 'Prior QUOTED Forte entry found for ' + mpn + ' at ' + quotedPrice + '. Verify this price is still valid and the OEM can still supply before sending.';
+        htmlBody2 = origMsg ? buildDraftHTML(replyText2, origMsg) : buildSimpleHTML(replyText2);
+        draftId2 = createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,null);
         Logger.log('QUOTED Forte draft: '+mpn);
       } else if (tp) {
         if (hasBillExt) {
           replyText2 = MSG_BILL; draftType = 'bill';
-          htmlBody2 = origMsg?buildDraftHTML(MSG_BILL,origMsg):'<div dir="ltr">'+MSG_BILL+getSignatureHTML()+'</div>';
-          createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,BILL_EMAIL);
+          oemAdvice = 'Buyer has TP (' + tp + ') for BILL EXT part ' + mpn + '. Routes to bill.pratt@intransittech.com — do NOT add to Forte. Bill handles this one.';
+          htmlBody2 = origMsg ? buildDraftHTML(MSG_BILL, origMsg) : buildSimpleHTML(MSG_BILL);
+          draftId2 = createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,BILL_EMAIL);
         } else {
           replyText2 = MSG_CHECKING; draftType = 'checking';
-          htmlBody2 = origMsg?buildDraftHTML(MSG_CHECKING,origMsg):'<div dir="ltr">'+MSG_CHECKING+getSignatureHTML()+'</div>';
-          createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,null);
+          oemAdvice = 'Buyer gave TP of ' + tp + ' for ' + mpn + ' (IS in OEM EXCESS). Sending triggers automatic Forte entry. Verify TP and QTY are correct before sending.';
+          htmlBody2 = origMsg ? buildDraftHTML(MSG_CHECKING, origMsg) : buildSimpleHTML(MSG_CHECKING);
+          draftId2 = createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,null);
         }
       } else {
         replyText2 = tpMsg; draftType = 'need_tp';
-        htmlBody2 = origMsg?buildDraftHTML(tpMsg,origMsg):'<div dir="ltr">'+tpMsg+getSignatureHTML()+'</div>';
-        createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,null);
+        oemAdvice = 'New RFQ for ' + mpn + ' which IS in OEM EXCESS. No TP from buyer yet — asking for target price (' + (has2k ? '$2,000' : '$500') + ' min). No Forte action needed yet.';
+        htmlBody2 = origMsg ? buildDraftHTML(tpMsg, origMsg) : buildSimpleHTML(tpMsg);
+        draftId2 = createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,null);
       }
-      hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, replyText2);
+      hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, replyText2, draftId2, oemAdvice);
       hubLog('draft_created', 'OEM draft: '+mpn+' ('+draftType+')', {mpn:mpn, type:draftType, tp:tp||null, country:country});
       Logger.log('OEM only draft: '+mpn);
       handled = true;
@@ -1099,6 +1497,11 @@ function checkInboxForPaymentAdvice() {
   if (!threads.length) return;
   var label = GmailApp.getUserLabelByName('oem-payment-forwarded')||GmailApp.createLabel('oem-payment-forwarded');
   threads.forEach(function(thread) {
+    var threadLabelNames = thread.getLabels().map(function(l){return l.getName();});
+    if (threadLabelNames.indexOf('oem-payment-forwarded') >= 0) {
+      Logger.log('Payment advice already forwarded (label present): ' + thread.getFirstMessageSubject());
+      return;
+    }
     var messages = thread.getMessages();
     var firstMsg = messages[0];
     if (firstMsg.getFrom().toLowerCase().indexOf('intransittech.com') >= 0) {
@@ -1182,7 +1585,1177 @@ function setupTriggers() {
   ScriptApp.newTrigger('checkInboxForNewRFQs').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkSentCheckingReplies').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
-  Logger.log('All 6 triggers installed.');
+  ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger('runEmailAgent').timeBased().everyMinutes(5).create();
+  Logger.log('All 7 triggers installed.');
+}
+
+// ============================================================
+// ONE-TIME: Fix all existing inbox drafts — add ADVICE blocks
+// Run once manually from Apps Script editor to retrofit all drafts.
+// ============================================================
+
+function extractDraftHtmlBody(payload) {
+  if (!payload) return null;
+  if (payload.mimeType === 'text/html' && payload.body && payload.body.data) {
+    try { return Utilities.newBlob(Utilities.base64Decode(payload.body.data.replace(/-/g,'+').replace(/_/g,'/'))).getDataAsString(); } catch(e) { return null; }
+  }
+  var parts = payload.parts || [];
+  for (var i = 0; i < parts.length; i++) {
+    var r = extractDraftHtmlBody(parts[i]);
+    if (r) return r;
+  }
+  return null;
+}
+
+function fixAllDraftsAddAdvice() {
+  var token = ScriptApp.getOAuthToken();
+  var listResp = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=100', {
+    headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true
+  });
+  var listData = JSON.parse(listResp.getContentText());
+  var drafts = listData.drafts || [];
+  Logger.log('fixAllDraftsAddAdvice: ' + drafts.length + ' drafts found');
+
+  var fixed = 0, skipped = 0, errors = 0;
+
+  drafts.forEach(function(stub) {
+    try {
+      Utilities.sleep(800);
+      var draftResp = UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + stub.id + '?format=full',
+        { headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true }
+      );
+      var draft = JSON.parse(draftResp.getContentText());
+      var headers = (draft.message && draft.message.payload && draft.message.payload.headers) || [];
+      var toHeader = '', subjectHeader = '', inReplyTo = '', references = '', ccHeader = '';
+      headers.forEach(function(h) {
+        if (h.name === 'To')          toHeader      = h.value;
+        if (h.name === 'Subject')     subjectHeader = h.value;
+        if (h.name === 'In-Reply-To') inReplyTo     = h.value;
+        if (h.name === 'References')  references    = h.value;
+        if (h.name === 'Cc')          ccHeader      = h.value;
+      });
+
+      var htmlBody = extractDraftHtmlBody(draft.message.payload);
+      if (!htmlBody) { skipped++; Logger.log('fixAllDraftsAddAdvice: no HTML body — skip: ' + subjectHeader); return; }
+
+      // Skip if ADVICE already present
+      if (htmlBody.indexOf('Note for John (remove before sending)') >= 0 || htmlBody.indexOf('[ADVICE:') >= 0) {
+        skipped++; Logger.log('fixAllDraftsAddAdvice: already has ADVICE — skip: ' + subjectHeader); return;
+      }
+
+      // Skip internal drafts (to intransittech.com)
+      if (toHeader.toLowerCase().indexOf('intransittech.com') >= 0 && toHeader.toLowerCase().indexOf('bill.pratt') < 0) {
+        skipped++; Logger.log('fixAllDraftsAddAdvice: internal — skip: ' + subjectHeader); return;
+      }
+
+      // Use Claude to generate an ADVICE block
+      var plainPreview = htmlBody.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 600);
+      var claudeResp = UrlFetchApp.fetch(HUB_URL + '/api/claude', {
+        method: 'post', contentType: 'application/json',
+        headers: { Authorization: 'Bearer ' + HUB_SECRET },
+        payload: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 200,
+          system: 'You are an email assistant for Intransit Technologies, an electronic components distributor. Write a concise ADVICE note for a Gmail draft. Return ONLY the advice text (no wrapper brackets). Max 2 sentences: (1) what this draft is and why it was created, (2) what John should verify or watch out for before sending. End with: Remove advice before sending.',
+          messages: [{ role: 'user', content: 'Draft To: ' + toHeader + '\nSubject: ' + subjectHeader + '\nBody preview: ' + plainPreview }]
+        }),
+        muteHttpExceptions: true
+      });
+      var cData = JSON.parse(claudeResp.getContentText());
+      var adviceText = (cData.content && cData.content[0] && cData.content[0].text || '').trim();
+      if (!adviceText) adviceText = 'Auto-generated draft for ' + subjectHeader + '. Review carefully before sending. Remove advice before sending.';
+
+      var adviceDiv = getAdviceHTML(adviceText);
+
+      // Insert ADVICE before the signature (which starts with <br><br><div><b>)
+      var updatedHtml;
+      var sigMark = '<br><br><div><b><span style="color:rgb(31,73,125)';
+      var sigIdx = htmlBody.indexOf(sigMark);
+      if (sigIdx >= 0) {
+        updatedHtml = htmlBody.substring(0, sigIdx) + adviceDiv + htmlBody.substring(sigIdx);
+      } else {
+        // Fallback: insert before last </div>
+        var lastDiv = htmlBody.lastIndexOf('</div>');
+        updatedHtml = lastDiv >= 0
+          ? htmlBody.substring(0, lastDiv) + adviceDiv + htmlBody.substring(lastDiv)
+          : htmlBody + adviceDiv;
+      }
+
+      // Rebuild raw RFC 2822 message
+      var rawLines = ['From: John Fluman <' + JOHN_EMAIL + '>', 'To: ' + toHeader];
+      if (ccHeader) rawLines.push('Cc: ' + ccHeader);
+      rawLines.push('Subject: ' + subjectHeader);
+      if (inReplyTo) rawLines.push('In-Reply-To: ' + inReplyTo);
+      if (references) rawLines.push('References: ' + references);
+      rawLines.push('MIME-Version: 1.0');
+      rawLines.push('Content-Type: text/html; charset=UTF-8');
+      rawLines.push('');
+      rawLines.push(updatedHtml);
+
+      var newRaw = Utilities.base64EncodeWebSafe(rawLines.join('\r\n'));
+      var threadId = draft.message.threadId || null;
+
+      var putResp = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + stub.id, {
+        method: 'PUT',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        payload: JSON.stringify({ message: { raw: newRaw, threadId: threadId } }),
+        muteHttpExceptions: true
+      });
+      var putData = JSON.parse(putResp.getContentText());
+      if (putData.error) {
+        Logger.log('fixAllDraftsAddAdvice PUT error for "' + subjectHeader + '": ' + JSON.stringify(putData.error));
+        errors++;
+      } else {
+        fixed++;
+        Logger.log('fixAllDraftsAddAdvice: fixed "' + subjectHeader + '" → To: ' + toHeader);
+      }
+    } catch(e) {
+      errors++;
+      Logger.log('fixAllDraftsAddAdvice error on draft: ' + e.toString());
+    }
+  });
+
+  var summary = 'fixAllDraftsAddAdvice DONE: ' + fixed + ' fixed, ' + skipped + ' skipped, ' + errors + ' errors';
+  Logger.log(summary);
+  hubLog('run', summary);
+}
+
+// ============================================================
+// GMAIL ADD-ON — Draft Review Sidebar
+//
+// HOW TO INSTALL (one-time setup):
+//   1. In Apps Script editor: click ⚙️ Project Settings
+//      → check "Show appsscript.json manifest file in editor"
+//   2. Open appsscript.json and ADD the "addOns" block (see MANIFEST below).
+//      Merge it — do not replace the whole file.
+//   3. Click Deploy → Test deployments → Install (for yourself)
+//   4. Open any Gmail draft → click the add-on icon in the toolbar
+//
+// MANIFEST to add inside appsscript.json (merge with existing content):
+// "addOns": {
+//   "common": {
+//     "name": "Intransit Assistant",
+//     "logoUrl": "https://www.gstatic.com/images/icons/material/system/2x/mail_black_24dp.png",
+//     "homepageTrigger": { "runFunction": "buildHomepageCard", "enabled": true }
+//   },
+//   "gmail": {
+//     "composeTrigger": {
+//       "selectActions": [{ "text": "Intransit Assistant", "runFunction": "buildComposeCard" }],
+//       "draftAccess": "METADATA"
+//     }
+//   }
+// }
+// ============================================================
+
+// Helper: extract advice text from our styled ADVICE div in the HTML body
+function extractAdviceText(htmlBody) {
+  if (!htmlBody) return null;
+  var m = htmlBody.match(/Note for John \(remove before sending\):<\/b><br>([\s\S]*?)<\/div>/);
+  return m ? m[1].replace(/<[^>]+>/g, '').trim() : null;
+}
+
+// Helper: remove the ADVICE div from HTML body, returning clean HTML
+function stripAdviceFromHtml(htmlBody) {
+  if (!htmlBody) return htmlBody;
+  return htmlBody.replace(/<div style="background:#fff3cd[\s\S]*?<\/div>/, '').trim();
+}
+
+// Helper: rebuild raw RFC 2822 message from a fetched draft + new HTML body
+function rebuildRawMessage(draft, newHtmlBody) {
+  var headers = (draft.message && draft.message.payload && draft.message.payload.headers) || [];
+  var toH = '', subjectH = '', inReplyTo = '', references = '', ccH = '';
+  headers.forEach(function(h) {
+    if (h.name === 'To')          toH        = h.value;
+    if (h.name === 'Subject')     subjectH   = h.value;
+    if (h.name === 'In-Reply-To') inReplyTo  = h.value;
+    if (h.name === 'References')  references = h.value;
+    if (h.name === 'Cc')          ccH        = h.value;
+  });
+  var lines = ['From: John Fluman <' + JOHN_EMAIL + '>', 'To: ' + toH];
+  if (ccH) lines.push('Cc: ' + ccH);
+  lines.push('Subject: ' + subjectH);
+  if (inReplyTo) lines.push('In-Reply-To: ' + inReplyTo);
+  if (references) lines.push('References: ' + references);
+  lines.push('MIME-Version: 1.0', 'Content-Type: text/html; charset=UTF-8', '');
+  lines.push(newHtmlBody);
+  return { raw: Utilities.base64EncodeWebSafe(lines.join('\r\n')), to: toH, subject: subjectH };
+}
+
+// ── CARD BUILDERS ──────────────────────────────────────────
+
+// Homepage card — lists all current drafts with advice + Send/Wrong buttons
+function buildHomepageCard() {
+  try {
+    var token = ScriptApp.getOAuthToken();
+    var listResp = UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=15',
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+    );
+    var drafts = JSON.parse(listResp.getContentText()).drafts || [];
+
+    var builder = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader()
+        .setTitle('Intransit Assistant')
+        .setSubtitle(drafts.length === 0 ? 'No drafts' : drafts.length + ' draft(s) ready to review'));
+
+    if (drafts.length === 0) {
+      builder.addSection(CardService.newCardSection()
+        .addWidget(CardService.newTextParagraph().setText('No drafts in your mailbox. Close and reopen this panel to refresh.')));
+      return builder.build();
+    }
+
+    // Fetch D1 pending drafts to get advice (stored separately from email body)
+    var d1Map = {};
+    try {
+      var d1Resp = UrlFetchApp.fetch(HUB_URL + '/api/drafts?status=pending&limit=100', {
+        headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+      });
+      var d1Rows = JSON.parse(d1Resp.getContentText()).rows || [];
+      d1Rows.forEach(function(row) {
+        if (!row.thread_id) return;
+        var content = row.draft_content || '';
+        var advIdx = content.indexOf('[ADVICE_STORED]:');
+        if (advIdx >= 0) {
+          var afterAdv = content.substring(advIdx + '[ADVICE_STORED]:'.length);
+          var gmailIdx = afterAdv.indexOf('\n\n[GMAIL_DRAFT:');
+          var advice = gmailIdx >= 0 ? afterAdv.substring(0, gmailIdx).trim() : afterAdv.trim();
+          if (advice && !d1Map[row.thread_id]) d1Map[row.thread_id] = advice;
+        }
+      });
+    } catch(e2) { Logger.log('buildHomepageCard D1 fetch error: ' + e2); }
+
+    // Fetch all Gmail draft details in parallel
+    var batch = drafts.slice(0, 12);
+    var requests = batch.map(function(stub) {
+      return {
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + stub.id + '?format=full',
+        headers: { Authorization: 'Bearer ' + token },
+        muteHttpExceptions: true
+      };
+    });
+    var responses = UrlFetchApp.fetchAll(requests);
+
+    responses.forEach(function(resp, i) {
+      if (resp.getResponseCode() !== 200) return;
+      var draft = JSON.parse(resp.getContentText());
+      var stub = batch[i];
+      var headers = (draft.message && draft.message.payload && draft.message.payload.headers) || [];
+      var threadId = (draft.message && draft.message.threadId) || '';
+      var toH = '', subjectH = '';
+      headers.forEach(function(h) {
+        if (h.name === 'To') toH = h.value;
+        if (h.name === 'Subject') subjectH = h.value;
+      });
+
+      // Get advice from D1 (never from draft body — body is always clean now)
+      var adviceText = d1Map[threadId] || null;
+      var label = (subjectH || 'Draft').replace(/^Re:\s*/i, '');
+      if (label.length > 55) label = label.substring(0, 52) + '...';
+
+      var section = CardService.newCardSection().setHeader('📧 ' + label);
+      section.addWidget(CardService.newTextParagraph().setText('To: ' + (toH || 'unknown')));
+
+      if (adviceText) {
+        var short = adviceText.length > 220 ? adviceText.substring(0, 217) + '...' : adviceText;
+        section.addWidget(CardService.newTextParagraph().setText('💡 ' + short));
+      } else {
+        section.addWidget(CardService.newTextParagraph().setText('Ready to send.'));
+      }
+
+      section.addWidget(CardService.newTextButton()
+        .setText('✅ Send')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#1a7340')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonSendDraft')
+          .setParameters({ draftId: stub.id, threadId: threadId, hasAdvice: '0' })));
+
+      var fbField = 'fb_' + stub.id.replace(/[^a-zA-Z0-9]/g, '_');
+      section.addWidget(CardService.newTextInput()
+        .setFieldName(fbField)
+        .setTitle('What was wrong / how to fix?')
+        .setHint('e.g. "Should ask for TP not check" or "Wrong MPN"')
+        .setMultiline(false));
+
+      section.addWidget(CardService.newTextButton()
+        .setText('🔧 Fix this draft')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#1565c0')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonFixDraft')
+          .setParameters({ draftId: stub.id, threadId: threadId, subject: subjectH, toEmail: toH })));
+
+      section.addWidget(CardService.newTextButton()
+        .setText('❌ Wrong — delete & retrain')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#c0392b')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonSubmitFeedback')
+          .setParameters({ draftId: stub.id, threadId: threadId, fbField: fbField })));
+
+      builder.addSection(section);
+    });
+
+    return builder.build();
+  } catch(err) {
+    return CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('Intransit Assistant').setSubtitle('Error'))
+      .addSection(CardService.newCardSection()
+        .addWidget(CardService.newTextParagraph().setText(err.toString())))
+      .build();
+  }
+}
+
+// ── CONTEXTUAL CARD — fires automatically when any email is opened ──────────
+// Shows only what's relevant to the currently viewed thread.
+function buildContextualCard(e) {
+  try {
+    var gmailThreadId = e.gmail && e.gmail.threadId;
+    if (!gmailThreadId) return buildHomepageCard();
+
+    var token = ScriptApp.getOAuthToken();
+
+    // Get thread subject + sender
+    var threadResp = UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/threads/' + gmailThreadId +
+      '?format=metadata&metadataHeaders=Subject&metadataHeaders=From',
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+    );
+    var threadData = JSON.parse(threadResp.getContentText());
+    var msgs = threadData.messages || [];
+    var subject = '', fromH = '';
+    if (msgs.length > 0) {
+      (msgs[0].payload && msgs[0].payload.headers || []).forEach(function(h) {
+        if (h.name === 'Subject') subject = h.value;
+        if (h.name === 'From') fromH = h.value;
+      });
+    }
+
+    // Look up D1 advice for this thread
+    var d1Advice = null;
+    try {
+      var d1Resp = UrlFetchApp.fetch(HUB_URL + '/api/drafts?status=pending&limit=100', {
+        headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+      });
+      var d1Rows = JSON.parse(d1Resp.getContentText()).rows || [];
+      var d1Match = d1Rows.filter(function(r) { return r.thread_id === gmailThreadId; })[0];
+      if (d1Match) {
+        var content = d1Match.draft_content || '';
+        var advIdx = content.indexOf('[ADVICE_STORED]:');
+        if (advIdx >= 0) {
+          var after = content.substring(advIdx + '[ADVICE_STORED]:'.length);
+          var gIdx = after.indexOf('\n\n[GMAIL_DRAFT:');
+          d1Advice = (gIdx >= 0 ? after.substring(0, gIdx) : after).trim();
+        }
+      }
+    } catch(e2) { Logger.log('buildContextualCard D1 error: ' + e2); }
+
+    // Find a Gmail draft for this thread
+    var matchDraftId = null, matchToH = '';
+    try {
+      var listResp = UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=50',
+        { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+      );
+      var stubs = JSON.parse(listResp.getContentText()).drafts || [];
+      if (stubs.length > 0) {
+        var reqs = stubs.map(function(s) {
+          return {
+            url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + s.id + '?format=metadata&metadataHeaders=To',
+            headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true
+          };
+        });
+        UrlFetchApp.fetchAll(reqs).forEach(function(r, i) {
+          if (r.getResponseCode() !== 200 || matchDraftId) return;
+          var d = JSON.parse(r.getContentText());
+          if (d.message && d.message.threadId === gmailThreadId) {
+            matchDraftId = stubs[i].id;
+            (d.message.payload && d.message.payload.headers || []).forEach(function(h) {
+              if (h.name === 'To') matchToH = h.value;
+            });
+          }
+        });
+      }
+    } catch(e3) { Logger.log('buildContextualCard draft search error: ' + e3); }
+
+    var label = (subject || 'Email').replace(/^Re:\s*/i, '').substring(0, 55);
+    var builder = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader()
+        .setTitle('Intransit Assistant')
+        .setSubtitle(label));
+
+    if (matchDraftId) {
+      var fbField = 'fb_' + matchDraftId.replace(/[^a-zA-Z0-9]/g, '_');
+
+      var infoSection = CardService.newCardSection().setHeader('📝 Draft ready');
+      infoSection.addWidget(CardService.newTextParagraph().setText('To: ' + (matchToH || 'unknown')));
+      if (d1Advice) {
+        var short = d1Advice.length > 250 ? d1Advice.substring(0, 247) + '...' : d1Advice;
+        infoSection.addWidget(CardService.newTextParagraph().setText('💡 ' + short));
+      }
+      infoSection.addWidget(CardService.newTextButton()
+        .setText('✅ Send')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#1a7340')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonSendDraft')
+          .setParameters({ draftId: matchDraftId, threadId: gmailThreadId, hasAdvice: '0' })));
+
+      var fixSection = CardService.newCardSection().setHeader('Something wrong?');
+      fixSection.addWidget(CardService.newTextInput()
+        .setFieldName(fbField)
+        .setTitle('What was wrong / how to fix?')
+        .setHint('e.g. "Should ask for TP" or "Wrong MPN extracted"')
+        .setMultiline(false));
+      fixSection.addWidget(CardService.newTextButton()
+        .setText('🔧 Fix this draft')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#1565c0')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonFixDraft')
+          .setParameters({ draftId: matchDraftId, threadId: gmailThreadId, subject: subject, toEmail: matchToH })));
+      fixSection.addWidget(CardService.newTextButton()
+        .setText('❌ Wrong — delete & retrain')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#c0392b')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonSubmitFeedback')
+          .setParameters({ draftId: matchDraftId, threadId: gmailThreadId, fbField: fbField })));
+
+      builder.addSection(infoSection).addSection(fixSection);
+
+    } else {
+      var noSection = CardService.newCardSection().setHeader('📥 No draft — create one now');
+      noSection.addWidget(CardService.newTextParagraph().setText('From: ' + (fromH || 'unknown')));
+      if (d1Advice) {
+        noSection.addWidget(CardService.newTextParagraph()
+          .setText('⚠️ Previously processed — draft may have been sent or deleted.'));
+      }
+      noSection.addWidget(CardService.newTextInput()
+        .setFieldName('draftInstruction')
+        .setTitle('Tell me what to draft')
+        .setHint('e.g. "MSG_CHECKING", "ask for TP $500 min", "David no stock removal for [MPN]"')
+        .setMultiline(false));
+      noSection.addWidget(CardService.newTextButton()
+        .setText('📤 Create draft now')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#6a1b9a')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonCreateDraft')
+          .setParameters({ threadId: gmailThreadId, subject: subject, fromEmail: fromH })));
+      builder.addSection(noSection);
+    }
+
+    // ── Chat section — always shown ──────────────────────────────────────────
+    var chatSection = CardService.newCardSection().setHeader('💬 Chat with assistant');
+    chatSection.addWidget(CardService.newTextInput()
+      .setFieldName('chatMessage')
+      .setTitle('Message')
+      .setHint('Ask anything or describe what you need — align first, then act')
+      .setMultiline(false));
+    chatSection.addWidget(CardService.newTextButton()
+      .setText('Send')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#37474f')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonChat')
+        .setParameters({
+          threadId: gmailThreadId,
+          subject: subject,
+          fromH: fromH,
+          draftId: matchDraftId || '',
+          draftBody: ''
+        })));
+    builder.addSection(chatSection);
+
+    return [builder.build()];
+  } catch(err) {
+    return [buildAddonError(err.toString())];
+  }
+}
+
+// Main compose trigger card — fires when user clicks add-on icon in compose toolbar
+function buildComposeCard(e) {
+  try {
+    var draftId = e && e.gmail && e.gmail.draftId;
+
+    if (!draftId) {
+      return [CardService.newCardBuilder()
+        .setHeader(CardService.newCardHeader().setTitle('Intransit Assistant'))
+        .addSection(CardService.newCardSection()
+          .addWidget(CardService.newTextParagraph()
+            .setText('Open an existing draft (from your Drafts folder) to see advice and send options.')))
+        .build()];
+    }
+
+    // Fetch full draft via REST API
+    var token = ScriptApp.getOAuthToken();
+    var resp = UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) {
+      return [buildAddonError('Could not load draft (HTTP ' + resp.getResponseCode() + ').')];
+    }
+
+    var draft = JSON.parse(resp.getContentText());
+    var htmlBody  = extractDraftHtmlBody(draft.message && draft.message.payload);
+    var threadId  = (draft.message && draft.message.threadId) || '';
+    var headers   = (draft.message && draft.message.payload && draft.message.payload.headers) || [];
+    var toH = '', subjectH = '';
+    headers.forEach(function(h) {
+      if (h.name === 'To')      toH      = h.value;
+      if (h.name === 'Subject') subjectH = h.value;
+    });
+
+    var adviceText = extractAdviceText(htmlBody);
+    var hasAdvice  = !!adviceText;
+
+    // ── Advice display section ──
+    var adviceSection = CardService.newCardSection()
+      .setHeader(subjectH ? ('📧 ' + subjectH.replace(/^Re:\s*/i,'')) : 'Draft');
+
+    if (hasAdvice) {
+      adviceSection.addWidget(CardService.newTextParagraph().setText('💡 ' + adviceText));
+    } else {
+      adviceSection.addWidget(CardService.newTextParagraph()
+        .setText('No advice block found — draft looks clean.'));
+    }
+
+    // ── Send button ──
+    var sendSection = CardService.newCardSection();
+    sendSection.addWidget(
+      CardService.newTextButton()
+        .setText(hasAdvice ? '✅  Send  (advice stripped automatically)' : '✅  Send as-is')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#1a7340')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonSendDraft')
+          .setParameters({ draftId: draftId, threadId: threadId, hasAdvice: hasAdvice ? '1' : '0' }))
+    );
+
+    // ── Feedback / retrain section (collapsed) ──
+    var feedbackSection = CardService.newCardSection()
+      .setHeader('❌  Wrong draft — retrain')
+      .setCollapsible(true)
+      .setNumUncollapsibleWidgets(0);
+    feedbackSection.addWidget(
+      CardService.newTextInput()
+        .setFieldName('feedbackText')
+        .setTitle('What was wrong with this draft?')
+        .setHint('e.g. "Should be need TP not checking" or "Wrong MPN extracted"')
+        .setMultiline(true)
+    );
+    feedbackSection.addWidget(
+      CardService.newTextButton()
+        .setText('Submit feedback & delete draft')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#c0392b')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonSubmitFeedback')
+          .setParameters({ draftId: draftId, threadId: threadId }))
+    );
+
+    return [CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader()
+        .setTitle('Intransit Assistant')
+        .setSubtitle('To: ' + (toH || 'unknown')))
+      .addSection(adviceSection)
+      .addSection(sendSection)
+      .addSection(feedbackSection)
+      .build()];
+
+  } catch(err) {
+    return [buildAddonError(err.toString())];
+  }
+}
+
+function buildAddonError(msg) {
+  return CardService.newCardBuilder()
+    .setHeader(CardService.newCardHeader().setTitle('Intransit Assistant').setSubtitle('Error'))
+    .addSection(CardService.newCardSection()
+      .addWidget(CardService.newTextParagraph().setText(msg)))
+    .build();
+}
+
+// ── ACTION HANDLERS ────────────────────────────────────────
+
+// Send the draft, stripping the ADVICE block first if present
+function addonSendDraft(e) {
+  try {
+    var params   = e.commonEventObject.parameters;
+    var draftId  = params.draftId;
+    var threadId = params.threadId;
+    var hasAdvice = params.hasAdvice === '1';
+    var token    = ScriptApp.getOAuthToken();
+
+    if (hasAdvice) {
+      // Fetch full draft, strip advice, update draft, then send
+      var fetchResp = UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
+        { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+      );
+      if (fetchResp.getResponseCode() !== 200) {
+        return notify('Error fetching draft: HTTP ' + fetchResp.getResponseCode());
+      }
+      var draft     = JSON.parse(fetchResp.getContentText());
+      var htmlBody  = extractDraftHtmlBody(draft.message && draft.message.payload);
+      var cleanHtml = stripAdviceFromHtml(htmlBody);
+      var rebuilt   = rebuildRawMessage(draft, cleanHtml);
+
+      // Update draft with clean HTML
+      var putResp = UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId,
+        {
+          method: 'PUT',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          payload: JSON.stringify({ message: { raw: rebuilt.raw, threadId: threadId || undefined } }),
+          muteHttpExceptions: true,
+        }
+      );
+      if (JSON.parse(putResp.getContentText()).error) {
+        return notify('Error updating draft before send.');
+      }
+      hubLog('run', 'Add-on: stripped advice from draft — ' + rebuilt.subject + ' → ' + rebuilt.to);
+    }
+
+    // Send the draft
+    var sendResp = UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/send',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        payload: JSON.stringify({ id: draftId }),
+        muteHttpExceptions: true,
+      }
+    );
+    var sendData = JSON.parse(sendResp.getContentText());
+    if (sendData.error) {
+      return notify('Send failed: ' + (sendData.error.message || JSON.stringify(sendData.error)));
+    }
+
+    hubLog('run', 'Add-on: sent draft ' + draftId);
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('✅ Email sent (advice stripped)'))
+      .build();
+
+  } catch(err) {
+    return notify('Error: ' + err.toString());
+  }
+}
+
+// Fix a wrong draft: call hub /api/fix-draft, rebuild the Gmail draft with corrected body
+function addonFixDraft(e) {
+  try {
+    var params     = e.commonEventObject.parameters;
+    var draftId    = params.draftId;
+    var threadId   = params.threadId;
+    var subject    = params.subject || '';
+    var toEmail    = params.toEmail || '';
+    var formInputs = e.commonEventObject.formInputs || {};
+    var fbField    = 'fb_' + draftId.replace(/[^a-zA-Z0-9]/g, '_');
+    var feedback   = '';
+    if (formInputs[fbField] && formInputs[fbField].stringInputs) {
+      feedback = (formInputs[fbField].stringInputs.value || [])[0] || '';
+    }
+    if (!feedback.trim()) return notify('Please type what was wrong before clicking Fix.');
+
+    var token = ScriptApp.getOAuthToken();
+
+    // Fetch current draft body (clean — no advice in body now)
+    var fetchResp = UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+    );
+    if (fetchResp.getResponseCode() !== 200) return notify('Could not load draft.');
+    var draft = JSON.parse(fetchResp.getContentText());
+    var htmlBody = extractDraftHtmlBody(draft.message && draft.message.payload);
+    var currentBody = htmlBody ? htmlBody.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+
+    // Call hub fix-draft endpoint
+    var fixResp = UrlFetchApp.fetch(HUB_URL + '/api/fix-draft', {
+      method: 'POST',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        draft_body: currentBody,
+        feedback: feedback,
+        subject: subject,
+        to_email: toEmail,
+        thread_id: threadId
+      }),
+      muteHttpExceptions: true
+    });
+    if (fixResp.getResponseCode() !== 200) {
+      return notify('Fix failed: ' + fixResp.getContentText().substring(0, 100));
+    }
+    var fixResult = JSON.parse(fixResp.getContentText());
+    var correctedBody = fixResult.corrected_body || '';
+    var newAdvice = fixResult.advice || ('Fixed per feedback: ' + feedback);
+
+    // Build clean HTML (no advice in body)
+    var newHtml = buildSimpleHTML(correctedBody.replace(/\n/g, '<br>'));
+    var rebuilt = rebuildRawMessage(draft, newHtml);
+
+    // Update the draft in Gmail
+    var putResp = UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId,
+      {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        payload: JSON.stringify({ message: { raw: rebuilt.raw, threadId: threadId || undefined } }),
+        muteHttpExceptions: true,
+      }
+    );
+    if (JSON.parse(putResp.getContentText()).error) return notify('Could not update draft.');
+
+    // Store new advice in D1
+    hubPostDraft(threadId, null, toEmail, subject, correctedBody, draftId, newAdvice);
+    hubLearn(feedback, currentBody, correctedBody, threadId, subject, toEmail, null, null);
+    hubLog('run', 'addonFixDraft: draft fixed + lesson saved — ' + subject, { feedback: feedback });
+
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification()
+        .setText('✅ Draft fixed! 🧠 Lesson saved — agent will remember this correction.'))
+      .build();
+
+  } catch(err) {
+    return notify('Error: ' + err.toString());
+  }
+}
+
+// Create a brand-new draft from a sidebar instruction when automation missed the email
+function addonCreateDraft(e) {
+  try {
+    var params     = e.commonEventObject.parameters;
+    var threadId   = params.threadId;
+    var subject    = params.subject || '';
+    var fromEmail  = params.fromEmail || '';
+    var formInputs = e.commonEventObject.formInputs || {};
+    var instruction = '';
+    if (formInputs.draftInstruction && formInputs.draftInstruction.stringInputs) {
+      instruction = (formInputs.draftInstruction.stringInputs.value || [])[0] || '';
+    }
+    if (!instruction.trim()) return notify('Please type what to draft before clicking Create.');
+
+    // Get thread to find the last message and reply target
+    var thread = GmailApp.getThreadById(threadId);
+    if (!thread) return notify('Thread not found.');
+    var messages = thread.getMessages();
+    var lastMsg = messages[messages.length - 1];
+    var threadSnippet = lastMsg.getPlainBody().substring(0, 600);
+    var replyTo = fromEmail || lastMsg.getReplyTo() || lastMsg.getFrom();
+
+    // Call fix-draft endpoint (also handles create-from-scratch when draft_body is empty)
+    var fixResp = UrlFetchApp.fetch(HUB_URL + '/api/fix-draft', {
+      method: 'POST',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        draft_body: '',
+        feedback: instruction,
+        subject: subject,
+        to_email: replyTo,
+        thread_id: threadId,
+        thread_context: threadSnippet
+      }),
+      muteHttpExceptions: true
+    });
+
+    if (fixResp.getResponseCode() !== 200) {
+      return notify('Failed: ' + fixResp.getContentText().substring(0, 120));
+    }
+    var result = JSON.parse(fixResp.getContentText());
+    var bodyText = result.corrected_body || '';
+    var advice = result.advice || ('Created per: ' + instruction);
+    if (!bodyText.trim()) return notify('Received empty draft body from AI. Try rephrasing the instruction.');
+
+    var htmlBody = buildSimpleHTML(bodyText.replace(/\n/g, '<br>'));
+    var draft = lastMsg.createDraftReply('', { htmlBody: htmlBody });
+    if (!draft) return notify('Failed to save draft to Gmail.');
+
+    var draftId = draft.getId();
+    hubPostDraft(threadId, null, replyTo, subject, bodyText, draftId, advice);
+    hubLog('run', 'addonCreateDraft: sidebar-created draft — ' + subject, { instruction: instruction });
+
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification()
+        .setText('✅ Draft created! Close and reopen the sidebar to review it.'))
+      .build();
+
+  } catch(err) {
+    return notify('Error: ' + err.toString());
+  }
+}
+
+// Submit feedback about a wrong draft, extract a lesson, then delete the draft
+function addonSubmitFeedback(e) {
+  try {
+    var params    = e.commonEventObject.parameters;
+    var draftId   = params.draftId;
+    var threadId  = params.threadId;
+    var fbField   = params.fbField || params.feedbackField || 'feedbackText';
+    var formInputs = e.commonEventObject.formInputs || {};
+    var feedback  = '';
+    if (formInputs[fbField] && formInputs[fbField].stringInputs) {
+      feedback = (formInputs[fbField].stringInputs.value || [])[0] || '';
+    }
+
+    var token = ScriptApp.getOAuthToken();
+
+    // Fetch draft body BEFORE deleting — needed for lesson extraction
+    var draftBody = '';
+    var draftSubject = '', draftSender = '', draftMpn = '', draftAction = '';
+    try {
+      var fetchResp = UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
+        { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+      );
+      if (fetchResp.getResponseCode() === 200) {
+        var draftData = JSON.parse(fetchResp.getContentText());
+        var rawHtml = extractDraftHtmlBody(draftData.message && draftData.message.payload);
+        draftBody = rawHtml ? rawHtml.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().substring(0,400) : '';
+        (draftData.message && draftData.message.payload && draftData.message.payload.headers || []).forEach(function(h) {
+          if (h.name === 'To') draftSender = h.value;
+          if (h.name === 'Subject') draftSubject = h.value;
+        });
+      }
+    } catch(eF) {}
+
+    // Look up D1 for MPN and action context
+    try {
+      var d1Resp = UrlFetchApp.fetch(HUB_URL + '/api/drafts?status=pending&limit=50', {
+        headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true,
+      });
+      var rows = JSON.parse(d1Resp.getContentText()).rows || [];
+      var match = rows.filter(function(r) { return r.thread_id === threadId; })[0];
+      if (match) {
+        hubPatchEntry(match.id, { action: 'wrong', sent_content: feedback });
+        draftMpn = match.mpn || '';
+        draftSender = draftSender || match.sender || '';
+      }
+    } catch(e2) {}
+
+    // Extract and store a lesson (async — don't block the UI)
+    if (feedback.trim()) {
+      hubLearn(feedback, draftBody, '', threadId, draftSubject, draftSender, draftMpn, draftAction);
+    }
+
+    hubLog('feedback', 'Draft marked wrong: ' + (feedback || '(no reason)'), { draft_id: draftId, thread_id: threadId });
+
+    // Delete the draft
+    UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId,
+      { method: 'DELETE', headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+    );
+
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification()
+        .setText(feedback
+          ? '🧠 Lesson saved + draft deleted. The agent will remember this.'
+          : 'Draft deleted. (Add a reason next time so the agent can learn.)'))
+      .build();
+
+  } catch(err) {
+    return notify('Error: ' + err.toString());
+  }
+}
+
+// Fetch last N sent emails mentioning an MPN — returns formatted string for Claude context
+function getRecentSentQuotesFull(mpn, maxThreads) {
+  if (!mpn) return 'No MPN provided.';
+  try {
+    var threads = GmailApp.search('in:sent "' + mpn + '"', 0, maxThreads || 5);
+    if (!threads.length) return 'No prior sent emails found for ' + mpn + '.';
+    var out = [];
+    threads.forEach(function(thread) {
+      var msgs = thread.getMessages();
+      for (var i = msgs.length - 1; i >= 0; i--) {
+        var msg = msgs[i];
+        if (msg.getFrom().indexOf(JOHN_EMAIL) >= 0) {
+          var body = stripQuotedLines(msg.getPlainBody()).substring(0, 350);
+          var dateStr = Utilities.formatDate(msg.getDate(), Session.getScriptTimeZone(), 'MMM d, yyyy');
+          out.push('[Sent ' + dateStr + ' to ' + msg.getTo() + ']\n' + body);
+          break;
+        }
+      }
+    });
+    return out.length ? out.join('\n\n') : 'No sent messages from John found for ' + mpn + '.';
+  } catch(e) {
+    return 'Email search error: ' + e.toString();
+  }
+}
+
+// Chat with Claude about the current email — gathers full context then sends to /api/chat
+function addonChat(e) {
+  try {
+    var params     = e.commonEventObject.parameters;
+    var threadId   = params.threadId  || '';
+    var subject    = params.subject   || '';
+    var fromH      = params.fromH     || '';
+    var draftId    = params.draftId   || '';
+    var formInputs = e.commonEventObject.formInputs || {};
+    var message    = '';
+    if (formInputs.chatMessage && formInputs.chatMessage.stringInputs) {
+      message = (formInputs.chatMessage.stringInputs.value || [])[0] || '';
+    }
+    if (!message.trim()) return notify('Please type a message before clicking Send.');
+
+    // ── Gather full context (Apps Script has Gmail + Sheets access) ──────────
+    var mpn = extractMPN(subject);
+
+    // Full thread text (up to 5 messages, 600 chars each)
+    var fullThread = '';
+    try {
+      var thread = GmailApp.getThreadById(threadId);
+      if (thread) {
+        var threadMsgs = thread.getMessages();
+        fullThread = threadMsgs.map(function(m, i) {
+          return 'Message ' + (i+1) + ' | From: ' + m.getFrom() + ' | ' + Utilities.formatDate(m.getDate(), Session.getScriptTimeZone(), 'MMM d, h:mm a') + '\n'
+            + m.getPlainBody().substring(0, 600);
+        }).join('\n\n---\n\n');
+      }
+    } catch(e2) { fullThread = '(thread fetch error: ' + e2 + ')'; }
+
+    // Prior sent quotes for this MPN
+    var priorQuotes = mpn ? getRecentSentQuotesFull(mpn, 5) : 'No MPN extracted from subject.';
+
+    // OEM EXCESS + Forte data via web app
+    var oemResults = [], forteResults = [];
+    if (mpn) {
+      try {
+        var webUrl = 'https://script.google.com/macros/s/AKfycbyuuBmiYVW5mKI82D5YQGPh1nNGLJZzlLKoxuOdtmOUwUe75VlhhakqgwKooZu5LHFK/exec'
+          + '?key=baSDJ%23444FE%268&mpn=' + encodeURIComponent(mpn);
+        var webResp = UrlFetchApp.fetch(webUrl, { followRedirects: true, muteHttpExceptions: true });
+        var webData = JSON.parse(webResp.getContentText());
+        oemResults   = webData.oem_excess   || [];
+        forteResults = webData.forte_sheet  || [];
+      } catch(e3) { Logger.log('addonChat web app error: ' + e3); }
+    }
+
+    // Inbox summary — other threads needing attention (quick scan, not full content)
+    var inboxSummary = '';
+    try {
+      var inboxThreads = GmailApp.search('in:inbox -from:intransittech.com -label:oem-rfq-incoming-processed newer_than:3d', 0, 8);
+      if (inboxThreads.length) {
+        inboxSummary = inboxThreads.map(function(t) {
+          var m = t.getMessages();
+          var last = m[m.length - 1];
+          return Utilities.formatDate(last.getDate(), Session.getScriptTimeZone(), 'MMM d h:mm a')
+            + ' | From: ' + last.getFrom().replace(/<.*>/, '').trim()
+            + ' | ' + t.getFirstMessageSubject().substring(0, 80);
+        }).join('\n');
+      }
+    } catch(e4) { Logger.log('addonChat inbox scan error: ' + e4); }
+
+    var chatResp = UrlFetchApp.fetch(HUB_URL + '/api/chat', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        thread_id:     threadId,
+        message:       message,
+        subject:       subject,
+        from_email:    fromH,
+        mpn:           mpn || '',
+        full_thread:   fullThread,
+        prior_quotes:  priorQuotes,
+        oem_results:   oemResults,
+        forte_results: forteResults,
+        inbox_summary: inboxSummary || '(no other inbox threads)'
+      }),
+      muteHttpExceptions: true
+    });
+
+    if (chatResp.getResponseCode() !== 200) {
+      return notify('Chat error: ' + chatResp.getContentText().substring(0, 120));
+    }
+    var result  = JSON.parse(chatResp.getContentText());
+    var reply   = result.response || '(no response)';
+    var action  = result.action   || null;
+
+    // Build response card (pushed on top, user can press back)
+    var builder = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('Intransit Assistant').setSubtitle('Chat — ' + (subject || '').substring(0, 40)));
+
+    var convSection = CardService.newCardSection().setHeader('💬');
+    convSection.addWidget(CardService.newTextParagraph().setText('You: ' + message));
+    convSection.addWidget(CardService.newTextParagraph().setText('Claude: ' + reply));
+    builder.addSection(convSection);
+
+    // Confirmed action → show action buttons
+    if (action && action.type) {
+      var actionType = action.type;
+      var actSection = CardService.newCardSection().setHeader('✅ Ready to execute');
+      // Preview text
+      var preview = action.advice || action.body || '';
+      if (actionType === 'add_forte') preview = 'Add ' + action.mpn + ' to Forte (QTY: ' + action.qty + ', TP: $' + (action.tp || '?') + ')';
+      if (actionType === 'remove_oem_excess') preview = 'Remove ' + action.mpn + ' from OEM EXCESS';
+      if (actionType === 'update_rule') preview = (action.delete ? 'Delete' : 'Update') + ' rule: ' + action.rule_type + '/' + action.key;
+      if (actionType === 'apply_label') preview = 'Apply label: ' + action.label;
+      if (actionType === 'multi') preview = (action.advice || 'Execute ' + (action.actions || []).length + ' actions');
+      actSection.addWidget(CardService.newTextParagraph().setText(preview.substring(0, 200)));
+      var actionParams = { threadId: threadId, subject: subject, fromH: fromH, actionJson: JSON.stringify(action) };
+      if (actionType === 'create_draft') {
+        actSection.addWidget(CardService.newTextButton()
+          .setText('📝 Create Draft')
+          .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+          .setBackgroundColor('#1a7340')
+          .setOnClickAction(CardService.newAction()
+            .setFunctionName('addonExecuteAction')
+            .setParameters(actionParams)));
+        actSection.addWidget(CardService.newTextButton()
+          .setText('🚀 Create & Send Now')
+          .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+          .setBackgroundColor('#1565c0')
+          .setOnClickAction(CardService.newAction()
+            .setFunctionName('addonExecuteAndSend')
+            .setParameters(actionParams)));
+      } else {
+        actSection.addWidget(CardService.newTextButton()
+          .setText('✅ Execute')
+          .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+          .setBackgroundColor('#1a7340')
+          .setOnClickAction(CardService.newAction()
+            .setFunctionName('addonExecuteAction')
+            .setParameters(actionParams)));
+      }
+      builder.addSection(actSection);
+    }
+
+    // Continue chat
+    var contSection = CardService.newCardSection().setHeader('Continue');
+    contSection.addWidget(CardService.newTextInput()
+      .setFieldName('chatMessage').setTitle('Reply').setMultiline(false));
+    contSection.addWidget(CardService.newTextButton()
+      .setText('Send')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#37474f')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonChat')
+        .setParameters({ threadId: threadId, subject: subject, fromH: fromH, draftId: draftId })));
+    builder.addSection(contSection);
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(builder.build()))
+      .build();
+
+  } catch(err) {
+    return notify('Error in chat: ' + err.toString());
+  }
+}
+
+// Execute a chat-agreed action
+function addonExecuteAction(e) {
+  try {
+    var params   = e.commonEventObject.parameters;
+    var threadId = params.threadId || '';
+    var subject  = params.subject  || '';
+    var fromH    = params.fromH    || '';
+    var action   = JSON.parse(params.actionJson || '{}');
+
+    if (!action.type) return notify('No action to execute.');
+    var result = executeAction(action, threadId, subject, fromH);
+    var msg = result.message || (result.ok ? '✅ Done' : '⛔ Failed');
+    if (action.type === 'create_draft') msg += ' — Press back then reopen to review it.';
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText(msg))
+      .build();
+
+  } catch(err) {
+    return notify('Error: ' + err.toString());
+  }
+}
+
+// Create draft and immediately send (only for create_draft action type)
+function addonExecuteAndSend(e) {
+  try {
+    var params   = e.commonEventObject.parameters;
+    var threadId = params.threadId || '';
+    var subject  = params.subject  || '';
+    var fromH    = params.fromH    || '';
+    var action   = JSON.parse(params.actionJson || '{}');
+
+    if (action.type !== 'create_draft' && action.type !== undefined) {
+      return notify('Create & Send is only for email drafts.');
+    }
+    var result = executeCreateAndSendDraft(action, threadId, subject, fromH);
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText(result.message))
+      .build();
+
+  } catch(err) {
+    return notify('Error sending: ' + err.toString());
+  }
+}
+
+// Shorthand notification response
+function notify(text) {
+  return CardService.newActionResponseBuilder()
+    .setNotification(CardService.newNotification().setText(text))
+    .build();
+}
+
+// ============================================================
+// ONE-TIME: Strip ADVICE blocks from ALL existing drafts
+// Run once from Apps Script editor to clean up current drafts.
+// Safe to run multiple times — skips drafts with no advice block.
+// ============================================================
+function stripAllDraftAdvice() {
+  var token = ScriptApp.getOAuthToken();
+  var listResp = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=100', {
+    headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true
+  });
+  var drafts = JSON.parse(listResp.getContentText()).drafts || [];
+  Logger.log('stripAllDraftAdvice: ' + drafts.length + ' drafts found');
+
+  var stripped = 0, skipped = 0, errors = 0;
+
+  drafts.forEach(function(stub) {
+    try {
+      Utilities.sleep(400);
+      var draftResp = UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + stub.id + '?format=full',
+        { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+      );
+      var draft    = JSON.parse(draftResp.getContentText());
+      var htmlBody = extractDraftHtmlBody(draft.message && draft.message.payload);
+
+      if (!htmlBody || htmlBody.indexOf('Note for John (remove before sending)') < 0) {
+        skipped++; return;
+      }
+
+      var cleanHtml = stripAdviceFromHtml(htmlBody);
+      var rebuilt   = rebuildRawMessage(draft, cleanHtml);
+      var threadId  = (draft.message && draft.message.threadId) || null;
+
+      var putResp = UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + stub.id,
+        {
+          method: 'PUT',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+          payload: JSON.stringify({ message: { raw: rebuilt.raw, threadId: threadId } }),
+          muteHttpExceptions: true,
+        }
+      );
+      var putData = JSON.parse(putResp.getContentText());
+      if (putData.error) {
+        Logger.log('stripAllDraftAdvice PUT error: ' + JSON.stringify(putData.error));
+        errors++;
+      } else {
+        stripped++;
+        Logger.log('stripAllDraftAdvice: stripped "' + rebuilt.subject + '"');
+      }
+    } catch(e) {
+      errors++;
+      Logger.log('stripAllDraftAdvice error: ' + e.toString());
+    }
+  });
+
+  var summary = 'stripAllDraftAdvice DONE: ' + stripped + ' stripped, ' + skipped + ' had none, ' + errors + ' errors';
+  Logger.log(summary);
+  hubLog('run', summary);
 }
 
 // ============================================================
@@ -1321,4 +2894,289 @@ function fixTDA21240() {
   var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
   forteSheet.appendRow(['6/2/2026', 'TDA21240', '', '$4.30', '', 'China', '', '', '', '', 'Open']);
   Logger.log('Added TDA21240 to Forte: TP $4.30 | China');
+}
+
+// ============================================================
+// TRIGGER 8 — Bill says "remove from netcomp" → delete from OEM EXCESS + draft to Bill
+// ============================================================
+function checkBillNetcompRemovals() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'checkBillNetcompRemovals: disabled'); return; }
+  var BILL_EMAIL = 'bill.pratt@intransittech.com';
+  var DONE_LABEL = 'oem-bill-removal-processed';
+  var query = 'from:' + BILL_EMAIL +
+    ' (netcomp OR netcomponents) (remove OR removing OR removed)' +
+    ' -label:' + DONE_LABEL + ' newer_than:14d';
+  var threads = GmailApp.search(query, 0, 20);
+  hubLog('run', 'checkBillNetcompRemovals: ' + threads.length + ' thread(s)');
+  if (!threads.length) return;
+  var doneLabel = GmailApp.getUserLabelByName(DONE_LABEL) || GmailApp.createLabel(DONE_LABEL);
+
+  threads.forEach(function(thread) {
+    var subject = thread.getFirstMessageSubject();
+    var mpn     = extractMPN(subject);
+    if (mpn) {
+      var result = deletePart(mpn, subject);
+      var body   = buildSimpleHTML('Removed - MPN: ' + mpn);
+      GmailApp.createDraft('bill.pratt@intransittech.com', 'Re: ' + subject, '', { htmlBody: body });
+      hubLog('run', 'Bill netcomp removal [' + result + ']: ' + mpn, { mpn: mpn });
+      Logger.log('Bill removal [' + result + ']: ' + mpn);
+    } else {
+      Logger.log('Bill removal: could not extract MPN from subject: ' + subject);
+      GmailApp.sendEmail(NOTIFY_EMAIL, 'OEM EXCESS: Bill removal — could not extract MPN',
+        'Subject: "' + subject + '"\nhttps://mail.google.com/mail/u/0/#inbox/' + thread.getId());
+    }
+    thread.addLabel(doneLabel);
+  });
+}
+
+// ONE-TIME: fix DG444DY-T1-E3 — Bill said to remove from NetComp; delete from OEM EXCESS + draft to Bill.
+function fixDG444DYRemoval() {
+  var MPN     = 'DG444DY-T1-E3';
+  var SUBJECT = 'DG444DY-T1-E3 5000PCS';
+  var result  = deletePart(MPN, SUBJECT);
+  var body    = buildSimpleHTML('Removed - MPN: ' + MPN);
+  GmailApp.createDraft('bill.pratt@intransittech.com', 'Re: ' + SUBJECT, '', { htmlBody: body });
+
+  // Mark the thread so the trigger doesn't re-process it
+  var threads = GmailApp.search('subject:"DG444DY-T1-E3" in:inbox', 0, 5);
+  var doneLabel = GmailApp.getUserLabelByName('oem-bill-removal-processed') || GmailApp.createLabel('oem-bill-removal-processed');
+  if (threads.length) threads[0].addLabel(doneLabel);
+
+  hubLog('run', 'fixDG444DYRemoval [' + result + ']: ' + MPN, { mpn: MPN });
+  Logger.log('fixDG444DYRemoval done: ' + MPN + ' | deletePart result: ' + result);
+}
+
+// ONE-TIME: fix MT25QU256ABA8E12-0AAT — wrong "need TP" draft was created; buyer gave TP=$8.
+// Creates correct MSG_CHECKING draft + adds to Forte. Run once after pasting script.
+function fixMT25QU256Draft() {
+  var MPN     = 'MT25QU256ABA8E12-0AAT';
+  var QTY     = 1610;
+  var TP      = '$8';
+  var COUNTRY = 'China';
+  var BUYER   = 'sells@zztchip.com';
+
+  // Find the thread
+  var threads = GmailApp.search('subject:"MT25QU256ABA8E12-0AAT" in:inbox', 0, 5);
+  if (!threads.length) { Logger.log('Thread not found for ' + MPN); return; }
+  var thread   = threads[0];
+  var messages = thread.getMessages();
+  var lastMsg  = messages[messages.length - 1];
+  var subject  = thread.getFirstMessageSubject();
+  var threadId = thread.getId();
+
+  // Delete any existing wrong draft for this thread
+  var allDrafts = GmailApp.getDrafts();
+  for (var d = 0; d < allDrafts.length; d++) {
+    try {
+      if (allDrafts[d].getMessage().getThread().getId() === threadId) {
+        allDrafts[d].deleteDraft();
+        Logger.log('Deleted wrong draft for ' + MPN);
+      }
+    } catch(e2) {}
+  }
+
+  // Create correct MSG_CHECKING draft with advice
+  var advice   = getAdviceHTML('netCOMPONENTS RFQ for ' + MPN + ' from sells@zztchip.com (China). QTY=1610, TP=$8 ($12,880 line value). Part IS in OEM EXCESS. Correct action is MSG_CHECKING — original wrong draft asked for TP that was already provided. Verify before sending. Remove advice before sending.');
+  var sig      = getSignatureHTML();
+  var origDate = Utilities.formatDate(lastMsg.getDate(), Session.getScriptTimeZone(), 'EEE, MMM d, yyyy, h:mm a');
+  var quoted   = '<br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">On ' + origDate + ', ' + lastMsg.getFrom() + ' wrote:<br></div>'
+    + '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">'
+    + (lastMsg.getBody() || lastMsg.getPlainBody().replace(/\n/g, '<br>')) + '</blockquote></div>';
+  var htmlBody = '<div dir="ltr">' + MSG_CHECKING + advice + sig + quoted + '</div>';
+
+  var draft = lastMsg.createDraftReply('', { htmlBody: htmlBody, to: BUYER });
+  if (!draft) { Logger.log('Failed to create draft'); return; }
+
+  hubPostDraft(threadId, null, BUYER, subject, MSG_CHECKING, draft.getId(),
+    'netCOMPONENTS RFQ for ' + MPN + ' from China. QTY=1610, TP=$8. MSG_CHECKING draft created after wrong "need TP" draft was corrected.');
+  Logger.log('MSG_CHECKING draft created for ' + MPN);
+
+  // Add to Forte (60-day duplicate check)
+  var existing = checkForteForMPN(MPN, 60);
+  var hasRecent = existing.some(function(r) { return r.recent && r.status.toLowerCase() !== 'closed'; });
+  if (hasRecent) {
+    Logger.log('Forte 60-day skip: ' + MPN);
+  } else {
+    addToForteSheet(MPN, QTY, TP, COUNTRY, '');
+    hubLog('run', 'fixMT25QU256Draft: added to Forte', { mpn: MPN, qty: QTY, tp: TP });
+    Logger.log('Added to Forte: ' + MPN + ' | QTY=' + QTY + ' | TP=' + TP + ' | ' + COUNTRY);
+  }
+}
+
+// ============================================================
+// TRIGGER 7 — AI EMAIL AGENT
+// Scans inbox every 5 min, calls Claude to decide action,
+// creates HTML draft with full signature, adds to Forte.
+// ============================================================
+
+var AGENT_LABEL = 'oem-agent-processed';
+
+function runEmailAgent() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'runEmailAgent: disabled via hub config'); return; }
+
+  var label   = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
+  var query   = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed newer_than:2d -from:' + DAVID_EMAIL;
+  var threads = GmailApp.search(query, 0, 15);
+
+  hubLog('run', 'runEmailAgent: ' + threads.length + ' thread(s) to evaluate');
+  if (!threads.length) return;
+
+  threads.forEach(function(thread) {
+    try {
+      processThreadWithAgent(thread, label);
+    } catch(e) {
+      hubLog('error', 'runEmailAgent error on thread: ' + e.toString());
+    }
+    Utilities.sleep(1500);
+  });
+}
+
+function processThreadWithAgent(thread, agentLabel) {
+  var messages = thread.getMessages();
+  var firstMsg = messages[0];
+  var lastMsg  = messages[messages.length - 1];
+  var subject  = thread.getFirstMessageSubject();
+  var threadId = thread.getId();
+  var sender   = firstMsg.getFrom();
+  var BLOCKED_DOMAINS = getBlockedDomains();
+
+  // Skip blocked domains
+  for (var b = 0; b < BLOCKED_DOMAINS.length; b++) {
+    if (sender.toLowerCase().indexOf(BLOCKED_DOMAINS[b]) >= 0) {
+      thread.addLabel(agentLabel);
+      return;
+    }
+  }
+
+  // Skip internal emails
+  if (sender.toLowerCase().indexOf('intransittech.com') >= 0) {
+    thread.addLabel(agentLabel);
+    return;
+  }
+
+  var threadText = buildAgentThreadText(messages, 6000);
+  var mpn        = extractMPNFromSubject(subject);
+
+  var oemResults   = [];
+  var forteResults = [];
+  if (mpn) {
+    try {
+      var webUrl = 'https://script.google.com/macros/s/AKfycbyuuBmiYVW5mKI82D5YQGPh1nNGLJZzlLKoxuOdtmOUwUe75VlhhakqgwKooZu5LHFK/exec'
+        + '?key=baSDJ%23444FE%268&mpn=' + encodeURIComponent(mpn);
+      var resp = UrlFetchApp.fetch(webUrl, { followRedirects: true, muteHttpExceptions: true });
+      var data = JSON.parse(resp.getContentText());
+      oemResults   = data.oem_excess  || [];
+      forteResults = data.forte_sheet || [];
+    } catch(e) {
+      hubLog('error', 'runEmailAgent OEM check error: ' + e.toString());
+    }
+  }
+
+  var payload = JSON.stringify({
+    thread_id:       threadId,
+    last_message_id: lastMsg.getId(),
+    subject:         subject,
+    sender:          sender,
+    thread_content:  threadText,
+    oem_results:     oemResults,
+    forte_results:   forteResults,
+    current_labels:  thread.getLabels().map(function(l){ return l.getName(); }),
+  });
+
+  var workerResp = UrlFetchApp.fetch(HUB_URL + '/api/email-agent', {
+    method:             'post',
+    contentType:        'application/json',
+    headers:            { Authorization: 'Bearer ' + HUB_SECRET },
+    payload:            payload,
+    muteHttpExceptions: true,
+  });
+
+  thread.addLabel(agentLabel);
+
+  if (workerResp.getResponseCode() !== 200) {
+    hubLog('error', 'runEmailAgent Worker ' + workerResp.getResponseCode() + ': ' + workerResp.getContentText().substring(0, 200));
+    return;
+  }
+
+  var decision = JSON.parse(workerResp.getContentText());
+  var action   = decision.action;
+
+  hubLog('run', 'runEmailAgent [' + action + ']: ' + subject + ' — ' + (decision.reasoning || ''));
+
+  if (action === 'no_action' || action === 'no_bid') return;
+
+  if (decision.draft_body) {
+    var plainBody = decision.draft_body;
+    // Extract and style the [ADVICE: ...] block from the agent response
+    var adviceMatch = plainBody.match(/\[ADVICE:([\s\S]*?)\](\s*)$/);
+    var bodyText = adviceMatch ? plainBody.replace(/\s*\[ADVICE:[\s\S]*?\]\s*$/, '').trim() : plainBody.trim();
+    bodyText = bodyText.replace(/\s*(Best regards?,?|Regards?,?|Sincerely,?)\s*$/i, '').trim();
+    var agentAdvice = adviceMatch
+      ? adviceMatch[1].trim()
+      : (decision.reasoning || 'AI agent decision: ' + action + '. Review carefully before sending.');
+    // For standard actions, always use the exact hardcoded text — never trust AI paraphrasing
+    if (action === 'msg_checking')      bodyText = MSG_CHECKING;
+    if (action === 'request_tp_500')    bodyText = MSG_NEED_TP_500;
+    if (action === 'request_tp_2000')   bodyText = MSG_NEED_TP_2000;
+    if (action === 'bill_handle')       bodyText = MSG_BILL;
+    var htmlBody  = '<div dir="ltr">' + bodyText.replace(/\n/g, '<br>') + getSignatureHTML() + '</div>';
+    var draft     = lastMsg.createDraftReply(bodyText, { htmlBody: htmlBody });
+    var draftId   = draft ? draft.getId() : null;
+
+    hubPostDraft(threadId, decision.mpn || mpn || '', sender, subject,
+                 '[AGENT:' + action + '] ' + plainBody, draftId, agentAdvice);
+
+    if (draftId && decision.id) {
+      try {
+        UrlFetchApp.fetch(HUB_URL + '/api/agent-decisions/' + decision.id, {
+          method:             'PATCH',
+          contentType:        'application/json',
+          headers:            { Authorization: 'Bearer ' + HUB_SECRET },
+          payload:            JSON.stringify({ status: 'drafted', gmail_draft_id: draftId }),
+          muteHttpExceptions: true,
+        });
+      } catch(e) {}
+    }
+
+    Logger.log('Agent draft created [' + action + ']: ' + subject);
+  }
+
+  var fe = decision.forte_entry;
+  if (fe && fe.mpn && fe.qty && fe.target_price) {
+    var alreadyThere = checkForteForMPN(fe.mpn, 60);
+    var hasRecent    = alreadyThere.some(function(r){ return r.recent && r.status.toLowerCase() !== 'closed'; });
+    if (!hasRecent) {
+      addToForteSheet(fe.mpn, fe.qty, fe.target_price, fe.country || '', '');
+      hubLog('run', 'Agent added to Forte: ' + fe.mpn + ' qty=' + fe.qty + ' tp=' + fe.target_price);
+    } else {
+      hubLog('run', 'Agent skipped Forte (60-day duplicate): ' + fe.mpn);
+    }
+  }
+}
+
+function buildAgentThreadText(messages, maxChars) {
+  var parts = [];
+  messages.forEach(function(m, i) {
+    var body   = m.getPlainBody() || '';
+    var lines  = body.split('\n');
+    var cleaned = [], quoteDepth = 0;
+    for (var j = 0; j < lines.length; j++) {
+      if (lines[j].match(/^[>\|]/)) { quoteDepth++; if (quoteDepth <= 4) cleaned.push(lines[j]); }
+      else { quoteDepth = 0; cleaned.push(lines[j]); }
+    }
+    parts.push('--- Message ' + (i + 1) + ' | From: ' + m.getFrom() + ' | ' + m.getDate() + ' ---\n' + cleaned.join('\n').trim());
+  });
+  var full = parts.join('\n\n');
+  return full.length > maxChars ? full.substring(0, maxChars) + '\n[truncated]' : full;
+}
+
+function extractMPNFromSubject(subject) {
+  if (!subject) return null;
+  var nc = subject.match(/\|\s*([A-Z0-9][A-Z0-9\-\/\.\s]{2,40})\s*\)?$/i);
+  if (nc) return nc[1].trim().replace(/\s{2,}/g, ' ');
+  var ic = subject.match(/RFQ[:\-\s]+([A-Z0-9][A-Z0-9\-\/\.]{4,})/i);
+  if (ic) return ic[1].trim();
+  return null;
 }

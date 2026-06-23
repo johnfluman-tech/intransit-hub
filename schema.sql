@@ -32,3 +32,22 @@ CREATE TABLE IF NOT EXISTS email_decisions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_email_decisions_mpn ON email_decisions (mpn);
+
+CREATE TABLE IF NOT EXISTS agent_decisions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id       TEXT,
+  mpn             TEXT,
+  sender          TEXT,
+  subject         TEXT,
+  action          TEXT NOT NULL,
+  reasoning       TEXT,
+  draft_body      TEXT,
+  forte_entry     TEXT,
+  gmail_draft_id  TEXT,
+  status          TEXT DEFAULT 'pending',
+  created_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_thread ON agent_decisions (thread_id);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_status ON agent_decisions (status);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_time   ON agent_decisions (created_at DESC);
