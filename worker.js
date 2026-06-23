@@ -816,9 +816,11 @@ async function handleSelfHeal(request, env) {
     headers: { Authorization: `Bearer ${env.GITHUB_TOKEN}`, 'User-Agent': 'intransit-hub', Accept: 'application/vnd.github.v3+json' }
   });
   if (!ghRead.ok) {
+    const ghErrBody = await ghRead.text().catch(() => '');
+    const ghErrMsg = `GitHub read failed: ${ghRead.status} — ${ghErrBody.slice(0, 300)}`;
     await env.DB.prepare(`UPDATE pending_issues SET status='failed', fix_description=?, updated_at=datetime('now') WHERE id=?`)
-      .bind('GitHub read failed: ' + ghRead.status, issue_id).run();
-    return json({ error: 'GitHub read failed' }, 500);
+      .bind(ghErrMsg, issue_id).run();
+    return json({ error: 'GitHub read failed', status: ghRead.status, detail: ghErrBody.slice(0, 300) }, 500);
   }
   const ghData = await ghRead.json();
   const fileSha = ghData.sha;

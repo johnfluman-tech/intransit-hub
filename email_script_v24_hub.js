@@ -300,7 +300,7 @@ function scanInboxForPreview() {
             if (tp2) {
               prediction = 'Draft → MSG_CHECKING to ' + sender + ' (TP: ' + tp2 + ')';
             } else {
-              var has2k = oemResults.some(function(r){ return r.notes.indexOf('$2000') >= 0; });
+              var has2k = oemResults.some(function(r){ return r.notes.indexOf('$2000') >= 0 || r.notes.indexOf('$2,000') >= 0; });
               prediction = 'Draft → Need TP ($' + (has2k ? '2,000' : '500') + ' min) to ' + sender;
             }
           }
@@ -3071,14 +3071,13 @@ function fixMT25QU256Draft() {
     } catch(e2) {}
   }
 
-  // Create correct MSG_CHECKING draft with advice
-  var advice   = getAdviceHTML('netCOMPONENTS RFQ for ' + MPN + ' from sells@zztchip.com (China). QTY=1610, TP=$8 ($12,880 line value). Part IS in OEM EXCESS. Correct action is MSG_CHECKING — original wrong draft asked for TP that was already provided. Verify before sending. Remove advice before sending.');
+  // Create correct MSG_CHECKING draft
   var sig      = getSignatureHTML();
   var origDate = Utilities.formatDate(lastMsg.getDate(), Session.getScriptTimeZone(), 'EEE, MMM d, yyyy, h:mm a');
   var quoted   = '<br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">On ' + origDate + ', ' + lastMsg.getFrom() + ' wrote:<br></div>'
     + '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">'
     + (lastMsg.getBody() || lastMsg.getPlainBody().replace(/\n/g, '<br>')) + '</blockquote></div>';
-  var htmlBody = '<div dir="ltr">' + MSG_CHECKING + advice + sig + quoted + '</div>';
+  var htmlBody = '<div dir="ltr">' + MSG_CHECKING + sig + quoted + '</div>';
 
   var draft = lastMsg.createDraftReply('', { htmlBody: htmlBody, to: BUYER });
   if (!draft) { Logger.log('Failed to create draft'); return; }
