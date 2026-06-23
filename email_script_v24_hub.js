@@ -2637,12 +2637,107 @@ function addonChat(e) {
         .setParameters({ threadId: threadId, subject: subject, fromH: fromH, draftId: draftId })));
     builder.addSection(contSection);
 
+    // Report Issue section — always visible at bottom
+    var issueSection = CardService.newCardSection().setHeader('🐛 Something wrong?');
+    issueSection.addWidget(CardService.newTextInput()
+      .setFieldName('issueDescription')
+      .setTitle('Describe the issue')
+      .setHint('e.g. "Wrong routing — should have asked for TP not sent to Bill"')
+      .setMultiline(true));
+    issueSection.addWidget(CardService.newTextButton()
+      .setText('Report Issue & Fix')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#b71c1c')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonReportIssue')
+        .setParameters({ threadId: threadId, subject: subject, mpn: (e.commonEventObject.parameters.mpn || '') })));
+    builder.addSection(issueSection);
+
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().pushCard(builder.build()))
       .build();
 
   } catch(err) {
     return notify('Error in chat: ' + err.toString());
+  }
+}
+
+// ── Report Issue → self-heal ─────────────────────────
+function addonReportIssue(e) {
+  try {
+    var params      = e.commonEventObject.parameters;
+    var formInputs  = e.commonEventObject.formInputs || {};
+    var description = (formInputs.issueDescription || {}).stringInputs
+      ? formInputs.issueDescription.stringInputs.value[0] : '';
+    if (!description || description.trim().length < 5) {
+      return notify('Please describe the issue before reporting.');
+    }
+    var threadId = params.threadId || '';
+    var subject  = params.subject  || '';
+    var mpn      = params.mpn      || '';
+
+    // Gather context: last agent decision for this thread
+    var context = null;
+    try {
+      var decResp = UrlFetchApp.fetch(HUB_URL + '/api/agent-decisions?thread_id=' + encodeURIComponent(threadId), {
+        headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+      });
+      var decData = JSON.parse(decResp.getContentText());
+      var decisions = (decData.decisions || []);
+      if (decisions.length) context = { last_decision: decisions[0] };
+    } catch(ce) {}
+
+    // Post the issue
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/issues', {
+      method: 'post', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        thread_id: threadId, mpn: mpn,
+        description: 'Subject: ' + subject + '\nMPN: ' + mpn + '\n\n' + description,
+        context: context
+      }),
+      muteHttpExceptions: true
+    });
+    var data = JSON.parse(resp.getContentText());
+    if (!data.ok) return notify('Failed to log issue: ' + (data.error || 'unknown'));
+    var issueId = data.id;
+
+    // Trigger self-heal immediately
+    var healResp = UrlFetchApp.fetch(HUB_URL + '/api/self-heal', {
+      method: 'post', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ issue_id: issueId }),
+      muteHttpExceptions: true
+    });
+    var healData = JSON.parse(healResp.getContentText());
+
+    var builder = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('Self-Heal').setSubtitle('Issue #' + issueId));
+
+    var section = CardService.newCardSection();
+    if (healData.ok) {
+      section.addWidget(CardService.newTextParagraph().setText(
+        '✅ Fix pushed to GitHub\n\n' +
+        '📝 ' + (healData.explanation || '') + '\n\n' +
+        '⏳ GitHub Actions is deploying now — takes about 60 seconds.\n\n' +
+        'Commit: ' + (healData.commit || 'pending').substring(0, 8)
+      ));
+    } else {
+      section.addWidget(CardService.newTextParagraph().setText(
+        '⚠️ Fix attempt failed:\n\n' + (healData.error || JSON.stringify(healData))
+      ));
+    }
+    section.addWidget(CardService.newTextButton()
+      .setText('← Back')
+      .setOnClickAction(CardService.newAction().setFunctionName('addonHomepage')));
+    builder.addSection(section);
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(builder.build()))
+      .build();
+
+  } catch(err) {
+    return notify('Report issue error: ' + err.toString());
   }
 }
 

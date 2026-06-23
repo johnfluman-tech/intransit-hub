@@ -51,3 +51,19 @@ CREATE TABLE IF NOT EXISTS agent_decisions (
 CREATE INDEX IF NOT EXISTS idx_agent_decisions_thread ON agent_decisions (thread_id);
 CREATE INDEX IF NOT EXISTS idx_agent_decisions_status ON agent_decisions (status);
 CREATE INDEX IF NOT EXISTS idx_agent_decisions_time   ON agent_decisions (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS pending_issues (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at      TEXT DEFAULT (datetime('now')),
+  updated_at      TEXT DEFAULT (datetime('now')),
+  thread_id       TEXT,
+  mpn             TEXT,
+  description     TEXT NOT NULL,
+  context         TEXT,
+  status          TEXT DEFAULT 'pending',
+  fix_description TEXT,
+  fix_commit      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_issues_status ON pending_issues (status);
+CREATE INDEX IF NOT EXISTS idx_issues_time   ON pending_issues (created_at DESC);

@@ -71,6 +71,10 @@ export default {
       if (p === '/api/learn'           && m === 'POST') return handleLearn(request, env);
       if (p === '/api/agent-decisions' && m === 'GET')  return handleGetAgentDecisions(url, env);
 
+      if (p === '/api/issues'    && m === 'GET')  return handleGetIssues(url, env);
+      if (p === '/api/issues'    && m === 'POST') return handlePostIssue(request, env);
+      if (p === '/api/self-heal' && m === 'POST') return handleSelfHeal(request, env);
+
       const agentId = p.match(/^\/api\/agent-decisions\/(\d+)$/);
       if (agentId && m === 'PATCH') return handlePatchAgentDecision(request, env, parseInt(agentId[1]));
 
@@ -766,4 +770,167 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status, headers: { ...CORS, 'Content-Type': 'application/json' },
   });
+}
+
+// ─── /api/issues GET ────────────────────────────────
+async function handleGetIssues(url, env) {
+  const status = url.searchParams.get('status') || 'pending';
+  const { results } = await env.DB.prepare(
+    `SELECT * FROM pending_issues WHERE status = ? ORDER BY created_at DESC LIMIT 20`
+  ).bind(status).all();
+  return json({ issues: results || [] });
+}
+
+// ─── /api/issues POST ───────────────────────────────
+async function handlePostIssue(request, env) {
+  const { thread_id, mpn, description, context } = await request.json();
+  if (!description) return json({ error: 'description required' }, 400);
+  const { meta } = await env.DB.prepare(
+    `INSERT INTO pending_issues (thread_id, mpn, description, context) VALUES (?, ?, ?, ?)`
+  ).bind(thread_id || null, mpn || null, description, context ? JSON.stringify(context) : null).run();
+  return json({ ok: true, id: meta.last_row_id });
+}
+
+// ─── /api/self-heal POST ────────────────────────────
+const HEAL_FORBIDDEN = [
+  'env.HUB_SECRET', 'env.CLAUDE_API_KEY', 'env.GITHUB_TOKEN',
+  'handleSelfHeal', 'handlePostIssue', 'handleGetIssues',
+  'Authorization', 'Unauthorized',
+];
+
+async function handleSelfHeal(request, env) {
+  const { issue_id } = await request.json();
+  if (!issue_id) return json({ error: 'issue_id required' }, 400);
+
+  const issue = await env.DB.prepare('SELECT * FROM pending_issues WHERE id = ?').bind(issue_id).first();
+  if (!issue) return json({ error: 'Issue not found' }, 404);
+  if (issue.status === 'fixed') return json({ error: 'Already fixed', issue });
+
+  // Mark as in-progress
+  await env.DB.prepare(`UPDATE pending_issues SET status = 'fixing', updated_at = datetime('now') WHERE id = ?`).bind(issue_id).run();
+
+  // Read current worker.js from GitHub
+  const ghRead = await fetch('https://api.github.com/repos/johnfluman-tech/intransit-hub/contents/worker.js', {
+    headers: { Authorization: `Bearer ${env.GITHUB_TOKEN}`, 'User-Agent': 'intransit-hub', Accept: 'application/vnd.github.v3+json' }
+  });
+  if (!ghRead.ok) {
+    await env.DB.prepare(`UPDATE pending_issues SET status='failed', fix_description=?, updated_at=datetime('now') WHERE id=?`)
+      .bind('GitHub read failed: ' + ghRead.status, issue_id).run();
+    return json({ error: 'GitHub read failed' }, 500);
+  }
+  const ghData = await ghRead.json();
+  const fileSha = ghData.sha;
+  const binary = atob(ghData.content.replace(/\s/g, ''));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const currentCode = new TextDecoder().decode(bytes);
+
+  // Extract the two sections Claude is allowed to modify
+  const agentPromptStart = currentCode.indexOf('const AGENT_SYSTEM_PROMPT');
+  const chatStart        = currentCode.indexOf('async function handleChat(');
+  const agentFnStart     = currentCode.indexOf('async function handleEmailAgent(');
+  const relevantCode = [
+    agentPromptStart >= 0 ? currentCode.substring(agentPromptStart, agentPromptStart + 3000) : '',
+    agentFnStart     >= 0 ? currentCode.substring(agentFnStart,     agentFnStart + 2000)     : '',
+    chatStart        >= 0 ? currentCode.substring(chatStart,        chatStart + 1500)         : '',
+  ].filter(Boolean).join('\n\n// ---\n\n');
+
+  // Ask Claude to generate a targeted fix
+  const fixPrompt = `You are fixing a bug in the Intransit Hub Cloudflare Worker email agent.
+
+REPORTED ISSUE:
+${issue.description}
+
+CONTEXT:
+${issue.context || 'none'}
+
+RELEVANT CODE SECTIONS (these are the only sections you may modify):
+\`\`\`javascript
+${relevantCode}
+\`\`\`
+
+RULES:
+1. Return a find-and-replace patch — NOT a full file rewrite.
+2. The "find" string must be the EXACT text from the code above (it will be verified).
+3. Only modify AGENT_SYSTEM_PROMPT, handleEmailAgent logic, or handleChat system prompt.
+4. Keep the change as minimal as possible — fix only what is described.
+5. Do not include auth code, secret handling, or database operations.
+
+Return JSON only:
+{
+  "find": "exact string to find",
+  "replace": "replacement string",
+  "explanation": "one sentence: what was wrong and what was changed"
+}`;
+
+  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, messages: [{ role: 'user', content: fixPrompt }] }),
+  });
+  const claudeData = await claudeRes.json();
+  if (!claudeData.content || !claudeData.content[0]) {
+    await env.DB.prepare(`UPDATE pending_issues SET status='failed', fix_description='Claude API error', updated_at=datetime('now') WHERE id=?`).bind(issue_id).run();
+    return json({ error: 'Claude API error' }, 500);
+  }
+
+  let fix;
+  try {
+    const raw = claudeData.content[0].text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    fix = JSON.parse(raw);
+  } catch(e) {
+    await env.DB.prepare(`UPDATE pending_issues SET status='failed', fix_description='Claude returned non-JSON', updated_at=datetime('now') WHERE id=?`).bind(issue_id).run();
+    return json({ error: 'Claude returned non-JSON' }, 500);
+  }
+
+  // Validate: find must exist in code
+  if (!currentCode.includes(fix.find)) {
+    await env.DB.prepare(`UPDATE pending_issues SET status='failed', fix_description=?, updated_at=datetime('now') WHERE id=?`)
+      .bind('Fix rejected: target string not found in code', issue_id).run();
+    return json({ error: 'Fix validation failed — target string not found', fix }, 400);
+  }
+
+  // Safety check: find/replace must not touch forbidden sections
+  for (const forbidden of HEAL_FORBIDDEN) {
+    if (fix.find.includes(forbidden) || fix.replace.includes(forbidden)) {
+      await env.DB.prepare(`UPDATE pending_issues SET status='failed', fix_description=?, updated_at=datetime('now') WHERE id=?`)
+        .bind('Fix rejected: touches forbidden code section (' + forbidden + ')', issue_id).run();
+      return json({ error: 'Fix rejected — touches protected code', forbidden }, 400);
+    }
+  }
+
+  // Apply the fix
+  const newCode = currentCode.replace(fix.find, fix.replace);
+
+  // Encode and push to GitHub
+  const encoder = new TextEncoder();
+  const newBytes = encoder.encode(newCode);
+  let newBinary = '';
+  newBytes.forEach(b => newBinary += String.fromCharCode(b));
+  const encoded = btoa(newBinary);
+
+  const ghPush = await fetch('https://api.github.com/repos/johnfluman-tech/intransit-hub/contents/worker.js', {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${env.GITHUB_TOKEN}`, 'User-Agent': 'intransit-hub', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: `self-heal #${issue_id}: ${fix.explanation}`,
+      content: encoded,
+      sha: fileSha,
+    }),
+  });
+
+  if (!ghPush.ok) {
+    const errText = await ghPush.text();
+    await env.DB.prepare(`UPDATE pending_issues SET status='failed', fix_description=?, updated_at=datetime('now') WHERE id=?`)
+      .bind('GitHub push failed: ' + errText.substring(0, 200), issue_id).run();
+    return json({ error: 'GitHub push failed', detail: errText }, 500);
+  }
+
+  const pushData = await ghPush.json();
+  const commitSha = pushData.commit?.sha || 'unknown';
+
+  await env.DB.prepare(`UPDATE pending_issues SET status='fixing', fix_description=?, fix_commit=?, updated_at=datetime('now') WHERE id=?`)
+    .bind(fix.explanation, commitSha, issue_id).run();
+
+  return json({ ok: true, explanation: fix.explanation, commit: commitSha, deploying: true, message: 'Fix pushed to GitHub — GitHub Actions is deploying now (~60 seconds)' });
 }
