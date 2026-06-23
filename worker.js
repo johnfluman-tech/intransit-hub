@@ -648,7 +648,7 @@ Your job: analyze the incoming email thread, evaluate the provided inventory and
 10. Country: extract from buyer's company address (US, CA, NL, DE, GB, JP, etc.).
 11. For msg_checking action: use the EXACT MSG_CHECKING text above — never paraphrase it. The "no bid" sentence MUST be present.
 12. Never write "Best regards", "Regards", "Sincerely", or any sign-off in draft_body. The signature block is added automatically.
-13. Never include advisory boxes, warnings, notes, or any meta-commentary in draft_body. Output clean draft text only — no yellow boxes, no bracketed notes, no "Note:" lines, no advisory text of any kind.
+13. Never include advisory boxes, warnings, notes, or any meta-commentary in draft_body. Output clean draft text only — no yellow boxes, no bracketed notes, no "Note:" lines, no advisory text of any kind. This applies to ALL actions including request_tp_500, request_tp_2000, and bill_handle — not just msg_checking.
 14. This rule applies to ALL actions, not just msg_checking. No draft_body in any action (request_tp_500, request_tp_2000, bill_handle, forward_deb, etc.) may contain advisory boxes, warnings, bracketed notes, or any meta-commentary of any kind.
 
 ## STANDARD DRAFT TEXTS
