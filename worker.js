@@ -633,6 +633,7 @@ Your job: analyze the incoming email thread, evaluate the provided inventory and
 - request_tp_2000: Part IS in OEM excess, buyer has NOT given a TP, NO "BILL EXT" in any OEM notes, AND at least one OEM note literally contains "$2000" or "$2,000" → ask for TP ($2,000 min). ONLY if "$2000"/"$2,000" literally appears AND no BILL EXT.
 - bill_handle: Part IS in OEM excess, at least one OEM note contains "BILL EXT", AND buyer HAS provided a target price → draft "Bill will help with this request" to buyer CC bill.pratt@intransittech.com. CRITICAL: if any OEM note has "BILL EXT" and buyer gave TP, this is the ONLY valid action — NOT msg_checking.
 - no_bid: Part NOT found in OEM excess → silent, no reply
+- remove_oem: Email from David/supplier saying part is no stock or unavailable → reply confirming "Removing [MPN] from OEM EXCESS". Extract MPN from subject if needed (e.g. "#3900 MCIMX535DVP1C2 No stock" → MPN is MCIMX535DVP1C2).
 - stan_list: Part NOT found in OEM excess BUT IS found in IN STOCK (stan list) → reply that warehouse is checking details and will update ASAP (no TP needed), and note for stan sheet tracking
 - no_action: Thread is internal, already has MSG_CHECKING from John, or no actionable request
 - forward_deb: Email is a payment advice / remittance notification from a bank or ERP
