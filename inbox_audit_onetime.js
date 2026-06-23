@@ -3,7 +3,29 @@
 // Scans every inbox thread + every thread with a draft.
 // Explains what the agent did. Fixes: BILL EXT routing, wrong TP amount,
 // advice blocks, stale drafts. Run once from Apps Script editor.
+//
+// Also run fixMissedDavidRemovals() separately to delete the 3 parts
+// David said were no-stock but the agent failed to remove.
 // ============================================================
+
+// ONE-TIME: Delete parts David confirmed as no-stock that the agent missed
+function fixMissedDavidRemovals() {
+  var missed = [
+    { mpn: 'MCIMX535DVP1C2', subject: '#3900 MCIMX535DVP1C2 No stock' },
+    { mpn: 'BD429B',          subject: '#3904 BD429B Cant find'         },
+    { mpn: '10M08SAM153I7G',  subject: '#3896 10M08SAM153I7G NO STOCK'  },
+  ];
+  missed.forEach(function(item) {
+    try {
+      var result = deletePart(item.mpn, item.subject);
+      Logger.log('Removed ' + item.mpn + ' from OEM EXCESS: ' + JSON.stringify(result));
+      hubLog('run', 'fixMissedDavidRemovals: removed ' + item.mpn, { mpn: item.mpn });
+    } catch(e) {
+      Logger.log('ERROR removing ' + item.mpn + ': ' + e.toString());
+    }
+  });
+  Logger.log('fixMissedDavidRemovals complete — 3 parts removed.');
+}
 
 function inboxFullAudit() {
   var BILL_EMAIL_LOCAL  = 'bill.pratt@intransittech.com';

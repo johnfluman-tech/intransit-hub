@@ -3219,6 +3219,16 @@ function processThreadWithAgent(thread, agentLabel) {
 
   if (action === 'no_action' || action === 'no_bid') return;
 
+  if (action === 'remove_oem') {
+    var removeMpn = decision.mpn || mpn;
+    if (removeMpn) {
+      deletePart(removeMpn, subject);
+      hubLog('run', 'Agent removed from OEM EXCESS (David no-stock): ' + removeMpn, { mpn: removeMpn });
+      Logger.log('Agent removed from OEM EXCESS: ' + removeMpn);
+    }
+    return;
+  }
+
   if (decision.draft_body) {
     var plainBody = decision.draft_body;
     // Extract and style the [ADVICE: ...] block from the agent response
