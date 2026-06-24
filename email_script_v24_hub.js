@@ -1720,6 +1720,84 @@ function processFixQueue() {
 }
 
 // ============================================================
+// COMMAND QUEUE — inventory actions queued remotely via the hub
+// ============================================================
+function processCommandQueue() {
+  try {
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/command-queue?status=pending', {
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      muteHttpExceptions: true
+    });
+    var commands = (JSON.parse(resp.getContentText()).commands) || [];
+    if (!commands.length) return;
+
+    commands.forEach(function(cmd) {
+      try {
+        var data = {};
+        try { data = JSON.parse(cmd.data || '{}'); } catch(e) {}
+
+        if (cmd.type === 'remove_instock_mpn') {
+          var mpn = (data.mpn || '').trim();
+          if (!mpn) throw new Error('No MPN provided');
+          var sheet = SpreadsheetApp.openById(IN_STOCK_ID).getSheets()[0];
+          var sheetData = sheet.getDataRange().getValues();
+          var searchNorm = normalize(mpn);
+          var rowsToDelete = [];
+          for (var i = 1; i < sheetData.length; i++) {
+            if (normalize(String(sheetData[i][0])) === searchNorm) rowsToDelete.push(i + 1);
+          }
+          if (!rowsToDelete.length) throw new Error('MPN not found in InStock: ' + mpn);
+          rowsToDelete.sort(function(a, b) { return b - a; });
+          rowsToDelete.forEach(function(row) { sheet.deleteRow(row); });
+          hubLog('inventory', 'Removed ' + rowsToDelete.length + ' row(s) for MPN ' + mpn + ' from InStock', { mpn: mpn, rows_deleted: rowsToDelete.length });
+
+        } else if (cmd.type === 'send_datamaster_email') {
+          var token = ScriptApp.getOAuthToken();
+          var fetchOpts = { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true };
+          var DATAMASTER_BCC = 'datamaster@netcomponents.com';
+
+          var oemBlob = UrlFetchApp.fetch(
+            'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/export?format=xlsx',
+            fetchOpts
+          ).getBlob().setName('OEM_EXCESS.xlsx');
+
+          var inBlob = UrlFetchApp.fetch(
+            'https://docs.google.com/spreadsheets/d/' + IN_STOCK_ID + '/export?format=xlsx',
+            fetchOpts
+          ).getBlob().setName('IN STOCK.xlsx');
+
+          GmailApp.sendEmail(NOTIFY_EMAIL, 'Please post', '', {
+            attachments: [oemBlob, inBlob],
+            bcc: DATAMASTER_BCC,
+            name: 'John Fluman'
+          });
+          hubLog('inventory', 'Sent NetCOMPONENTS report (OEM_EXCESS + IN STOCK) to ' + DATAMASTER_BCC, {});
+        }
+
+        UrlFetchApp.fetch(HUB_URL + '/api/command-queue/' + cmd.id, {
+          method: 'PATCH', contentType: 'application/json',
+          headers: { Authorization: 'Bearer ' + HUB_SECRET },
+          payload: JSON.stringify({ status: 'done' }),
+          muteHttpExceptions: true
+        });
+        Logger.log('Command queue done #' + cmd.id + ' | type: ' + cmd.type);
+
+      } catch(e) {
+        Logger.log('Command queue error #' + cmd.id + ': ' + e.toString());
+        UrlFetchApp.fetch(HUB_URL + '/api/command-queue/' + cmd.id, {
+          method: 'PATCH', contentType: 'application/json',
+          headers: { Authorization: 'Bearer ' + HUB_SECRET },
+          payload: JSON.stringify({ status: 'failed', error: e.toString() }),
+          muteHttpExceptions: true
+        });
+      }
+    });
+  } catch(e) {
+    Logger.log('processCommandQueue error: ' + e.toString());
+  }
+}
+
+// ============================================================
 // TRIGGERS
 // ============================================================
 function setupTriggers() {
@@ -1733,7 +1811,8 @@ function setupTriggers() {
   ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('runEmailAgent').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
-  Logger.log('All 8 triggers installed.');
+  ScriptApp.newTrigger('processCommandQueue').timeBased().everyMinutes(5).create();
+  Logger.log('All 10 triggers installed.');
 }
 
 // ============================================================

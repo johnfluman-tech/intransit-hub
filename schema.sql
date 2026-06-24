@@ -83,3 +83,16 @@ CREATE TABLE IF NOT EXISTS fix_queue (
 
 CREATE INDEX IF NOT EXISTS idx_fix_queue_status ON fix_queue (status);
 CREATE INDEX IF NOT EXISTS idx_fix_queue_time   ON fix_queue (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS command_queue (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  type        TEXT NOT NULL,   -- 'remove_instock_mpn', 'send_datamaster_email'
+  data        TEXT,            -- JSON payload
+  status      TEXT DEFAULT 'pending',  -- 'pending', 'done', 'failed'
+  error       TEXT,
+  created_at  TEXT DEFAULT (datetime('now')),
+  updated_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_command_queue_status ON command_queue (status);
+CREATE INDEX IF NOT EXISTS idx_command_queue_time   ON command_queue (created_at DESC);

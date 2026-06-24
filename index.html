@@ -541,6 +541,10 @@
       <span class="icon">🎓</span>
       <span class="nav-text">Training</span>
     </a>
+    <a data-tab="inventory">
+      <span class="icon">📦</span>
+      <span class="nav-text">Inventory</span>
+    </a>
 
     <div class="nav-section">System</div>
     <a data-tab="memory">
@@ -871,6 +875,40 @@
       </div>
     </div>
 
+    <!-- ── INVENTORY TAB ── -->
+    <div class="tab-panel" id="tab-inventory">
+
+      <!-- Remove from Stock -->
+      <div class="section-header">
+        <h2>🗑 Remove MPN from InStock</h2>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:28px">
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Mark a part as gone when it was sold/shipped but the InStock sheet wasn't updated. Deletes the row immediately on next 5-min run.</p>
+        <div class="cfg-field">
+          <label>Part Number (MPN)</label>
+          <input type="text" id="inv-mpn-input" placeholder="e.g. BCM5461SA2KQMG" style="text-transform:uppercase">
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:4px">
+          <button class="btn primary" onclick="removeFromStock()">Remove from InStock</button>
+          <span id="inv-remove-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>
+
+      <!-- Post to NetCOMPONENTS -->
+      <div class="section-header">
+        <h2>📤 Post to NetCOMPONENTS</h2>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px">
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:8px">Exports OEM Excess + InStock sheets and emails them to NetCOMPONENTS — matching your standard format.</p>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:16px">Subject: "Please post" &nbsp;·&nbsp; To: john.fluman@intransittech.com &nbsp;·&nbsp; BCC: datamaster@netcomponents.com &nbsp;·&nbsp; Attachments: OEM_EXCESS.xlsx, IN STOCK.xlsx</p>
+        <div style="display:flex;gap:10px;align-items:center">
+          <button class="btn primary" onclick="sendNetComEmail()">📤 Send to NetCOMPONENTS</button>
+          <span id="inv-send-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>
+
+    </div>
+
     <!-- ── TRAINING TAB ── -->
     <div class="tab-panel" id="tab-training">
       <div class="page-header">
@@ -1136,6 +1174,7 @@ const TAB_TITLES = {
   'memory':       'AI Memory',
   'apps':         'Apps',
   'training':     'Email Training',
+  'inventory':    'Inventory Tools',
   'settings':     'Settings'
 };
 
@@ -1610,6 +1649,32 @@ async function saveAppConfig(app) {
     if (updEl)   updEl.textContent = 'Saved just now';
   } catch (e) {
     alert('Save failed: ' + e.message);
+  }
+}
+
+// ─── Inventory Tools ─────────────────────────────
+async function removeFromStock() {
+  const mpn = (document.getElementById('inv-mpn-input').value || '').trim().toUpperCase();
+  const el = document.getElementById('inv-remove-status');
+  if (!mpn) { el.textContent = 'Enter an MPN first.'; el.style.color = 'var(--error)'; return; }
+  el.textContent = 'Queuing…'; el.style.color = 'var(--muted)';
+  try {
+    await apiPost('/api/command-queue', { type: 'remove_instock_mpn', data: { mpn } });
+    el.textContent = '✓ Queued — will run within 5 min.'; el.style.color = 'var(--success)';
+    document.getElementById('inv-mpn-input').value = '';
+  } catch(e) {
+    el.textContent = 'Error: ' + e.message; el.style.color = 'var(--error)';
+  }
+}
+
+async function sendNetComEmail() {
+  const el = document.getElementById('inv-send-status');
+  el.textContent = 'Queuing…'; el.style.color = 'var(--muted)';
+  try {
+    await apiPost('/api/command-queue', { type: 'send_datamaster_email' });
+    el.textContent = '✓ Queued — email will send within 5 min.'; el.style.color = 'var(--success)';
+  } catch(e) {
+    el.textContent = 'Error: ' + e.message; el.style.color = 'var(--error)';
   }
 }
 
