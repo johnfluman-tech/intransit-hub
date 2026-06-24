@@ -160,7 +160,9 @@ Key functions:
 - `checkInboxForPaymentAdvice()` — Trigger 6, forwards payment advice to Deb
 - `checkInboxForTPReplies()` — Trigger 4, processes TP replies
 - `checkInboxForNewRFQs()` — Trigger 3, scans for new RFQs
-- `setupTriggers()` — installs all 6 triggers (run once after script update)
+- `processFixQueue()` — Trigger 9, repairs Gmail drafts queued via /api/fix-queue
+- `processCommandQueue()` — Trigger 10, runs inventory commands (remove stock, send NetCOMPONENTS email)
+- `setupTriggers()` — installs all 10 triggers (run once after script update)
 
 BLOCKED_DOMAINS: `['sourceschip.com', 'bulechip.com', 'feelchips.com']`
 
