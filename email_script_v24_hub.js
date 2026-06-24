@@ -2123,6 +2123,29 @@ function buildHomepageCard() {
       builder.addSection(section);
     });
 
+    // ── Inventory section ────────────────────────────────────────────────────
+    var invSectionHome = CardService.newCardSection().setHeader('📦 Inventory');
+    invSectionHome.addWidget(CardService.newTextInput()
+      .setFieldName('invMpn')
+      .setTitle('Remove MPN from InStock')
+      .setHint('Enter MPN of sold/shipped part')
+      .setMultiline(false));
+    invSectionHome.addWidget(CardService.newTextButton()
+      .setText('🗑 Remove from InStock')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#7b1fa2')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonRemoveStock')
+        .setParameters({ threadId: '' })));
+    invSectionHome.addWidget(CardService.newTextButton()
+      .setText('📤 Send to NetCOMPONENTS')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1565c0')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonSendNetCom')
+        .setParameters({})));
+    builder.addSection(invSectionHome);
+
     return builder.build();
   } catch(err) {
     return CardService.newCardBuilder()
@@ -2294,6 +2317,31 @@ function buildContextualCard(e) {
           draftBody: ''
         })));
     builder.addSection(chatSection);
+
+    // ── Inventory section — always shown ──────────────────────────────────────
+    var invMpnHint = extractMPNFromSubject(subject) || '';
+    var invSection = CardService.newCardSection().setHeader('📦 Inventory');
+    invSection.addWidget(CardService.newTextInput()
+      .setFieldName('invMpn')
+      .setTitle('Remove MPN from InStock')
+      .setHint('Part sold/shipped — enter MPN to delete row')
+      .setValue(invMpnHint)
+      .setMultiline(false));
+    invSection.addWidget(CardService.newTextButton()
+      .setText('🗑 Remove from InStock')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#7b1fa2')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonRemoveStock')
+        .setParameters({ threadId: gmailThreadId })));
+    invSection.addWidget(CardService.newTextButton()
+      .setText('📤 Send to NetCOMPONENTS')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1565c0')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonSendNetCom')
+        .setParameters({})));
+    builder.addSection(invSection);
 
     return [builder.build()];
   } catch(err) {
@@ -2902,6 +2950,52 @@ function addonChat(e) {
 
   } catch(err) {
     return notify('Error in chat: ' + err.toString());
+  }
+}
+
+// ── Remove MPN from InStock ──────────────────────────
+function addonRemoveStock(e) {
+  try {
+    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+    var mpnField = formInputs.invMpn;
+    var mpn = (mpnField && mpnField.stringInputs && mpnField.stringInputs.value && mpnField.stringInputs.value[0] || '').trim().toUpperCase();
+    if (!mpn) {
+      return CardService.newActionResponseBuilder()
+        .setNotification(CardService.newNotification().setText('⚠️ Enter an MPN first.'))
+        .build();
+    }
+    UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ type: 'remove_instock_mpn', data: { mpn: mpn } }),
+      muteHttpExceptions: true
+    });
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('✅ Queued: removing ' + mpn + ' from InStock (~5 min)'))
+      .build();
+  } catch(err) {
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('❌ Error: ' + err.toString()))
+      .build();
+  }
+}
+
+// ── Send to NetCOMPONENTS ─────────────────────────────
+function addonSendNetCom(e) {
+  try {
+    UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ type: 'send_datamaster_email' }),
+      muteHttpExceptions: true
+    });
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('✅ Queued: NetCOMPONENTS email will send in ~5 min'))
+      .build();
+  } catch(err) {
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('❌ Error: ' + err.toString()))
+      .build();
   }
 }
 
