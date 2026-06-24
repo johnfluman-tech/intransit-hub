@@ -1754,7 +1754,14 @@ function processCommandQueue() {
         } else if (cmd.type === 'send_datamaster_email') {
           var token = ScriptApp.getOAuthToken();
           var fetchOpts = { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true };
-          var DATAMASTER_BCC = 'datamaster@netcomponents.com';
+          var DATAMASTER_BCC = [
+            '5BDFA5@stkdst.com',
+            'datamaster@netcomponents.com',
+            'post@icsource.com',
+            'bill@intransittech.com',
+            'david@fortetechno.com',
+            'Stan@amorelectronics.com'
+          ].join(',');
 
           var oemBlob = UrlFetchApp.fetch(
             'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/export?format=xlsx',
