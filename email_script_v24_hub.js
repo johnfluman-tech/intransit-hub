@@ -1378,7 +1378,10 @@ function checkInboxForNewRFQs() {
         var stanR = stanResults[0];
         var stanQuoteText = stanR.colB + (stanR.colC ? ' | ' + stanR.colC : '');
         var replyTextW3, htmlBodyW3;
-        if (oemResults.length) {
+        // FIX v26: W3 OEM rows are the same stock as the InStock W3 entry — filter them out
+        // before deciding there is "additional quantity available" to quote via OEM
+        var nonW3OemResults = oemResults.filter(function(r){ return String(r.notes).indexOf('Warehouse#3') < 0; });
+        if (nonW3OemResults.length) {
           replyTextW3 = stanQuoteText + '\n\nWe also have additional quantity available. ' + tpMsg;
           Logger.log('Combined Stan+OEM draft: '+mpn);
         } else {
@@ -1657,6 +1660,66 @@ function doGet(e) {
 }
 
 // ============================================================
+// FIX QUEUE — execute draft fixes queued remotely via the hub
+// ============================================================
+function processFixQueue() {
+  try {
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/fix-queue?status=pending', {
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      muteHttpExceptions: true
+    });
+    var fixes = (JSON.parse(resp.getContentText()).fixes) || [];
+    if (!fixes.length) return;
+
+    fixes.forEach(function(fix) {
+      try {
+        if (fix.type === 'replace_draft') {
+          var thread = GmailApp.getThreadById(fix.thread_id);
+          if (!thread) throw new Error('Thread not found: ' + fix.thread_id);
+
+          // Delete all existing drafts for this thread
+          var allDrafts = GmailApp.getDrafts();
+          for (var d = 0; d < allDrafts.length; d++) {
+            try {
+              if (allDrafts[d].getMessage().getThread().getId() === fix.thread_id) {
+                allDrafts[d].deleteDraft();
+                Logger.log('Fix queue: deleted draft for ' + fix.thread_id);
+              }
+            } catch(e2) {}
+          }
+
+          // Create the replacement draft
+          var firstMsg = thread.getMessages()[0];
+          var htmlBody = buildDraftHTML(fix.draft_body, firstMsg);
+          var draftId = createThreadedDraft(
+            fix.to_email, fix.subject, htmlBody, firstMsg.getId(), fix.thread_id, null
+          );
+          if (!draftId) throw new Error('createThreadedDraft returned null');
+
+          UrlFetchApp.fetch(HUB_URL + '/api/fix-queue/' + fix.id, {
+            method: 'PATCH', contentType: 'application/json',
+            headers: { Authorization: 'Bearer ' + HUB_SECRET },
+            payload: JSON.stringify({ status: 'done' }),
+            muteHttpExceptions: true
+          });
+          Logger.log('Fix queue done #' + fix.id + ' | thread ' + fix.thread_id);
+        }
+      } catch(e) {
+        Logger.log('Fix queue error #' + fix.id + ': ' + e.toString());
+        UrlFetchApp.fetch(HUB_URL + '/api/fix-queue/' + fix.id, {
+          method: 'PATCH', contentType: 'application/json',
+          headers: { Authorization: 'Bearer ' + HUB_SECRET },
+          payload: JSON.stringify({ status: 'failed', error: e.toString() }),
+          muteHttpExceptions: true
+        });
+      }
+    });
+  } catch(e) {
+    Logger.log('processFixQueue error: ' + e.toString());
+  }
+}
+
+// ============================================================
 // TRIGGERS
 // ============================================================
 function setupTriggers() {
@@ -1669,7 +1732,8 @@ function setupTriggers() {
   ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('runEmailAgent').timeBased().everyMinutes(5).create();
-  Logger.log('All 7 triggers installed.');
+  ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
+  Logger.log('All 8 triggers installed.');
 }
 
 // ============================================================
@@ -3196,6 +3260,35 @@ function fixMT25QU256Draft() {
     hubLog('run', 'fixMT25QU256Draft: added to Forte', { mpn: MPN, qty: QTY, tp: TP });
     Logger.log('Added to Forte: ' + MPN + ' | QTY=' + QTY + ' | TP=' + TP + ' | ' + COUNTRY);
   }
+}
+
+// ONE-TIME: fix BCM5461SA2KQMG — bad draft had Forte quote + TP request concatenated.
+// Deletes the mixed draft and creates a clean quote-only reply.
+function fixBCM5461Draft() {
+  var THREAD_ID = '19ef786c6a8de2f9';
+  var BUYER     = 'julia@hk-sim.com';
+  var SUBJECT   = 'Re: RFQ from netCOMPONENTS Member (HK Sim Group Co., Limited | BCM5461SA2KQMG)';
+  var REPLY_TEXT = '$25.00 each | Retinned never used parts, 2009 DC, 120 day warranty, QTY 250 | needs to go through our final inspection';
+
+  var thread   = GmailApp.getThreadById(THREAD_ID);
+  var messages = thread.getMessages();
+  var firstMsg = messages[0];
+
+  // Delete any existing wrong draft for this thread
+  var allDrafts = GmailApp.getDrafts();
+  for (var d = 0; d < allDrafts.length; d++) {
+    try {
+      if (allDrafts[d].getMessage().getThread().getId() === THREAD_ID) {
+        allDrafts[d].deleteDraft();
+        Logger.log('Deleted wrong draft for BCM5461SA2KQMG');
+      }
+    } catch(e) {}
+  }
+
+  // Create clean quote draft
+  var htmlBody = buildDraftHTML(REPLY_TEXT, firstMsg);
+  var draftId  = createThreadedDraft(BUYER, SUBJECT, htmlBody, firstMsg.getId(), THREAD_ID, null);
+  Logger.log('Clean draft created: ' + draftId);
 }
 
 // ============================================================

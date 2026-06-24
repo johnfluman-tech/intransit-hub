@@ -67,3 +67,19 @@ CREATE TABLE IF NOT EXISTS pending_issues (
 
 CREATE INDEX IF NOT EXISTS idx_issues_status ON pending_issues (status);
 CREATE INDEX IF NOT EXISTS idx_issues_time   ON pending_issues (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS fix_queue (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  type        TEXT NOT NULL,   -- 'replace_draft' (more types can be added later)
+  thread_id   TEXT NOT NULL,
+  to_email    TEXT,
+  subject     TEXT,
+  draft_body  TEXT,
+  status      TEXT DEFAULT 'pending',  -- 'pending', 'done', 'failed'
+  error       TEXT,
+  created_at  TEXT DEFAULT (datetime('now')),
+  updated_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_fix_queue_status ON fix_queue (status);
+CREATE INDEX IF NOT EXISTS idx_fix_queue_time   ON fix_queue (created_at DESC);

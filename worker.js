@@ -75,6 +75,11 @@ export default {
       if (p === '/api/issues'    && m === 'POST') return handlePostIssue(request, env);
       if (p === '/api/self-heal' && m === 'POST') return handleSelfHeal(request, env);
 
+      if (p === '/api/fix-queue' && m === 'GET')  return handleGetFixQueue(url, env);
+      if (p === '/api/fix-queue' && m === 'POST') return handlePostFixQueue(request, env);
+      const fixId = p.match(/^\/api\/fix-queue\/(\d+)$/);
+      if (fixId && m === 'PATCH') return handlePatchFixQueue(request, env, parseInt(fixId[1]));
+
       const agentId = p.match(/^\/api\/agent-decisions\/(\d+)$/);
       if (agentId && m === 'PATCH') return handlePatchAgentDecision(request, env, parseInt(agentId[1]));
 
@@ -769,6 +774,36 @@ async function handlePatchAgentDecision(request, env, id) {
   } else {
     await env.DB.prepare('UPDATE agent_decisions SET status=? WHERE id=?').bind(status, id).run();
   }
+  return json({ ok: true });
+}
+
+// ─── /api/fix-queue GET ─────────────────────────────
+async function handleGetFixQueue(url, env) {
+  const status = url.searchParams.get('status') || 'pending';
+  const { results: rows } = await env.DB.prepare(
+    'SELECT * FROM fix_queue WHERE status = ? ORDER BY created_at ASC LIMIT 50'
+  ).bind(status).all();
+  return json({ fixes: rows || [] });
+}
+
+// ─── /api/fix-queue POST ────────────────────────────
+async function handlePostFixQueue(request, env) {
+  const { type, thread_id, to_email, subject, draft_body } = await request.json();
+  if (!type || !thread_id) return json({ error: 'type and thread_id are required' }, 400);
+  const { meta } = await env.DB.prepare(
+    `INSERT INTO fix_queue (type, thread_id, to_email, subject, draft_body)
+     VALUES (?, ?, ?, ?, ?)`
+  ).bind(type, thread_id, to_email || null, subject || null, draft_body || null).run();
+  return json({ ok: true, id: meta.last_row_id });
+}
+
+// ─── /api/fix-queue/:id PATCH ───────────────────────
+async function handlePatchFixQueue(request, env, id) {
+  const { status, error } = await request.json();
+  if (!status) return json({ error: 'status required' }, 400);
+  await env.DB.prepare(
+    `UPDATE fix_queue SET status = ?, error = ?, updated_at = datetime('now') WHERE id = ?`
+  ).bind(status, error || null, id).run();
   return json({ ok: true });
 }
 
