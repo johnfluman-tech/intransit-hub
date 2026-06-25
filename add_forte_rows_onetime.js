@@ -1,3 +1,85 @@
+// ─── backfillForteHistory ─────────────────────────────────────────────────────
+// ONE-TIME: Run once to populate col J (History) for duplicate MPNs in the Forte
+// sheet from the last 3 months. For each row whose col J is blank and has at
+// least one earlier entry for the same MPN, fills J with a formatted history of
+// those prior entries (most recent first).
+// Format per line: "M/D/YYYY | Qty: X | TP: Y | Quoted: Z | STATUS | Notes"
+// ─────────────────────────────────────────────────────────────────────────────
+function backfillForteHistory() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = sheet.getDataRange().getValues();
+  var cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 90); // 3 months back from today
+
+  // Build a map: normalizedMPN → array of {rowNum (1-indexed), date, qty, tp, quoted, notes, status, histJ}
+  var byMpn = {};
+  for (var i = 1; i < data.length; i++) {
+    var mpn = String(data[i][1]).trim();
+    if (!mpn) continue;
+    var key = mpn.toLowerCase();
+    if (!byMpn[key]) byMpn[key] = [];
+    byMpn[key].push({
+      rowNum:  i + 1,
+      date:    data[i][0] ? new Date(data[i][0]) : null,
+      qty:     String(data[i][2] || '').trim(),
+      tp:      String(data[i][3] || '').trim(),
+      quoted:  String(data[i][7] || '').trim(),
+      notes:   String(data[i][8] || '').trim(),
+      status:  String(data[i][10] || '').trim(),
+      histJ:   String(data[i][9] || '').trim(),
+    });
+  }
+
+  var updated = 0;
+  for (var key in byMpn) {
+    var rows = byMpn[key];
+    if (rows.length < 2) continue; // Only duplicates
+
+    // Skip MPNs with no entry in the last 3 months
+    var hasRecent = rows.some(function(r) { return r.date && r.date >= cutoff; });
+    if (!hasRecent) continue;
+
+    for (var ri = 0; ri < rows.length; ri++) {
+      var cur = rows[ri];
+      if (cur.histJ) continue; // Already has history
+
+      // Prior entries = those with an earlier date, or earlier row if same date
+      var prior = rows.filter(function(r, idx) {
+        if (idx === ri) return false;
+        if (!cur.date) return idx < ri;
+        if (!r.date)   return false;
+        return r.date < cur.date || (r.date.getTime() === cur.date.getTime() && r.rowNum < cur.rowNum);
+      });
+      if (!prior.length) continue; // No prior entries, nothing to backfill
+
+      // Sort prior most-recent first
+      prior.sort(function(a, b) {
+        if (!a.date && !b.date) return b.rowNum - a.rowNum;
+        if (!a.date) return 1;
+        if (!b.date) return -1;
+        return b.date - a.date;
+      });
+
+      var histLines = prior.map(function(r) {
+        var ds = r.date ? Utilities.formatDate(r.date, Session.getScriptTimeZone(), 'M/d/yyyy') : '?';
+        var line = ds;
+        if (r.qty)    line += ' | Qty: ' + r.qty;
+        if (r.tp)     line += ' | TP: ' + r.tp;
+        if (r.quoted) line += ' | Quoted: ' + r.quoted;
+        if (r.status && r.status.toLowerCase() !== 'open') line += ' | ' + r.status;
+        if (r.notes)  line += ' | ' + r.notes;
+        return line;
+      });
+
+      sheet.getRange(cur.rowNum, 10).setValue(histLines.join('\n'));
+      updated++;
+    }
+  }
+  SpreadsheetApp.flush();
+  Logger.log('backfillForteHistory: updated ' + updated + ' rows across ' + Object.keys(byMpn).length + ' MPNs scanned.');
+}
+
 // ONE-TIME SCRIPT — Paste in Apps Script editor and run addForteRowsToday()
 // Adds missed Forte entries from 2026-06-19 where MSG_CHECKING was sent manually
 

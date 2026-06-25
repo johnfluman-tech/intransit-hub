@@ -950,13 +950,51 @@ function checkForteForMPN(mpn, days) {
   return matches;
 }
 
+// Builds a readable history string from ALL prior Forte entries for a given MPN.
+// Called before appending a new row so the new row's col J contains full context.
+function buildForteHistory(mpn) {
+  if (!mpn) return '';
+  try {
+    var data = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0].getDataRange().getValues();
+    var entries = [];
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][1]).trim().toLowerCase() !== mpn.trim().toLowerCase()) continue;
+      var rawDate = data[i][0];
+      var qty     = String(data[i][2] || '').trim();
+      var tp      = String(data[i][3] || '').trim();
+      var quoted  = String(data[i][7] || '').trim();   // col H: John Quoted
+      var notes   = String(data[i][8] || '').trim();   // col I: Notes
+      var status  = String(data[i][10] || '').trim();  // col K: Status
+      var dateStr = rawDate ? Utilities.formatDate(new Date(rawDate), Session.getScriptTimeZone(), 'M/d/yyyy') : '?';
+      var line = dateStr;
+      if (qty)    line += ' | Qty: ' + qty;
+      if (tp)     line += ' | TP: ' + tp;
+      if (quoted) line += ' | Quoted: ' + quoted;
+      if (status && status.toLowerCase() !== 'open') line += ' | ' + status;
+      if (notes)  line += ' | ' + notes;
+      entries.push({ date: rawDate ? new Date(rawDate) : new Date(0), text: line });
+    }
+    // Most recent first
+    entries.sort(function(a, b) { return b.date - a.date; });
+    return entries.map(function(e) { return e.text; }).join('\n');
+  } catch(e) {
+    Logger.log('buildForteHistory error: ' + e);
+    return '';
+  }
+}
+
 function addToForteSheet(mpn, qty, targetPrice, country, historyNote) {
   var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  // Build prior-entry history BEFORE appending (so the new row sees all existing rows)
+  var priorHistory = buildForteHistory(mpn);
+  var finalHistory = '';
+  if (priorHistory) finalHistory = priorHistory;
+  if (historyNote) finalHistory = finalHistory ? finalHistory + '\n---\n' + historyNote : historyNote;
   var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
   var nextRow = sheet.getLastRow() + 1;
   var potentialFormula = '=C' + nextRow + '*D' + nextRow;
-  sheet.appendRow([today, mpn, qty||'', targetPrice||'', '', country||'', potentialFormula, '', '', historyNote||'', 'Open']);
-  Logger.log('Added to Forte: ' + mpn);
+  sheet.appendRow([today, mpn, qty||'', targetPrice||'', '', country||'', potentialFormula, '', '', finalHistory, 'Open']);
+  Logger.log('Added to Forte: ' + mpn + (priorHistory ? ' [history populated]' : ''));
 }
 
 function updateForteSheet(mpn) {
