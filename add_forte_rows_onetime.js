@@ -36,3 +36,27 @@ function addForteRowsToday() {
 
   Logger.log('Done — ' + rows.length + ' rows added to Forte sheet.');
 }
+
+// ONE-TIME — Run addMissingForteRows_Jun25() to fix Forte entries missed on 2026-06-25
+// STPS20L15D: MSG_CHECKING draft was created then deleted, Forte never auto-added
+// CAR1AP80DC12-S: checkSentCheckingReplies failed qty extraction (Qty= format), Forte skipped
+function addMissingForteRows_Jun25() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '6/25/2026';
+  var rows = [
+    // [mpn, qty, buyerTP, country]
+    ['STPS20L15D',     5000, 0.35, 'SG'],  // chili.wu@ample.sg — Ample Electronics Singapore
+    ['CAR1AP80DC12-S', 6982, 1.26, 'AU'],  // gparashou@electronic-components.com.au — Australia
+  ];
+  rows.forEach(function(r) {
+    var nextRow = sheet.getLastRow() + 1;
+    sheet.appendRow([
+      today, r[0], r[1], r[2], '', r[3],
+      '=C' + nextRow + '*D' + nextRow,
+      '', '', '', 'Open'
+    ]);
+    Logger.log('Added: ' + r[0]);
+  });
+  Logger.log('Done — ' + rows.length + ' rows added.');
+}

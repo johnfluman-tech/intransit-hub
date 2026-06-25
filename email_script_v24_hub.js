@@ -1162,7 +1162,7 @@ function checkInboxForTPReplies() {
         johnAlreadyReplied = true;
       }
     }
-    if (johnAlreadyReplied) { thread.addLabel(label); return; }
+    if (johnAlreadyReplied) { return; }
 
     var body = lastMsg.getPlainBody();
     var tp = extractTargetPrice(stripQuotedLines(body));
@@ -1192,7 +1192,7 @@ function checkInboxForTPReplies() {
       if (qMsg.getFrom().indexOf(JOHN_EMAIL) >= 0 || qMsg.getFrom().indexOf('intransittech') >= 0) continue;
       country = extractCountryFromEmail(qMsg.getFrom());
       var qBody = qMsg.getPlainBody();
-      var qMatch = qBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[：:]\s*(\d[\d,]*)/i);
+      var qMatch = qBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)/i);
       if (qMatch && !qty) {
         var rawQty = qMatch[1] || qMatch[2] || qMatch[3] || '';
         var qtyNum2 = parseQtyValue(rawQty, country);
@@ -1271,7 +1271,7 @@ function checkInboxForNewRFQs() {
   try { scanInboxForPreview(); } catch(e) { Logger.log('scanInboxForPreview error: ' + e); }
   var BLOCKED_DOMAINS = getBlockedDomains();
   var _blockedFromFilter = BLOCKED_DOMAINS.map(function(d){return '-from:'+d;}).join(' ');
-  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
+  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
   var threads = GmailApp.search(query,0,10);
   hubLog('run', 'checkInboxForNewRFQs: ' + threads.length + ' thread(s)');
   if (!threads.length) return;
@@ -1311,7 +1311,7 @@ function checkInboxForNewRFQs() {
     }
 
     var qty = '';
-    var qtyMatch = fullBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[：:]\s*(\d[\d,]*)/i);
+    var qtyMatch = fullBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)/i);
     if (qtyMatch) {
       var rawQty = qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || '';
       var qtyNum = parseQtyValue(rawQty, country);
@@ -1532,7 +1532,7 @@ function checkSentCheckingReplies() {
           var netcompTP = extractNetcompsTgtPrice(directText, msg.getBody());
           if (netcompTP && !tp) tp = netcompTP;
         }
-          var qtyMatch = fullMsgBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[：:]\s*(\d[\d,]*)/i);
+          var qtyMatch = fullMsgBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)/i);
           if (qtyMatch && !qty) {
             var rawQty = qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || '';
             var qtyNum = parseQtyValue(rawQty, country);
@@ -1565,8 +1565,8 @@ function checkSentCheckingReplies() {
       } else {
         Logger.log('Forte 60-day skip: '+mpn);
       }
+      thread.addLabel(label);
     } catch(e) { Logger.log('Error checkSentChecking: '+e.toString()); }
-    thread.addLabel(label);
   });
 }
 
