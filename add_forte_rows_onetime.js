@@ -1,3 +1,25 @@
+// ONE-TIME — Run removeOemExcess_AT25DF321A() to stamp NO STK and delete the 2
+// OEM EXCESS rows for AT25DF321A-SH-T (rows 64430 and 64431).
+// Bill confirmed Jun 25 2026: "they're no longer available."
+function removeOemExcess_AT25DF321A() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+  var data = sheet.getDataRange().getValues();
+  var rowsToDelete = [];
+  for (var i = 1; i < data.length; i++) {
+    var mpn = String(data[i][1]).trim();
+    if (mpn.toLowerCase() === 'at25df321a-sh-t') {
+      // Stamp NO STK in Notes column (col E = index 4)
+      sheet.getRange(i + 1, 5).setValue('NO STK ' + today);
+      rowsToDelete.push(i + 1);
+    }
+  }
+  // Delete rows bottom-up so indices stay valid
+  rowsToDelete.reverse().forEach(function(r) { sheet.deleteRow(r); });
+  Logger.log('removeOemExcess_AT25DF321A: stamped and deleted ' + rowsToDelete.length + ' rows for AT25DF321A-SH-T');
+}
+
 // ─── backfillForteHistory ─────────────────────────────────────────────────────
 // ONE-TIME: Run once to populate col J (History) for duplicate MPNs in the Forte
 // sheet from the last 3 months. For each row whose col J is blank and has at
