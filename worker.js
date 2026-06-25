@@ -639,7 +639,7 @@ Your job: analyze the incoming email thread, evaluate the provided inventory and
 
 ## ACTIONS (pick exactly one)
 - msg_checking: Part IS in OEM excess, ZERO OEM notes contain "BILL EXT", AND buyer has given a target price → draft checking reply + Forte entry. NEVER use if any OEM note contains "BILL EXT".
-- request_tp_500: Part IS in OEM excess, buyer has NOT given a TP → ask for TP ($500 min). ALWAYS use when no TP, regardless of "BILL EXT". Never skip to bill_handle without a TP.
+- request_tp_500: Part IS in OEM excess, buyer has NOT given a TP, AND no prior quote price is already known for this MPN → ask for TP ($500 min). ALWAYS use when no TP and no known price, regardless of "BILL EXT". Never skip to bill_handle without a TP. EXCEPTION: if oem_results contain stock AND a price for this MPN is already known from a prior quote in the thread or forte_results, treat that known price as the TP and use msg_checking instead.
 - request_tp_2000: Part IS in OEM excess, buyer has NOT given a TP, NO "BILL EXT" in any OEM notes, AND at least one OEM note literally contains "$2000" or "$2,000" → ask for TP ($2,000 min). ONLY if "$2000"/"$2,000" literally appears AND no BILL EXT.
 - bill_handle: Part IS in OEM excess, at least one OEM note contains "BILL EXT", AND buyer HAS provided a target price → draft EXACTLY the following to buyer CC bill.pratt@intransittech.com. CRITICAL: if any OEM note has "BILL EXT" and buyer gave TP, this is the ONLY valid action — NOT msg_checking. The draft_body MUST be copied character for character as: "Bill will help with this request" — no paraphrasing, no synonyms, no alternate wording, no additional sentences. Any deviation is a bug.
 - no_bid: Part NOT found in OEM excess → silent, no reply
