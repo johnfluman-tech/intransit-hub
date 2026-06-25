@@ -48,6 +48,31 @@ function addMissingForteRows_Jun25() {
     // [mpn, qty, buyerTP, country]
     ['STPS20L15D',     5000, 0.35, 'SG'],  // chili.wu@ample.sg — Ample Electronics Singapore
     ['CAR1AP80DC12-S', 6982, 1.26, 'AU'],  // gparashou@electronic-components.com.au — Australia
+    ['7114-5623-02',  16000, 0.40, 'ES'],  // f.sabelli@goldney.net — Goldney Electronics Spain; script wrongly declined (used netcomp listed qty=2 instead of buyer's 16K)
+    ['FIS155NL',       1300, 0.8209, 'TR'],  // gulsah@boardelectronics.com — Board Elektronik Turkey; extractTargetPrice missed table/Unit Price($) format
+  ];
+  rows.forEach(function(r) {
+    var nextRow = sheet.getLastRow() + 1;
+    sheet.appendRow([
+      today, r[0], r[1], r[2], '', r[3],
+      '=C' + nextRow + '*D' + nextRow,
+      '', '', '', 'Open'
+    ]);
+    Logger.log('Added: ' + r[0]);
+  });
+  Logger.log('Done — ' + rows.length + ' rows added.');
+}
+
+// ONE-TIME — Run addMissingForteRows_Jun25b() for Yazaki 7183-2412 missed due to European TP format bug
+// Emre (velosi.co Slovakia) replied "0,18$" Jun 17 — extractTargetPrice failed, Label_166 applied, Forte skipped
+// Using Jun 24 revised TP from Emre's follow-up: $0.17/ea, 2800 pcs
+function addMissingForteRows_Jun25b() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '6/25/2026';
+  var rows = [
+    // [mpn, qty, buyerTP, country]
+    ['7183-2412', 2800, 0.17, 'SK'],  // emre.kurtulus@velosi.co — Velosi S.R.O. Slovakia; Jun 24 revised TP
   ];
   rows.forEach(function(r) {
     var nextRow = sheet.getLastRow() + 1;

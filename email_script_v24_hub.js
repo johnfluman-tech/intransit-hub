@@ -12,7 +12,7 @@ var JOHN_EMAIL        = 'john.fluman@intransittech.com';
 var DAVID_EMAIL       = 'david@fortetechno.com';
 var BILL_EMAIL        = 'bill.pratt@intransittech.com';
 var DEB_EMAIL         = 'deb@intransittech.com';
-var BLOCKED_DOMAINS   = ['sourceschip.com', 'bulechip.com', 'feelchips.com'];
+var BLOCKED_DOMAINS   = ['sourceschip.com', 'bulechip.com', 'feelchips.com', 'chip-wintrading.com', 'qizhongsmart.com'];
 var INCOMING_LABEL    = 'oem-nostock-seen';
 var FORTE_SHEET_ID    = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
 var IN_STOCK_ID       = '1iOFHUBiWRgA6EjtO2ujoGpz-8v1qTRkgCXSvCa2Gf54';
@@ -587,6 +587,18 @@ function extractMPNFromBody(body) {
 
 function extractMPNFromRFQBody(body) {
   if (!body) return null;
+  // Abacus "REQUEST FOR QUOTE FROM" format: table with columns LN# | QUOTE NO | QTY | DESCRIPTION | MFR
+  // The DESCRIPTION column contains the MPN — skip columns by looking for the data row after the header
+  var abacusMatch = body.match(/LN#[\s\t]+QUOTE\s*NO[\s\t]+[\s\S]*?DESCRIPTION[\s\S]*?\n([\s\S]*?)(?:\n\n|\n[A-Z])/i);
+  if (abacusMatch) {
+    var dataLine = abacusMatch[1].trim().split('\n')[0];
+    var cols = dataLine.split(/\t|\s{2,}/);
+    // Description is typically col 3 (0-indexed) after LN#, QUOTE NO, QTY
+    if (cols.length >= 4) {
+      var descCol = cols[3].trim().replace(/[,;:?()[\]]/g, '');
+      if (descCol.length >= 4 && /[A-Za-z]/.test(descCol) && /[0-9]/.test(descCol)) return descCol;
+    }
+  }
   var labelPatterns = [
     /(?:part\s*#|part\s+number|p\/n|mpn)\s*:?\s*([A-Z0-9][A-Z0-9\-\/\.]{3,})/i
   ];
@@ -615,11 +627,26 @@ function extractMPNFromRFQBody(body) {
 
 function extractNetcompsQtyReq(htmlBody) {
   if (!htmlBody) return null;
-  var tableMatch = htmlBody.match(/class="partlist"[\s\S]*?<\/tr>([\s\S]*?)<\/table>/i);
+  // Find the partlist table — capture the header row and first data row
+  var tableMatch = htmlBody.match(/class="partlist"([\s\S]*?)<\/table>/i);
   if (!tableMatch) return null;
-  var cells = tableMatch[1].match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
-  if (!cells || cells.length < 4) return null;
-  var qtyCell = cells[3].replace(/<[^>]+>/g, '').trim();
+  var tableContent = tableMatch[1];
+  var rows = tableContent.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi);
+  if (!rows || rows.length < 2) return null;
+  // Find the column index of QtyReq from the header row
+  var headerCells = rows[0].match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi) || [];
+  var qtyReqIdx = -1;
+  for (var h = 0; h < headerCells.length; h++) {
+    var headerText = headerCells[h].replace(/<[^>]+>/g, '').trim().toLowerCase();
+    if (headerText === 'qtyreq' || headerText === 'qty req' || headerText === 'quantity required') {
+      qtyReqIdx = h; break;
+    }
+  }
+  // Fall back to column 3 (0-indexed) if header not found — standard netcomponents layout
+  if (qtyReqIdx < 0) qtyReqIdx = 3;
+  var dataCells = rows[1].match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+  if (!dataCells || dataCells.length <= qtyReqIdx) return null;
+  var qtyCell = dataCells[qtyReqIdx].replace(/<[^>]+>/g, '').trim();
   if (!qtyCell) return null;
   var qty = parseInt(qtyCell.replace(/[^0-9]/g, ''), 10);
   return qty > 0 ? String(qty) : null;
@@ -668,6 +695,24 @@ function extractNetcompsTgtPrice(plainBody, htmlBody) {
 
 function extractTargetPrice(text) {
   if (!text) return null;
+
+  // European decimal-comma formats: "0,18$", "0,17$/each", "0,17 USD", "0,18$ per pcs"
+  // Must check BEFORE general patterns to avoid comma being stripped as thousand-separator
+  var euPatterns = [
+    /(\d+),(\d{1,2})\s*\$\s*\/\s*(?:each|ea)/i,   // 0,17$/each
+    /(\d+),(\d{1,2})\s*\$\s*per\s*pcs?/i,          // 0,18$ per pcs
+    /(\d+),(\d{1,2})\s*\$/,                          // 0,18$
+    /(\d+),(\d{1,2})\s*USD/i,                        // 0,18 USD
+    /(\d+),(\d{1,2})\s*\/\s*(?:each|ea)/i,          // 0,18/each (comma decimal, no $)
+  ];
+  for (var eu = 0; eu < euPatterns.length; eu++) {
+    var em = text.match(euPatterns[eu]);
+    if (em && em[1] !== undefined && em[2] !== undefined) {
+      var euVal = parseFloat(em[1] + '.' + em[2]);
+      if (euVal > 0 && euVal < 100000) return '$' + euVal;
+    }
+  }
+
   var rangeMatch = text.match(/\$?\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(?:\$|usd|\/each)?/i);
   if (rangeMatch) {
     var lo = parseFloat(rangeMatch[1]), hi = parseFloat(rangeMatch[2]);
@@ -675,6 +720,12 @@ function extractTargetPrice(text) {
     var hasDecimal = rangeMatch[1].indexOf('.') >= 0 || rangeMatch[2].indexOf('.') >= 0;
     if (hi > lo && hi < 100000 && (hasCurrency || hasDecimal)) return '$' + hi;
   }
+
+  // Unit Price($) tabular format: "Unit Price($)\n0.35" or "Unit Price($) 0.35"
+  var unitPriceMatch = text.match(/Unit\s*Price\s*\(\$\)\s*[\r\n\s]+(\d+(?:\.\d+)?)/i);
+  if (!unitPriceMatch) unitPriceMatch = text.match(/Unit\s*Price\s*\(\$\)\s*\t(\d+(?:\.\d+)?)/i);
+  if (unitPriceMatch && parseFloat(unitPriceMatch[1]) > 0) return '$' + parseFloat(unitPriceMatch[1]);
+
   var patterns = [
     /\btp\s*([\d,.]+)/i,
     /\btarget\s+price\s*[:\s]*\$?\s*([\d,.]+)/i,
@@ -692,7 +743,14 @@ function extractTargetPrice(text) {
   for (var i = 0; i < patterns.length; i++) {
     var m = text.match(patterns[i]);
     if (m && m[1]) {
-      var val = parseFloat(m[1].replace(/,/g, ''));
+      var raw = m[1];
+      // European decimal comma: X,XX pattern (comma as decimal, not thousand separator)
+      var val;
+      if (/^\d+,\d{1,2}$/.test(raw.trim())) {
+        val = parseFloat(raw.replace(',', '.'));
+      } else {
+        val = parseFloat(raw.replace(/,/g, ''));
+      }
       if (val > 0) return '$' + val;
     }
   }
@@ -1167,8 +1225,10 @@ function checkInboxForTPReplies() {
     var body = lastMsg.getPlainBody();
     var tp = extractTargetPrice(stripQuotedLines(body));
     if (!tp) {
-      // Q1: label to prevent infinite re-processing; Q2: leave unlabeled so we catch future TP reply
-      if (!isQ2Only) thread.addLabel(label);
+      // No numeric TP found — leave thread unlabeled in ALL cases so it remains available for manual handling.
+      // Applying the label here permanently locks out threads where the buyer said "we don't know market value"
+      // or replied with a non-numeric answer (Bug 12 — e.g. TRAMAG thread Jun 2026).
+      hubLog('run', 'checkInboxForTPReplies: no TP extracted from buyer reply — leaving unlabeled: ' + thread.getFirstMessageSubject());
       return;
     }
     var tpNum = parseFloat(String(tp).replace(/[^0-9.]/g, '')) || 0;
@@ -1227,9 +1287,17 @@ function checkInboxForTPReplies() {
 
     var buyerEmail = extractBuyerEmail(lastMsg.getFrom());
     var oemResults = searchOEMExcess(mpn);
-    if (!oemResults.length) { thread.addLabel(label); return; }
+    var inStockTP = searchInStock(mpn);
+    // IN STOCK takes priority over OEM EXCESS BILL EXT (Bug 6 fix)
+    var ownStockTP = inStockTP.filter(function(r){ return String(r.notes).indexOf('Warehouse#3') < 0; });
+    if (!oemResults.length && !ownStockTP.length) { thread.addLabel(label); return; }
     var hasBillExt = oemResults.some(function(r) { return r.notes.indexOf('BILL EXT 117') >= 0; })
       || body.indexOf('BILL EXT 117') >= 0;
+    // If we have own stock, use own-stock reply instead of BILL EXT routing
+    if (hasBillExt && ownStockTP.length) {
+      hasBillExt = false;
+      Logger.log('checkInboxForTPReplies: IN STOCK found for BILL EXT part ' + mpn + ' — routing to own-stock reply');
+    }
     var firstMsg = messages[0];
     var netcompTP = isNetcompEmail(firstMsg.getFrom(), firstMsg.getSubject());
     var icsourceTP = isICSouceEmail(firstMsg.getFrom(), firstMsg.getSubject());
@@ -1288,7 +1356,9 @@ function checkInboxForNewRFQs() {
     if (!fullBody || fullBody.trim().length < 30) {
       fullBody = lastMsg.getBody().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     }
-    if (!mpn || !/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)) {
+    // IC Source "IC Source RFQ on [MPN] from [Company]" uses all-digit MPNs — bypass letter+digit requirement
+    var isIcSourceThread = isICSouceEmail(messages[0].getFrom(), subject);
+    if (!mpn || (!isIcSourceThread && (!/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)))) {
       var bodyMpn = extractMPNFromRFQBody(fullBody);
       if (bodyMpn) mpn = bodyMpn.replace(/#\w+$/, '');
     }
@@ -1359,18 +1429,27 @@ function checkInboxForNewRFQs() {
       } else if (ownStock.length) {
         var sr = ownStock[0];
         var priorQuotes = getPriorQuoteHistory(sr.mpn);
+        // Extract the most recent prior price from history string for use as a suggested price
+        var priorPriceMatch = priorQuotes.match(/\$(\d+(?:\.\d+)?)\s*each/i);
+        var suggestedPrice = priorPriceMatch ? '$' + parseFloat(priorPriceMatch[1]).toFixed(2) + ' each' : '$[FILL IN]';
+        var stockAdviceBase = priorPriceMatch
+          ? 'RFQ for ' + mpn + ' which is OWN STOCK. Suggested price from prior quote history: ' + suggestedPrice + '. Verify before sending. $100 minimum on stock items.'
+          : 'RFQ for ' + mpn + ' which is OWN STOCK. Fill in the price before sending — no prior quote history found. There is a $100 minimum on stock items. Do not send until price is filled in.';
+        // Also ask for TP on OEM EXCESS if available and buyer qty warrants it (Bug 10)
+        var oemAlso = oemResults.length ? '\n\nWe also have additional quantity available from the OEM. We need a target price and there is a $500 minimum line requirement.' : '';
         var stockInfo = 'This is our stock<br><br>'
           + 'MPN: ' + sr.mpn + '<br>'
           + (sr.dc ? 'DC: ' + sr.dc + '<br>' : '')
           + (sr.qty ? 'QTY in stock: ' + sr.qty + '<br>' : '')
-          + 'Price: $[FILL IN]<br><br>'
+          + 'Price: ' + suggestedPrice + '<br><br>'
           + 'There is a $100 min on stock items'
+          + (oemAlso ? '<br><br>' + oemAlso.trim() : '')
           + priorQuotes;
-        var stockAdvice = 'RFQ for ' + mpn + ' which is OWN STOCK. Fill in the price before sending — intentionally left as $[FILL IN]. There is a $100 minimum on stock items. Do not send until price is filled in.';
+        var stockAdvice = stockAdviceBase + (oemResults.length ? ' OEM EXCESS also available — need-TP appended.' : '');
         var hbStock = origMsg ? buildDraftHTML(stockInfo, origMsg) : buildSimpleHTML(stockInfo);
         var draftId = createThreadedDraft(replyTo,'Re: '+subject,hbStock,replyToId,threadId,null);
         hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, stockInfo, draftId, stockAdvice);
-        hubLog('draft_created', 'In-stock draft: '+mpn, {mpn:mpn, type:'own_stock', qty:sr.qty});
+        hubLog('draft_created', 'In-stock draft: '+mpn, {mpn:mpn, type:'own_stock', qty:sr.qty, priorPrice:suggestedPrice});
         Logger.log('IN STOCK own draft: '+mpn);
         handled = true;
 
