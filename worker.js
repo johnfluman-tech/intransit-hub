@@ -739,6 +739,18 @@ async function handleEmailAgent(request, env) {
     return json({ error: 'Claude returned non-JSON', raw: claudeData.content[0].text }, 500);
   }
 
+  // Enforce exact template wording — override whatever Claude wrote for standard reply types.
+  // Claude picks the action; the worker locks the text. No improvisation possible.
+  const DRAFT_TEMPLATES = {
+    request_tp_500:  'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
+    request_tp_2000: 'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.',
+    msg_checking:    'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.',
+    bill_handle:     'Bill will help with this request',
+  };
+  if (DRAFT_TEMPLATES[decision.action]) {
+    decision.draft_body = DRAFT_TEMPLATES[decision.action];
+  }
+
   const { meta } = await env.DB.prepare(
     `INSERT INTO agent_decisions (thread_id, mpn, sender, subject, action, reasoning, draft_body, forte_entry, status)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
