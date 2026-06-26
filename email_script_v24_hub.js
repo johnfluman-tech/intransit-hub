@@ -1366,6 +1366,36 @@ function checkInboxForTPReplies() {
 // ============================================================
 // TRIGGER 4 — New inbox RFQs → threaded draft
 // ============================================================
+// ─── Worker email-agent call ─────────────────────────────────
+// Calls /api/email-agent and returns the decision JSON, or null on failure.
+// The worker enforces exact template wording — no improvisation possible.
+function callEmailAgent(threadId, subject, sender, threadContent, oemResults, forteResults, currentLabels) {
+  try {
+    var payload = JSON.stringify({
+      thread_id: threadId,
+      subject: subject,
+      sender: sender,
+      thread_content: threadContent,
+      oem_results: oemResults || [],
+      forte_results: forteResults || [],
+      current_labels: currentLabels || []
+    });
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/email-agent', {
+      method: 'post', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: payload, muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) {
+      Logger.log('callEmailAgent HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().substring(0, 200));
+      return null;
+    }
+    return JSON.parse(resp.getContentText());
+  } catch(e) {
+    Logger.log('callEmailAgent error: ' + e);
+    return null;
+  }
+}
+
 function checkInboxForNewRFQs() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkInboxForNewRFQs: disabled via hub config'); return; }
@@ -1545,45 +1575,54 @@ function checkInboxForNewRFQs() {
       }
     }
 
-    // OEM EXCESS only branch
+    // OEM EXCESS only branch — all decisions routed through worker for template enforcement
     if (!handled && oemResults.length) {
-      var forteMatches = checkForteForMPN(mpn,3650);
-      var quotedEntry = null;
-      for (var f=0;f<forteMatches.length;f++){if(forteMatches[f].status==='QUOTED'&&forteMatches[f].colH){quotedEntry=forteMatches[f];break;}}
-      var replyText2, htmlBody2, draftType, draftId2, oemAdvice;
-      if (quotedEntry) {
-        var quotedPrice = quotedEntry.colH;
-        if (quotedPrice && !isNaN(parseFloat(quotedPrice))) {
-          quotedPrice = '$' + parseFloat(quotedPrice).toFixed(2) + ' each';
-        }
-        replyText2 = quotedPrice + (quotedEntry.colI?' | '+quotedEntry.colI:'');
-        draftType = 'forte_quoted';
-        oemAdvice = 'Prior QUOTED Forte entry found for ' + mpn + ' at ' + quotedPrice + '. Verify this price is still valid and the OEM can still supply before sending.';
-        htmlBody2 = origMsg ? buildDraftHTML(replyText2, origMsg) : buildSimpleHTML(replyText2);
-        draftId2 = createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,null);
-        Logger.log('QUOTED Forte draft: '+mpn);
-      } else if (tp) {
-        if (hasBillExt) {
-          replyText2 = MSG_BILL; draftType = 'bill';
-          oemAdvice = 'Buyer has TP (' + tp + ') for BILL EXT part ' + mpn + '. Routes to bill.pratt@intransittech.com — do NOT add to Forte. Bill handles this one.';
-          htmlBody2 = origMsg ? buildDraftHTML(MSG_BILL, origMsg) : buildSimpleHTML(MSG_BILL);
-          draftId2 = createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,BILL_EMAIL);
-        } else {
-          replyText2 = MSG_CHECKING; draftType = 'checking';
-          oemAdvice = 'Buyer gave TP of ' + tp + ' for ' + mpn + ' (IS in OEM EXCESS). Sending triggers automatic Forte entry. Verify TP and QTY are correct before sending.';
-          htmlBody2 = origMsg ? buildDraftHTML(MSG_CHECKING, origMsg) : buildSimpleHTML(MSG_CHECKING);
-          draftId2 = createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,null);
+      var forteCheck60 = checkForteForMPN(mpn, 60);
+      var threadContent = 'Subject: ' + subject + '\nFrom: ' + replyTo + '\n\n' + fullBody;
+      var currentLabels = thread.getLabels().map(function(l){return l.getName();});
+      var agentDecision = callEmailAgent(threadId, subject, replyTo, threadContent, oemResults, forteCheck60, currentLabels);
+
+      if (agentDecision) {
+        var agentAction = agentDecision.action;
+        var agentDraftBody = agentDecision.draft_body;
+        var agentReasoning = agentDecision.reasoning || agentAction;
+
+        if (agentAction === 'no_bid' || agentAction === 'no_action') {
+          Logger.log('Worker: ' + agentAction + ' for ' + mpn);
+          handled = true;
+        } else if (agentDraftBody) {
+          var ccEmail2 = (agentAction === 'bill_handle') ? BILL_EMAIL : null;
+          var oemHtml2 = origMsg ? buildDraftHTML(agentDraftBody, origMsg) : buildSimpleHTML(agentDraftBody);
+          var draftId2 = createThreadedDraft(replyTo, 'Re: '+subject, oemHtml2, replyToId, threadId, ccEmail2);
+          hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, agentDraftBody, draftId2, agentReasoning);
+          hubLog('draft_created', 'Worker draft: '+mpn+' ('+agentAction+')', {mpn:mpn, type:agentAction, tp:agentDecision.target_price||null, country:agentDecision.buyer_country||country});
+          Logger.log('Worker draft (' + agentAction + '): ' + mpn);
+          handled = true;
         }
       } else {
-        replyText2 = tpMsg; draftType = 'need_tp';
-        oemAdvice = 'New RFQ for ' + mpn + ' which IS in OEM EXCESS. No TP from buyer yet — asking for target price (' + (has2k ? '$2,000' : '$500') + ' min). No Forte action needed yet.';
-        htmlBody2 = origMsg ? buildDraftHTML(tpMsg, origMsg) : buildSimpleHTML(tpMsg);
-        draftId2 = createThreadedDraft(replyTo,'Re: '+subject,htmlBody2,replyToId,threadId,null);
+        // Worker unavailable — fallback to local template logic (no improvisation)
+        Logger.log('Worker call failed for ' + mpn + ' — using fallback');
+        var fbTp = tp;
+        var fbReplyText, fbHtml, fbDraftId, fbAdvice, fbType;
+        if (fbTp) {
+          if (hasBillExt) {
+            fbReplyText = MSG_BILL; fbType = 'bill'; fbAdvice = 'BILL EXT + TP for ' + mpn;
+            fbHtml = origMsg ? buildDraftHTML(MSG_BILL, origMsg) : buildSimpleHTML(MSG_BILL);
+            fbDraftId = createThreadedDraft(replyTo,'Re: '+subject,fbHtml,replyToId,threadId,BILL_EMAIL);
+          } else {
+            fbReplyText = MSG_CHECKING; fbType = 'checking'; fbAdvice = 'TP given for ' + mpn + '. Verify before sending.';
+            fbHtml = origMsg ? buildDraftHTML(MSG_CHECKING, origMsg) : buildSimpleHTML(MSG_CHECKING);
+            fbDraftId = createThreadedDraft(replyTo,'Re: '+subject,fbHtml,replyToId,threadId,null);
+          }
+        } else {
+          fbReplyText = tpMsg; fbType = 'need_tp'; fbAdvice = 'No TP from buyer for ' + mpn + ' (fallback).';
+          fbHtml = origMsg ? buildDraftHTML(tpMsg, origMsg) : buildSimpleHTML(tpMsg);
+          fbDraftId = createThreadedDraft(replyTo,'Re: '+subject,fbHtml,replyToId,threadId,null);
+        }
+        hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, fbReplyText, fbDraftId, fbAdvice);
+        hubLog('draft_created', 'Fallback OEM draft: '+mpn+' ('+fbType+')', {mpn:mpn, type:fbType});
+        handled = true;
       }
-      hubPostDraft(threadId, mpn, replyTo, 'Re: '+subject, replyText2, draftId2, oemAdvice);
-      hubLog('draft_created', 'OEM draft: '+mpn+' ('+draftType+')', {mpn:mpn, type:draftType, tp:tp||null, country:country});
-      Logger.log('OEM only draft: '+mpn);
-      handled = true;
     }
 
     if (handled) {
