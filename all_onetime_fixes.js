@@ -593,3 +593,63 @@ function addSD1446ToStan() {
   sheet.appendRow(['', '', '', '6/23/2026', 'SD1446', 'US', 67, 90]);
   Logger.log('Stan sheet: SD1446 | US | 67 pcs | TP $90');
 }
+
+// ============================================================
+// extractCBPFormText() — 2026-06-23
+// Reads the CBP Form 7501 PDF (entry 1FX55523609) directly from
+// Gmail message 19eef4ad45a1ad98, extracts readable ASCII text
+// from the PDF bytes, and logs HTS codes, duty amounts, and
+// all key field values. No Drive API needed.
+// ============================================================
+function extractCBPFormText() {
+  var message = GmailApp.getMessageById('19eef4ad45a1ad98');
+  if (!message) { Logger.log('ERROR: message not found'); return; }
+
+  var attachments = message.getAttachments();
+  var found = false;
+
+  attachments.forEach(function(att) {
+    if (!(att.getContentType() === 'application/pdf' || att.getName().match(/\.pdf$/i))) return;
+    found = true;
+    Logger.log('Reading: ' + att.getName() + ' (' + att.getSize() + ' bytes)');
+
+    // Convert raw bytes to ASCII string (readable PDF text is stored as plain ASCII)
+    var bytes = att.getBytes();
+    var raw = '';
+    for (var i = 0; i < bytes.length; i++) {
+      var b = bytes[i] & 0xFF;
+      raw += (b >= 32 && b < 127) ? String.fromCharCode(b) : ' ';
+    }
+
+    // Collapse whitespace runs for cleaner output
+    var text = raw.replace(/ {3,}/g, '   ');
+
+    // --- Extract HTS codes (format: NNNN.NN.NNNN or NNNN.NN.NN) ---
+    var htsCodes = text.match(/\b\d{4}\.\d{2}\.\d{2,4}\b/g) || [];
+    Logger.log('HTS CODES FOUND: ' + (htsCodes.length ? htsCodes.join(', ') : 'none'));
+
+    // --- Extract dollar amounts ---
+    var dollars = text.match(/\$\s*[\d,]+\.?\d*/g) || [];
+    Logger.log('DOLLAR AMOUNTS: ' + (dollars.length ? dollars.join(', ') : 'none'));
+
+    // --- Log surrounding context for key CBP fields ---
+    var keywords = ['HTS', 'DUTY', 'RATE', 'ENTERED VALUE', 'DUTIABLE', 'COUNTRY OF ORIGIN',
+                    'TARIFF', 'ASSESS', 'TOTAL', 'VALUE', 'DESCRIPTION', 'UNIT'];
+    keywords.forEach(function(kw) {
+      var idx = text.indexOf(kw);
+      var count = 0;
+      while (idx >= 0 && count < 3) {
+        Logger.log('[' + kw + '] ...' + text.substring(Math.max(0, idx - 15), Math.min(text.length, idx + 120)).trim() + '...');
+        idx = text.indexOf(kw, idx + kw.length + 1);
+        count++;
+      }
+    });
+
+    // --- Also dump first 3000 chars of readable text for full context ---
+    Logger.log('\n=== RAW TEXT (first 3000 chars) ===\n' + text.substring(0, 3000));
+    Logger.log('\n=== RAW TEXT (chars 3000-6000) ===\n' + text.substring(3000, 6000));
+    Logger.log('\n=== RAW TEXT (chars 6000-9000) ===\n' + text.substring(6000, 9000));
+  });
+
+  if (!found) Logger.log('No PDF attachments found on message 19eef4ad45a1ad98');
+}
