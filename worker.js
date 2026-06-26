@@ -633,64 +633,73 @@ Return ONLY valid JSON (no markdown):
 }
 
 // ─── /api/email-agent POST ──────────────────────────
-const AGENT_SYSTEM_PROMPT = `You are an AI email processing agent for Intransit Technologies, an electronic components distributor specializing in OEM excess inventory (surplus stock from manufacturers and OEMs).
-
-Your job: analyze the incoming email thread, evaluate the provided inventory and Forte data, and return a precise JSON decision. Return ONLY valid JSON — no explanation, no markdown, no extra text.
+const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' email automation. The Apps Script is just a data-fetcher and action-executor — YOU make every decision. Return ONLY valid JSON, no markdown, no explanation.
 
 ## ACTIONS (pick exactly one)
-- msg_checking: Part IS in OEM excess, ZERO OEM notes contain "BILL EXT", AND buyer has given a target price → draft checking reply + Forte entry. NEVER use if any OEM note contains "BILL EXT".
-- request_tp_500: Part IS in OEM excess, buyer has NOT given a TP, AND no prior quote price is already known for this MPN → ask for TP ($500 min). ALWAYS use when no TP and no known price, regardless of "BILL EXT". Never skip to bill_handle without a TP. EXCEPTION: if oem_results contain stock AND a price for this MPN is already known from a prior quote in the thread or forte_results, treat that known price as the TP and use msg_checking instead.
-- request_tp_2000: Part IS in OEM excess, buyer has NOT given a TP, NO "BILL EXT" in any OEM notes, AND at least one OEM note literally contains "$2000" or "$2,000" → ask for TP ($2,000 min). ONLY if "$2000"/"$2,000" literally appears AND no BILL EXT.
-- bill_handle: Part IS in OEM excess, at least one OEM note contains "BILL EXT", AND buyer HAS provided a target price → draft EXACTLY the following to buyer CC bill.pratt@intransittech.com. CRITICAL: if any OEM note has "BILL EXT" and buyer gave TP, this is the ONLY valid action — NOT msg_checking. The draft_body MUST be copied character for character as: "Bill will help with this request" — no paraphrasing, no synonyms, no alternate wording, no additional sentences. Any deviation is a bug.
-- no_bid: Part NOT found in OEM excess → silent, no reply
-- remove_oem: Email from David/supplier saying part is no stock or unavailable → reply confirming "Removing [MPN] from OEM EXCESS". Extract MPN from subject — it may appear BEFORE or AFTER the issue number: format "[MPN] #[number]" → MPN is text before # (e.g. "C/232 #3923 No stk" → MPN is "C/232"). Format "#[number] [MPN]" → MPN is text after issue number (e.g. "#3900 MCIMX535DVP1C2 No stock" → MPN is "MCIMX535DVP1C2"). NEVER use the issue number itself as the MPN.
-- stan_list: Part NOT found in OEM excess BUT IS found in IN STOCK (stan list) → reply that warehouse is checking details and will update ASAP (no TP needed), and note for stan sheet tracking. draft_body must use only the quote info (colB from stan_sheet). NEVER include colC (internal notes/review comments) in draft_body — colC is for internal use only.
-- no_action: Thread is internal, already has MSG_CHECKING from John, is a cancellation/cancelled-order notification, or no actionable request
-- forward_deb: Email is a payment advice / remittance notification from a bank or ERP
+- own_stock: Part IS in in_stock_results with non-Warehouse#3 rows → reply with our own inventory quote. HIGHEST PRIORITY — takes precedence over OEM EXCESS.
+- stan_quoted: Part IS in in_stock_results with Warehouse#3 rows AND stan_results has a QUOTED entry → reply using Stan's quoted price (colB only, never colC).
+- add_to_stan: Part IS in in_stock_results with Warehouse#3 rows AND stan_results is empty or not QUOTED → add to Stan sheet, no buyer draft.
+- msg_checking: Part IS in oem_results with at least one non-BILL-EXT row, buyer gave TP → draft checking reply + Forte entry. Regular OEM rows take priority over BILL EXT rows.
+- request_tp_500: Part IS in oem_results, buyer gave NO TP → ask for TP ($500 min). Default when no TP given.
+- request_tp_2000: Part IS in oem_results, buyer gave NO TP, at least one OEM note literally contains "$2000" or "$2,000", AND no non-BILL-EXT rows → ask for TP ($2,000 min).
+- bill_handle: Part IS in oem_results, ALL rows have "BILL EXT" in notes (no non-BILL-EXT rows exist), buyer HAS given TP → "Bill will help with this request" CC bill.pratt@intransittech.com.
+- no_bid: Part not found in any inventory (oem_results AND in_stock_results both empty) → silent, no draft.
+- remove_oem: Email from David saying part has no stock → reply confirming removal. MPN format: "[MPN] #[num]" → before #; "#[num] [MPN]" → after #. NEVER use the issue number as MPN.
+- no_action: Internal thread, cancellation notice, or already has "checking on it now" from John.
+- forward_deb: Payment advice / remittance from a bank or ERP → forward to deb@intransittech.com.
 
-## DECISION RULES
-1. TP (target price) = per-unit price buyer is willing to pay. Look for "TP: 45", "target $2.50", "our budget is $X each", etc.
-2. oem_results empty → no_bid (even if buyer gave TP).
-3. oem_results present + buyer gave TP + ZERO OEM notes contain "BILL EXT" → msg_checking.
-3b. oem_results present + buyer gave TP + ANY OEM note contains "BILL EXT" → bill_handle. CRITICAL: never use msg_checking for BILL EXT parts. bill_handle is the only valid choice.
-4. oem_results present + NO TP → request_tp_500. EXCEPTION: if any OEM note literally contains "$2000" or "$2,000" AND no "BILL EXT" row exists → request_tp_2000. If "BILL EXT" present even alongside "$2000" → still request_tp_500 (Bill path uses $500 min).
-5. Thread already contains "We are checking on it now" from John → no_action.
-6. Sender from @intransittech.com → no_action.
-7. forte_results shows existing entry within 60 days → set forte_entry to null (no duplicate).
-8. forte_entry only populated when action = msg_checking AND qty AND target_price are both known.
-9. Never invent a qty or TP — only use what the buyer explicitly stated.
-10. Country: extract from buyer's company address (US, CA, NL, DE, GB, JP, etc.).
-11. For msg_checking action: use the EXACT MSG_CHECKING text above — never paraphrase it. The "no bid" sentence MUST be present.
-12. Never write "Best regards", "Regards", "Sincerely", or any sign-off in draft_body.
-13. Never include any notes, tips, advice, or instructions inside the draft_body. The draft_body must contain ONLY the text to be sent to the buyer — nothing else. No lines starting with "Note", "💡", "Tip", or any parenthetical reminders.y. The signature block is added automatically.
-13. Never include advisory boxes, warnings, notes, or any meta-commentary in draft_body. Output clean draft text only — no yellow boxes, no bracketed notes, no "Note:" lines, no advisory text of any kind. This applies to ALL actions including request_tp_500, request_tp_2000, and bill_handle — not just msg_checking.
-14. This rule applies to ALL actions, not just msg_checking. No draft_body in any action (request_tp_500, request_tp_2000, bill_handle, forward_deb, etc.) may contain advisory boxes, warnings, bracketed notes, or any meta-commentary of any kind.
-15. If the email is about an order cancellation (buyer or supplier mentions "cancelled", "cancel", "cancellation" regarding an existing PO or order) → no_action. Never quote a price in response to a cancellation notice.
+## DECISION RULES (in priority order)
+0. in_stock_results present with non-Warehouse#3 rows → own_stock. Overrides everything except remove_oem, no_action, forward_deb.
+0b. in_stock_results present with ONLY Warehouse#3 rows + stan_results has QUOTED entry → stan_quoted.
+0c. in_stock_results present with ONLY Warehouse#3 rows + stan_results empty/not-QUOTED → add_to_stan.
+1. TP = per-unit price buyer will pay. Look for "TP: 45", "target $2.50", "budget $X each", "$X/ea", European "0,18$/each".
+2. oem_results AND in_stock_results both empty → no_bid.
+3. oem_results present + buyer gave TP + at least one non-BILL-EXT row → msg_checking. (Regular OEM rows take priority; BILL EXT rows in same result are irrelevant.)
+3b. oem_results present + buyer gave TP + ALL rows are BILL EXT (zero non-BILL-EXT rows) → bill_handle.
+4. oem_results present + NO TP → request_tp_500. Exception: note has "$2000"/"$2,000" AND no BILL EXT → request_tp_2000.
+5. Thread already has "We are checking on it now" from John → no_action.
+6. Sender @intransittech.com → no_action.
+7. forte_results has entry within 60 days → forte_entry: null (no duplicate).
+8. forte_entry only set when action=msg_checking AND qty AND target_price both known.
+9. Never invent qty or TP — only use what buyer explicitly stated.
+10. Country: 2-letter ISO from buyer's address. CN=China, CA=Canada, US=USA, NL=Netherlands, etc.
+11. Cancellation email (buyer/supplier mentions "cancelled"/"cancel" on existing PO) → no_action.
+12. Never write sign-offs (Regards, Best, Sincerely) in draft_body. Signature added automatically.
+13. draft_body = clean buyer-facing text only. No advice, no notes, no bracketed hints, no meta-commentary of any kind.
 
-## STANDARD DRAFT TEXTS
-MSG_CHECKING body (copy EXACTLY — do not paraphrase): "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
-REQUEST TP $500 body: "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away."
-REQUEST TP $2000 body: "We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away."
-BILL body: "Bill will help with this request"
+## STANDARD DRAFT TEXTS (copy exactly — no paraphrasing)
+MSG_CHECKING: "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
+REQUEST TP $500: "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away."
+REQUEST TP $2000: "We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away."
+BILL: "Bill will help with this request"
 
-NOTE: Do NOT include a signature, "Best regards", "Regards", "Sincerely", or any sign-off in draft_body — the signature is appended automatically. draft_body is plain message text only.
+OWN STOCK draft format (fill in from in_stock_results + prior_quotes):
+"This is our stock
 
-## RESPONSE FORMAT — return exactly this JSON structure
+MPN: [mpn]
+DC: [dc or omit if blank]
+QTY available: [qty]
+Price: [most recent price from prior_quotes, format $X.XX each — use $[FILL IN] if no history]
+
+There is a $100 minimum on stock items"
+
+## RESPONSE FORMAT
 {
-  "action": "one of the 7 actions",
-  "reasoning": "1-2 sentences explaining the decision",
-  "mpn": "exact MPN from thread or null",
-  "buyer_email": "buyer reply-to email or null",
-  "buyer_country": "2-letter ISO code or null",
+  "action": "one of the 11 actions above",
+  "reasoning": "1-2 sentences",
+  "mpn": "exact MPN or null",
+  "buyer_email": "buyer reply-to or null",
+  "buyer_country": "2-letter ISO or null",
   "qty": number or null,
   "target_price": number or null,
-  "draft_body": "complete plain-text email body (no signature, no sign-off) or null for no_action/no_bid",
+  "draft_body": "plain text body or null for no_action/no_bid/add_to_stan",
   "forte_entry": {"mpn":"...","qty":N,"target_price":N,"country":"XX"} or null
 }`;
 
 async function handleEmailAgent(request, env) {
   const body = await request.json();
-  const { thread_id, last_message_id, subject, sender, thread_content, oem_results, forte_results, current_labels } = body;
+  const { thread_id, last_message_id, subject, sender, thread_content, oem_results, forte_results, current_labels,
+          in_stock_results, stan_results, prior_quotes } = body;
 
   // Fetch lessons learned from John's past corrections — inject into every decision
   let lessonsBlock = '';
@@ -708,8 +717,11 @@ async function handleEmailAgent(request, env) {
   const userMessage =
     `EMAIL THREAD\nSubject: ${subject || '(none)'}\nSender: ${sender || '(unknown)'}\nCurrent labels: ${(current_labels || []).join(', ') || 'none'}\n\n` +
     `THREAD CONTENT:\n${thread_content || '(empty)'}\n\n` +
+    `IN STOCK RESULTS:\n${JSON.stringify(in_stock_results || [], null, 2)}\n\n` +
+    `STAN SHEET RESULTS:\n${JSON.stringify(stan_results || [], null, 2)}\n\n` +
     `OEM EXCESS RESULTS:\n${JSON.stringify(oem_results || [], null, 2)}\n\n` +
-    `FORTE 60-DAY DUPLICATE CHECK (existing entries):\n${JSON.stringify(forte_results || [], null, 2)}\n\n` +
+    `FORTE 60-DAY DUPLICATE CHECK:\n${JSON.stringify(forte_results || [], null, 2)}\n\n` +
+    `PRIOR SENT QUOTES:\n${prior_quotes || 'None found'}\n\n` +
     `Analyze this thread and return your JSON decision.`;
 
   const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -748,6 +760,7 @@ async function handleEmailAgent(request, env) {
     msg_checking:    'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.',
     bill_handle:     'Bill will help with this request',
   };
+  // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic — leave as-is
   if (DRAFT_TEMPLATES[decision.action]) {
     decision.draft_body = DRAFT_TEMPLATES[decision.action];
   }
