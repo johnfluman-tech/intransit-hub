@@ -215,109 +215,6 @@ function hubPatchEntry(id, payload) {
   } catch(e) { Logger.log('hubPatchEntry error: ' + e); }
 }
 
-function hubPostInbox(threadId, mpn, sender, subject, prediction) {
-  try {
-    UrlFetchApp.fetch(HUB_URL + '/api/inbox', {
-      method: 'post', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({ thread_id: threadId, mpn: mpn, sender: sender,
-                                subject: subject, draft_content: prediction }),
-      muteHttpExceptions: true,
-    });
-  } catch(e) { Logger.log('hubPostInbox error: ' + e); }
-}
-
-// Pre-loaded OEM data variant — avoids repeated sheet reads inside a scan loop
-function searchOEMExcessFromData(oemData, mpn) {
-  if (!mpn || !oemData) return [];
-  var searchNorm = normalize(mpn);
-  var results = [];
-  for (var i = 1; i < oemData.length; i++) {
-    var cellNorm = normalize(String(oemData[i][0]));
-    var reverseOk = searchNorm.startsWith(cellNorm) && cellNorm.length >= Math.ceil(searchNorm.length * 0.75);
-    if (cellNorm.length >= 3 && (cellNorm === searchNorm || cellNorm.startsWith(searchNorm) || reverseOk)) {
-      results.push({ row: i+1, mpn: oemData[i][0], man: oemData[i][1], dc: oemData[i][2], qty: oemData[i][3], notes: String(oemData[i][4]) });
-    }
-  }
-  return results;
-}
-
-// Scans in:inbox, classifies each thread, posts predictions to D1 /api/inbox
-// Called at the start of checkInboxForNewRFQs — no drafts created here, read-only + D1 post
-function scanInboxForPreview() {
-  try {
-    var rfqQuery = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock"))) -from:intransittech.com -label:oem-rfq-incoming-processed newer_than:7d';
-    var tpQuery  = 'in:inbox "minimum line requirement" -label:oem-tp-processed newer_than:7d';
-    var rfqThreads = GmailApp.search(rfqQuery, 0, 20);
-    var tpThreads  = GmailApp.search(tpQuery,  0, 10);
-    if (!rfqThreads.length && !tpThreads.length) return;
-
-    // Load OEM EXCESS sheet once for all threads
-    var oemData = SpreadsheetApp.openById(SPREADSHEET_ID)
-      .getSheetByName(MAIN_SHEET_NAME).getDataRange().getValues();
-
-    var seen = {}, count = 0;
-
-    function classifyAndPost(thread, isTP) {
-      var id = thread.getId();
-      if (seen[id]) return;
-      seen[id] = true;
-      var messages = thread.getMessages();
-      var lastMsg  = messages[messages.length - 1];
-      var subject  = thread.getFirstMessageSubject();
-      var mpn      = extractMPN(subject);
-      var fullBody = lastMsg.getPlainBody();
-      if (!fullBody || fullBody.trim().length < 30) {
-        fullBody = lastMsg.getBody().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      }
-      if (!mpn || !/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)) {
-        var bodyMpn = extractMPNFromRFQBody(fullBody);
-        if (bodyMpn) mpn = bodyMpn.replace(/#\w+$/, '');
-      }
-      var firstMsg = messages[0];
-      var icsource = isICSouceEmail(firstMsg.getFrom(), firstMsg.getSubject());
-      var sender = icsource
-        ? (extractICSourcBuyerEmail(lastMsg.getBody()) || extractBuyerEmail(lastMsg.getFrom()))
-        : extractBuyerEmail(lastMsg.getFrom());
-      var prediction;
-      if (!mpn) {
-        prediction = 'No action — could not extract MPN from subject/body';
-      } else {
-        var oemResults = searchOEMExcessFromData(oemData, mpn);
-        if (!oemResults.length) {
-          prediction = 'No action — ' + mpn + ' not found in OEM EXCESS';
-        } else {
-          var hasBillExt = oemResults.some(function(r){ return r.notes.indexOf('BILL EXT 117') >= 0; });
-          if (hasBillExt) {
-            prediction = 'Draft → MSG_BILL to ' + sender;
-          } else if (isTP) {
-            var tp = extractTargetPrice(stripQuotedLines(fullBody));
-            prediction = tp
-              ? 'Draft → MSG_CHECKING to ' + sender + ' (TP: ' + tp + ')'
-              : 'No action — TP thread but no price found yet';
-          } else {
-            var tp2 = extractTargetPrice(fullBody.split('OEM EXCESS')[0]);
-            if (tp2) {
-              prediction = 'Draft → MSG_CHECKING to ' + sender + ' (TP: ' + tp2 + ')';
-            } else {
-              var has2k = oemResults.some(function(r){ return r.notes.indexOf('$2000') >= 0 || r.notes.indexOf('$2,000') >= 0; });
-              prediction = 'Draft → Need TP ($' + (has2k ? '2,000' : '500') + ' min) to ' + sender;
-            }
-          }
-        }
-      }
-      hubPostInbox(id, mpn, sender, subject, prediction);
-      count++;
-    }
-
-    rfqThreads.forEach(function(t) { classifyAndPost(t, false); });
-    tpThreads.forEach(function(t)  { classifyAndPost(t, true);  });
-    if (count > 0) Logger.log('scanInboxForPreview: ' + count + ' thread(s) posted');
-  } catch(e) {
-    Logger.log('scanInboxForPreview error: ' + e.toString());
-  }
-}
-
 // Archive any inbox emails from blocked domains immediately
 function archiveBlockedDomains() {
   var BLOCKED_DOMAINS = getBlockedDomains();
@@ -330,85 +227,6 @@ function archiveBlockedDomains() {
     });
     hubLog('run', 'Blocked & archived ' + threads.length + ' email(s) from ' + domain);
   });
-}
-
-// Auto-fix wrong drafts: fetch 'wrong' entries, call Claude to correct, replace Gmail draft
-function fixWrongDrafts() {
-  try {
-    var resp = UrlFetchApp.fetch(HUB_URL + '/api/drafts?status=wrong&limit=20', {
-      method: 'get', headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true,
-    });
-    if (resp.getResponseCode() !== 200) return;
-    var wrongEntries = JSON.parse(resp.getContentText()).rows || [];
-    if (!wrongEntries.length) return;
-    Logger.log('fixWrongDrafts: ' + wrongEntries.length + ' entries to fix');
-
-    wrongEntries.forEach(function(entry) {
-      try {
-        var correctionNote = entry.sent_content || '';
-        if (!correctionNote.trim()) { Logger.log('fixWrongDrafts: no correction note for #' + entry.id); return; }
-
-        var rawContent = entry.draft_content || '';
-        var draftIdMatch = rawContent.match(/\[GMAIL_DRAFT:([^\]]+)\]/);
-        var gmailDraftId = draftIdMatch ? draftIdMatch[1] : null;
-        var cleanContent = rawContent.replace(/\n*\[GMAIL_DRAFT:[^\]]+\][\s]*/g, '').trim();
-
-        // Ask Claude to generate corrected message body
-        var claudeResp = UrlFetchApp.fetch(HUB_URL + '/api/claude', {
-          method: 'post', contentType: 'application/json',
-          headers: { Authorization: 'Bearer ' + HUB_SECRET },
-          payload: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 600,
-            system: 'You are an email assistant for Intransit Technologies. Given the original draft body and a correction note, return ONLY the corrected message body — no greeting, no signature, no explanation. Include an [ADVICE: <what was corrected and why>. <what John should verify before sending>. Remove advice before sending.] block at the end.',
-            messages: [{ role: 'user', content: 'Original draft:\n' + cleanContent + '\n\nCorrection:\n' + correctionNote + '\n\nCorrected body:' }]
-          }),
-          muteHttpExceptions: true,
-        });
-        var claudeData = JSON.parse(claudeResp.getContentText());
-        var correctedText = (claudeData.content && claudeData.content[0] && claudeData.content[0].text) || '';
-        if (!correctedText.trim()) { Logger.log('fixWrongDrafts: Claude returned nothing for #' + entry.id); return; }
-
-        // Delete the wrong Gmail draft if we know its ID
-        if (gmailDraftId) {
-          UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + gmailDraftId, {
-            method: 'DELETE', headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true,
-          });
-          Logger.log('fixWrongDrafts: deleted draft ' + gmailDraftId);
-        }
-
-        // Get thread and build corrected draft
-        var thread = GmailApp.getThreadById(entry.thread_id);
-        if (!thread) { Logger.log('fixWrongDrafts: thread not found: ' + entry.thread_id); return; }
-        var messages = thread.getMessages();
-        var lastMsg = messages[messages.length - 1];
-        var origMsg = null;
-        for (var i = 0; i < messages.length; i++) {
-          if (messages[i].getFrom().indexOf(JOHN_EMAIL) < 0 && messages[i].getFrom().indexOf('intransittech') < 0) {
-            origMsg = messages[i]; break;
-          }
-        }
-        var fixAdvice = 'This draft was corrected based on your feedback: "' + correctionNote.substring(0, 120) + '". Verify it reads correctly before sending.';
-        var htmlBody = origMsg ? buildDraftHTML(correctedText, origMsg) : buildSimpleHTML(correctedText);
-        var replyTo = entry.sender || extractBuyerEmail(lastMsg.getFrom());
-        var subj = entry.subject || ('Re: ' + thread.getFirstMessageSubject());
-        var newDraftId = createThreadedDraft(replyTo, subj, htmlBody, lastMsg.getId(), entry.thread_id, null);
-
-        if (newDraftId) {
-          hubPostDraft(entry.thread_id, entry.mpn, replyTo, subj, correctedText, newDraftId, fixAdvice);
-          hubLog('draft_created', 'Auto-fixed: ' + (entry.mpn || subj), { mpn: entry.mpn, fixed_from: entry.id });
-          Logger.log('fixWrongDrafts: created new draft ' + newDraftId + ' for thread ' + entry.thread_id);
-        }
-
-        hubPatchEntry(entry.id, { action: 'fixed' });
-
-      } catch(eInner) {
-        Logger.log('fixWrongDrafts inner error #' + entry.id + ': ' + eInner.toString());
-      }
-    });
-  } catch(e) {
-    Logger.log('fixWrongDrafts outer error: ' + e.toString());
-  }
 }
 
 function getRemoteConfig() {
@@ -1077,58 +895,6 @@ function checkDavidNoStockEmails() {
   });
 }
 
-// ============================================================
-// ONE-TIME: find every thread with more than one draft, keep the non-agent one, delete the rest.
-// Handles IC Source and any other RFQ type that got double-drafted.
-function cleanDuplicateDrafts() {
-  var allDrafts = GmailApp.getDrafts();
-  hubLog('run', 'cleanDuplicateDrafts: checking ' + allDrafts.length + ' total drafts');
-
-  // Group drafts by thread ID
-  var byThread = {};
-  allDrafts.forEach(function(draft) {
-    try {
-      var tid = draft.getMessage().getThread().getId();
-      if (!byThread[tid]) byThread[tid] = [];
-      byThread[tid].push(draft);
-    } catch(e) {}
-  });
-
-  var deleted = 0, kept = 0;
-  Object.keys(byThread).forEach(function(tid) {
-    var drafts = byThread[tid];
-    if (drafts.length <= 1) return; // no duplicate
-
-    // Score each draft: prefer non-agent drafts (agent drafts contain "[AGENT:")
-    // Within same type, prefer the most recent (assume array order = creation order, keep last)
-    var nonAgent = drafts.filter(function(d) {
-      try { return d.getMessage().getPlainBody().indexOf('[AGENT:') < 0; } catch(e) { return false; }
-    });
-    var agentDrafts = drafts.filter(function(d) {
-      try { return d.getMessage().getPlainBody().indexOf('[AGENT:') >= 0; } catch(e) { return true; }
-    });
-
-    var toKeep   = nonAgent.length ? nonAgent[nonAgent.length - 1] : drafts[drafts.length - 1];
-    var toDelete = drafts.filter(function(d) { return d !== toKeep; });
-
-    toDelete.forEach(function(d) {
-      try {
-        var body = d.getMessage().getPlainBody().substring(0, 60).replace(/\n/g, ' ');
-        d.deleteDraft();
-        Logger.log('DELETED duplicate draft [' + tid + ']: "' + body + '"');
-        deleted++;
-      } catch(e) {
-        Logger.log('ERROR deleting draft: ' + e.toString());
-      }
-    });
-    kept++;
-  });
-
-  Logger.log('cleanDuplicateDrafts done — threads cleaned: ' + kept + ', drafts deleted: ' + deleted);
-  hubLog('run', 'cleanDuplicateDrafts: deleted ' + deleted + ' duplicate drafts across ' + kept + ' threads');
-}
-
-
 // TRIGGER 2 — Sent "Removed - MPN:" → delete from OEM EXCESS
 // ============================================================
 function checkSentRemovals() {
@@ -1403,10 +1169,6 @@ function checkInboxForNewRFQs() {
   if (_cfg.enabled === false) { hubLog('run', 'checkInboxForNewRFQs: disabled via hub config'); return; }
   // Archive blocked domains immediately
   try { archiveBlockedDomains(); } catch(e) { Logger.log('archiveBlockedDomains error: ' + e); }
-  // Auto-fix any drafts John marked wrong since last run
-  try { fixWrongDrafts(); } catch(e) { Logger.log('fixWrongDrafts error: ' + e); }
-  // Post inbox predictions to D1 for the Training tab (read-only, no drafts created)
-  try { scanInboxForPreview(); } catch(e) { Logger.log('scanInboxForPreview error: ' + e); }
   var BLOCKED_DOMAINS = getBlockedDomains();
   var _blockedFromFilter = BLOCKED_DOMAINS.map(function(d){return '-from:'+d;}).join(' ');
   var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
@@ -1830,16 +1592,6 @@ function setupTriggers() {
   ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processCommandQueue').timeBased().everyMinutes(5).create();
   Logger.log('All 10 triggers installed.');
-}
-
-// ============================================================
-// ONE-TIME: Fix all existing inbox drafts — add ADVICE blocks
-// Run once manually from Apps Script editor to retrofit all drafts.
-// ============================================================
-
-function fixAllDraftsAddAdvice() {
-  // Advice blocks removed 2026-06-22 — this function is a no-op.
-  Logger.log('fixAllDraftsAddAdvice: advice system removed, skipping');
 }
 
 // ============================================================
@@ -3031,67 +2783,6 @@ function notify(text) {
   return CardService.newActionResponseBuilder()
     .setNotification(CardService.newNotification().setText(text))
     .build();
-}
-
-// ============================================================
-// ONE-TIME: Strip ADVICE blocks from ALL existing drafts
-// Run once from Apps Script editor to clean up current drafts.
-// Safe to run multiple times — skips drafts with no advice block.
-// ============================================================
-function stripAllDraftAdvice() {
-  var token = ScriptApp.getOAuthToken();
-  var listResp = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=100', {
-    headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true
-  });
-  var drafts = JSON.parse(listResp.getContentText()).drafts || [];
-  Logger.log('stripAllDraftAdvice: ' + drafts.length + ' drafts found');
-
-  var stripped = 0, skipped = 0, errors = 0;
-
-  drafts.forEach(function(stub) {
-    try {
-      Utilities.sleep(400);
-      var draftResp = UrlFetchApp.fetch(
-        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + stub.id + '?format=full',
-        { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-      );
-      var draft    = JSON.parse(draftResp.getContentText());
-      var htmlBody = extractDraftHtmlBody(draft.message && draft.message.payload);
-
-      if (!htmlBody || htmlBody.indexOf('Note for John (remove before sending)') < 0) {
-        skipped++; return;
-      }
-
-      var cleanHtml = stripAdviceFromHtml(htmlBody);
-      var rebuilt   = rebuildRawMessage(draft, cleanHtml);
-      var threadId  = (draft.message && draft.message.threadId) || null;
-
-      var putResp = UrlFetchApp.fetch(
-        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + stub.id,
-        {
-          method: 'PUT',
-          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-          payload: JSON.stringify({ message: { raw: rebuilt.raw, threadId: threadId } }),
-          muteHttpExceptions: true,
-        }
-      );
-      var putData = JSON.parse(putResp.getContentText());
-      if (putData.error) {
-        Logger.log('stripAllDraftAdvice PUT error: ' + JSON.stringify(putData.error));
-        errors++;
-      } else {
-        stripped++;
-        Logger.log('stripAllDraftAdvice: stripped "' + rebuilt.subject + '"');
-      }
-    } catch(e) {
-      errors++;
-      Logger.log('stripAllDraftAdvice error: ' + e.toString());
-    }
-  });
-
-  var summary = 'stripAllDraftAdvice DONE: ' + stripped + ' stripped, ' + skipped + ' had none, ' + errors + ' errors';
-  Logger.log(summary);
-  hubLog('run', summary);
 }
 
 // ============================================================
