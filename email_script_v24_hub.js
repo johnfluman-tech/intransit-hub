@@ -1116,8 +1116,9 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
       deletePart(removeMpn, subject);
       hubLog('run', 'Worker remove_oem: ' + removeMpn, {mpn: removeMpn});
       try {
+        var draftTo = decision.buyer_email || replyTo;
         var rmHtml = buildSimpleHTML('Removing ' + removeMpn + ' from OEM EXCESS.');
-        createThreadedDraft(replyTo, 'Re: ' + subject, rmHtml, lastMsg.getId(), threadId, null);
+        createThreadedDraft(draftTo, 'Re: ' + subject, rmHtml, lastMsg.getId(), threadId, null);
       } catch(e) {}
     }
     return;
