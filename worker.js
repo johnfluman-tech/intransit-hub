@@ -637,7 +637,7 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 
 ## ACTIONS (pick exactly one)
 - own_stock: Part IS in in_stock_results with non-Warehouse#3 rows → reply with our own inventory quote. HIGHEST PRIORITY — takes precedence over OEM EXCESS.
-- stan_quoted: Part IS in in_stock_results with Warehouse#3 rows AND stan_results has a QUOTED entry → reply using Stan's quoted price (colB only, never colC).
+- stan_quoted: Part IS in in_stock_results with Warehouse#3 rows AND stan_results has a QUOTED entry → reply using Stan's quoted price (colB only, never colC). Draft MUST include the final inspection line — see STAN QUOTED draft format below.
 - add_to_stan: Part IS in in_stock_results with Warehouse#3 rows AND stan_results is empty or not QUOTED → add to Stan sheet, no buyer draft.
 - msg_checking: Part IS in oem_results with at least one non-BILL-EXT row, buyer gave TP → draft checking reply + Forte entry. Regular OEM rows take priority over BILL EXT rows.
 - request_tp_500: Part IS in oem_results, buyer gave NO TP → ask for TP ($500 min). Default when no TP given, even when all OEM rows are BILL EXT.
@@ -680,6 +680,18 @@ MPN: [mpn]
 DC: [dc or omit if blank]
 QTY available: [qty]
 Price: [most recent price from prior_quotes, format $X.XX each — use $[FILL IN] if no history]
+
+There is a $100 minimum on stock items"
+
+STAN QUOTED draft format (fill in from stan_results colB price + in_stock_results DC/qty):
+"This is our stock
+
+MPN: [mpn]
+DC: [dc or omit if blank]
+QTY available: [qty]
+Price: [colB from stan_results, format $X.XX each]
+
+Please note these parts will need to go through our final inspection.
 
 There is a $100 minimum on stock items"
 
