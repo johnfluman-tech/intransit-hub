@@ -640,9 +640,9 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 - stan_quoted: Part IS in in_stock_results with Warehouse#3 rows AND stan_results has a QUOTED entry → reply using Stan's quoted price (colB only, never colC).
 - add_to_stan: Part IS in in_stock_results with Warehouse#3 rows AND stan_results is empty or not QUOTED → add to Stan sheet, no buyer draft.
 - msg_checking: Part IS in oem_results with at least one non-BILL-EXT row, buyer gave TP → draft checking reply + Forte entry. Regular OEM rows take priority over BILL EXT rows.
-- request_tp_500: Part IS in oem_results, buyer gave NO TP → ask for TP ($500 min). Default when no TP given.
+- request_tp_500: Part IS in oem_results, buyer gave NO TP → ask for TP ($500 min). Default when no TP given, even when all OEM rows are BILL EXT.
 - request_tp_2000: Part IS in oem_results, buyer gave NO TP, at least one OEM note literally contains "$2000" or "$2,000", AND no non-BILL-EXT rows → ask for TP ($2,000 min).
-- bill_handle: Part IS in oem_results, ALL rows have "BILL EXT" in notes (no non-BILL-EXT rows exist), buyer HAS given TP → "Bill will help with this request" CC bill.pratt@intransittech.com.
+- bill_handle: Part IS in oem_results, ALL rows have "BILL EXT" in notes (no non-BILL-EXT rows exist), AND buyer explicitly stated their own target price (a dollar amount they will pay) → "Bill will help with this request" CC bill.pratt@intransittech.com. NEVER use bill_handle when buyer has not given an explicit TP.
 - no_bid: Part not found in any inventory (oem_results AND in_stock_results both empty) → silent, no draft.
 - remove_oem: Email from David saying part has no stock → reply confirming removal. MPN format: "[MPN] #[num]" → before #; "#[num] [MPN]" → after #. NEVER use the issue number as MPN.
 - no_action: Internal thread, cancellation notice, or already has "checking on it now" from John.
@@ -652,11 +652,11 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 0. in_stock_results present with non-Warehouse#3 rows → own_stock. Overrides everything except remove_oem, no_action, forward_deb.
 0b. in_stock_results present with ONLY Warehouse#3 rows + stan_results has QUOTED entry → stan_quoted.
 0c. in_stock_results present with ONLY Warehouse#3 rows + stan_results empty/not-QUOTED → add_to_stan.
-1. TP = per-unit price buyer will pay. Look for "TP: 45", "target $2.50", "budget $X each", "$X/ea", European "0,18$/each".
+1. TP = dollar amount buyer explicitly states they will pay per unit. Valid TP examples: "TP: 45", "target $2.50", "budget $X each", "$X/ea", European "0,18$/each", "our target price is $X". NOT a TP: buyer asking "what is your price?", "how much is your unit price?", "can you help me with quoting?", "please quote", "please send a price", "what can you offer?" — these are requests for OUR quote, not buyer targets. Blank TgtPrice in netCOMPONENTS table = no TP. If no explicit dollar amount with units is stated by the buyer → NO TP.
 2. oem_results AND in_stock_results both empty → no_bid.
 3. oem_results present + buyer gave TP + at least one non-BILL-EXT row → msg_checking. (Regular OEM rows take priority; BILL EXT rows in same result are irrelevant.)
-3b. oem_results present + buyer gave TP + ALL rows are BILL EXT (zero non-BILL-EXT rows) → bill_handle.
-4. oem_results present + NO TP → request_tp_500. Exception: note has "$2000"/"$2,000" AND no BILL EXT → request_tp_2000.
+3b. oem_results present + buyer gave TP (explicit dollar amount) + ALL rows are BILL EXT (zero non-BILL-EXT rows) → bill_handle.
+4. oem_results present + NO TP → request_tp_500. This includes when all rows are BILL EXT but buyer gave no TP. bill_handle NEVER fires without an explicit buyer TP. Exception: note has "$2000"/"$2,000" AND no BILL EXT → request_tp_2000.
 5. Thread already has "We are checking on it now" from John → no_action.
 6. Sender @intransittech.com → no_action.
 7. forte_results has entry within 60 days → forte_entry: null (no duplicate).
