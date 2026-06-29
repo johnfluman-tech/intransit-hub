@@ -1107,7 +1107,7 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
     addToStanSheet(mpn, country, '', '');
     hubLog('run', 'Worker add_to_stan: ' + mpn, {mpn: mpn});
     Logger.log('Worker add_to_stan: ' + mpn);
-    return;
+    // fall through to draft creation below — worker sets draft_body with checking message
   }
 
   if (action === 'remove_oem') {
@@ -2882,7 +2882,7 @@ function processThreadWithAgent(thread, agentLabel) {
   var BLOCKED_DOMAINS = getBlockedDomains();
 
   for (var b = 0; b < BLOCKED_DOMAINS.length; b++) {
-    if (sender.toLowerCase().indexOf(BLOCKED_DOMAINS[b]) >= 0) { thread.addLabel(agentLabel); return; }
+    if (sender.toLowerCase().indexOf(BLOCKED_DOMAINS[b]) >= 0) { thread.addLabel(agentLabel); thread.moveToArchive(); return; }
   }
   if (sender.toLowerCase().indexOf('intransittech.com') >= 0) { thread.addLabel(agentLabel); return; }
 

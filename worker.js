@@ -638,7 +638,7 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 ## ACTIONS (pick exactly one)
 - own_stock: Part IS in in_stock_results with non-Warehouse#3 rows → reply with our own inventory quote. HIGHEST PRIORITY — takes precedence over OEM EXCESS.
 - stan_quoted: Part IS in in_stock_results with Warehouse#3 rows AND stan_results has a QUOTED entry → reply using Stan's quoted price (colB only, never colC). Draft MUST include the final inspection line — see STAN QUOTED draft format below.
-- add_to_stan: Part IS in in_stock_results with Warehouse#3 rows AND stan_results is empty or not QUOTED → add to Stan sheet, no buyer draft.
+- add_to_stan: Part IS in in_stock_results with Warehouse#3 rows AND stan_results is empty or not QUOTED → add to Stan sheet AND send buyer a checking draft (see ADD TO STAN draft format below).
 - msg_checking: Part IS in oem_results with at least one non-BILL-EXT row, buyer gave TP → draft checking reply + Forte entry. Regular OEM rows take priority over BILL EXT rows.
 - request_tp_500: Part IS in oem_results, buyer gave NO TP → ask for TP ($500 min). Default when no TP given, even when all OEM rows are BILL EXT.
 - request_tp_2000: Part IS in oem_results, buyer gave NO TP, at least one OEM note literally contains "$2000" or "$2,000", AND no non-BILL-EXT rows → ask for TP ($2,000 min).
@@ -695,6 +695,9 @@ Please note these parts will need to go through our final inspection.
 
 There is a $100 minimum on stock items"
 
+ADD TO STAN draft format (use this exactly — no price, no details):
+"Our warehouse is checking on the details and I will update you as soon as possible."
+
 ## RESPONSE FORMAT
 {
   "action": "one of the 11 actions above",
@@ -704,7 +707,7 @@ There is a $100 minimum on stock items"
   "buyer_country": "2-letter ISO or null",
   "qty": number or null,
   "target_price": number or null,
-  "draft_body": "plain text body or null for no_action/no_bid/add_to_stan",
+  "draft_body": "plain text body or null for no_action/no_bid",
   "forte_entry": {"mpn":"...","qty":N,"target_price":N,"country":"XX"} or null
 }`;
 
