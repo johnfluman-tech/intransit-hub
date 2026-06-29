@@ -644,7 +644,7 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 - request_tp_2000: Part IS in oem_results, buyer gave NO TP, at least one OEM note literally contains "$2000" or "$2,000", AND no non-BILL-EXT rows → ask for TP ($2,000 min).
 - bill_handle: Part IS in oem_results, ALL rows have "BILL EXT" in notes (no non-BILL-EXT rows exist), AND buyer explicitly stated their own target price (a dollar amount they will pay) → "Bill will help with this request" CC bill.pratt@intransittech.com. NEVER use bill_handle when buyer has not given an explicit TP.
 - no_bid: Part not found in any inventory (oem_results AND in_stock_results both empty) → silent, no draft.
-- remove_oem: Email from David saying part has no stock → reply confirming removal. MPN format: "[MPN] #[num]" → before #; "#[num] [MPN]" → after #. NEVER use the issue number as MPN.
+- remove_oem: (1) Email from David saying part has no stock → reply confirming removal. MPN format: "[MPN] #[num]" → before #; "#[num] [MPN]" → after #. NEVER use the issue number as MPN. (2) Email from bill.pratt@intransittech.com with "@John" + MPN → remove from OEM EXCESS and confirm to Bill. Set buyer_email = "bill.pratt@intransittech.com" so the draft goes to Bill, not the buyer.
 - no_action: Internal thread, cancellation notice, or already has "checking on it now" from John.
 - forward_deb: Payment advice / remittance from a bank or ERP → forward to deb@intransittech.com.
 
@@ -658,7 +658,7 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 3b. oem_results present + buyer gave TP (explicit dollar amount) + ALL rows are BILL EXT (zero non-BILL-EXT rows) → bill_handle.
 4. oem_results present + NO TP → request_tp_500. This includes when all rows are BILL EXT but buyer gave no TP. bill_handle NEVER fires without an explicit buyer TP. Exception: note has "$2000"/"$2,000" AND no BILL EXT → request_tp_2000.
 5. Thread already has "We are checking on it now" from John → no_action.
-6. Sender @intransittech.com → no_action.
+6. Sender @intransittech.com → no_action. EXCEPTION: if sender is bill.pratt@intransittech.com AND message body contains "@John" AND an MPN → remove_oem (set buyer_email = "bill.pratt@intransittech.com", draft confirms removal to Bill). Bill uses this pattern to tell John to remove a part from OEM EXCESS/NetComp.
 7. forte_results has entry within 60 days → forte_entry: null (no duplicate).
 8. forte_entry only set when action=msg_checking AND qty AND target_price both known.
 9. Never invent qty or TP — only use what buyer explicitly stated.
