@@ -2977,16 +2977,30 @@ function checkBillNetcompRemovals() {
   var doneLabel = GmailApp.getUserLabelByName(DONE_LABEL) || GmailApp.createLabel(DONE_LABEL);
 
   threads.forEach(function(thread) {
+    var msgs    = thread.getMessages();
+    var lastMsg = msgs[msgs.length - 1];
     var subject = thread.getFirstMessageSubject();
-    var mpn     = extractMPN(subject);
+
+    // Primary: look for @John Fluman -MPN tag in the message body (most reliable)
+    var mpn = null;
+    try {
+      var bodyText = lastMsg.getPlainBody();
+      var tagMatch = bodyText.match(/@John\s+Fluman\s*[-–]\s*([A-Z0-9][A-Z0-9\-\.\/]{2,})/i);
+      if (tagMatch) mpn = tagMatch[1].trim();
+    } catch(e) {}
+
+    // Fallback: extract from subject
+    if (!mpn) mpn = extractMPN(subject);
+
     if (mpn) {
       var result = deletePart(mpn, subject);
-      var body   = buildSimpleHTML('Removed - MPN: ' + mpn);
-      GmailApp.createDraft('bill.pratt@intransittech.com', 'Re: ' + subject, '', { htmlBody: body });
+      var replyBody = buildSimpleHTML('Done — ' + mpn + ' removed from OEM EXCESS.');
+      // Reply in-thread to Bill's message
+      createThreadedDraft(BILL_EMAIL, 'Re: ' + subject, replyBody, lastMsg.getId(), thread.getId(), null);
       hubLog('run', 'Bill netcomp removal [' + result + ']: ' + mpn, { mpn: mpn });
       Logger.log('Bill removal [' + result + ']: ' + mpn);
     } else {
-      Logger.log('Bill removal: could not extract MPN from subject: ' + subject);
+      Logger.log('Bill removal: could not extract MPN from body or subject: ' + subject);
       GmailApp.sendEmail(NOTIFY_EMAIL, 'OEM EXCESS: Bill removal — could not extract MPN',
         'Subject: "' + subject + '"\nhttps://mail.google.com/mail/u/0/#inbox/' + thread.getId());
     }

@@ -16,6 +16,17 @@ function updateStanQTY_June29() {
   });
 }
 
+// ONE-TIME — Run removeOemExcess_DA721700U32() to stamp NO STK and delete row
+// 121688 (DA7217-00U32, BILL EXT 117, qty 12016). Bill said no bid 6/30/2026.
+function removeOemExcess_DA721700U32() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+  sheet.getRange(121688, 5).setValue('NO STK ' + today);
+  sheet.deleteRow(121688);
+  Logger.log('Stamped NO STK and deleted OEM row 121688 for DA7217-00U32');
+}
+
 // ONE-TIME — Run addForte_WFM200S022XNN3() to add the missed Forte entry from
 // the WFM200S022XNN3 msg_checking that automation filed incorrectly on Jun 29.
 // Buyer: JICE ZHU / sales1@bzgj-ele.com, qty=500, TP=$3, CN
