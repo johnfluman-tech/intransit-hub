@@ -1013,34 +1013,53 @@ function checkInboxForTPReplies() {
     }
     if (!mpn) { thread.addLabel(label); return; }
 
-    // Extract qty from buyer messages
+    // Extract qty from buyer messages — try ALL qty matches, skip decimals < 1 (those are prices)
     var qty = '', country = 'USA';
     messages.forEach(function(m){
       if (m.getFrom().indexOf(JOHN_EMAIL)>=0||m.getFrom().indexOf('intransittech')>=0) return;
       country = extractCountryFromEmail(m.getFrom());
       var qBody = m.getPlainBody();
-      var qm = qBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)/i);
-      if (qm && !qty) { var n=parseQtyValue(qm[1]||qm[2]||qm[3]||'', country); if(n>0) qty=String(n); }
+      // QtyReq / Qty= patterns first
+      var qTagM = qBody.match(/QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)/i);
+      if (qTagM && !qty) { var n=parseQtyValue(qTagM[1]||qTagM[2]||'', country); if(n>=1) qty=String(n); }
+      // Inline quantity — iterate all "N pcs/ea/each" matches; take first whole-number result >= 1
+      // This skips decimal price values like "0.084 each" which appear before "6000 each"
+      if (!qty) {
+        var qRegex = /(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)/ig;
+        var qMatch;
+        while ((qMatch = qRegex.exec(qBody)) !== null) {
+          var n = parseQtyValue(qMatch[1], country);
+          if (n >= 1) { qty = String(n); break; }
+        }
+      }
       if (!qty && isNetcompEmail(m.getFrom(), m.getSubject())) { var ncQ=extractNetcompsQtyReq(m.getBody()); if(ncQ) qty=ncQ; }
     });
 
-    // $500 MOV check — decline if line value too low
+    // $500 MOV check — decline if line value too low.
+    // Skip for BILL EXT-only parts (worker handles those as bill_handle regardless of line value).
     if (qty && tpNum > 0) {
       var lineValue = parseFloat(qty) * tpNum;
       if (lineValue > 0 && lineValue < 500) {
-        var tpDisp = tpNum < 1 ? tpNum.toFixed(4) : tpNum.toFixed(2);
-        var replyToMov = extractBuyerEmail(lastMsg.getFrom());
-        var firstMsg0 = messages[0];
-        if (isNetcompEmail(firstMsg0.getFrom(), subject)) replyToMov = extractNetcompsBuyerEmail(body) || replyToMov;
-        else if (isICSouceEmail(firstMsg0.getFrom(), subject)) replyToMov = extractICSourcBuyerEmail(lastMsg.getBody()) || replyToMov;
-        var declineText = 'Thank you for your inquiry. Unfortunately, ' + qty + ' pcs at $' + tpDisp + '/EA comes to $' + lineValue.toFixed(2) + ', which does not meet our $500 minimum line requirement. We appreciate the opportunity and hope to work with you on a larger quantity in the future.';
-        var declineHtml = buildSimpleHTML(declineText);
-        var declineDraftId = createThreadedDraft(replyToMov, 'Re: '+subject, declineHtml, lastMsg.getId(), thread.getId(), null);
-        if (declineDraftId) {
-          hubPostDraft(thread.getId(), mpn, replyToMov, 'Re: '+subject, declineText, declineDraftId, 'Below $500 MOV: '+qty+'×$'+tpDisp+'=$'+lineValue.toFixed(2));
-          hubLog('draft_created', 'TP below MOV: '+mpn, {mpn:mpn, tp:tp, qty:qty});
+        var quickOem = searchOEMExcess(mpn);
+        var isBillExtOnly = quickOem.length > 0 && quickOem.every(function(r){
+          return r.notes && r.notes.toString().indexOf('BILL EXT') >= 0;
+        });
+        if (!isBillExtOnly) {
+          var tpDisp = tpNum < 1 ? tpNum.toFixed(4) : tpNum.toFixed(2);
+          var replyToMov = extractBuyerEmail(lastMsg.getFrom());
+          var firstMsg0 = messages[0];
+          if (isNetcompEmail(firstMsg0.getFrom(), subject)) replyToMov = extractNetcompsBuyerEmail(body) || replyToMov;
+          else if (isICSouceEmail(firstMsg0.getFrom(), subject)) replyToMov = extractICSourcBuyerEmail(lastMsg.getBody()) || replyToMov;
+          var declineText = 'Thank you for your inquiry. Unfortunately, ' + qty + ' pcs at $' + tpDisp + '/EA comes to $' + lineValue.toFixed(2) + ', which does not meet our $500 minimum line requirement. We appreciate the opportunity and hope to work with you on a larger quantity in the future.';
+          var declineHtml = buildSimpleHTML(declineText);
+          var declineDraftId = createThreadedDraft(replyToMov, 'Re: '+subject, declineHtml, lastMsg.getId(), thread.getId(), null);
+          if (declineDraftId) {
+            hubPostDraft(thread.getId(), mpn, replyToMov, 'Re: '+subject, declineText, declineDraftId, 'Below $500 MOV: '+qty+'×$'+tpDisp+'=$'+lineValue.toFixed(2));
+            hubLog('draft_created', 'TP below MOV: '+mpn, {mpn:mpn, tp:tp, qty:qty});
+          }
+          thread.addLabel(label); return;
         }
-        thread.addLabel(label); return;
+        // BILL EXT-only: fall through to worker (it will return bill_handle)
       }
     }
 
