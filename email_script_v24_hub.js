@@ -1029,7 +1029,8 @@ function checkInboxForTPReplies() {
     var decision = callEmailAgent(thread.getId(), subject, replyTo, threadContent, oemResults, forteResults, currentLabels, inStockResults, stanResults, priorQuotes);
     if (!decision) { Logger.log('Worker unavailable for TP thread: ' + mpn); return; }
 
-    executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo);
+    var draftIdTp = executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo);
+    auditAndCorrect(decision, draftIdTp, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
     thread.addLabel(label);
   });
 }
@@ -1091,15 +1092,17 @@ function buildThreadContent(messages, subject, replyTo) {
 }
 
 // Executes a worker decision: creates draft, logs to hub, adds Forte entry.
+// Returns the Gmail draft ID (string) if a draft was created, else null.
 function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo) {
-  if (!decision) return;
+  if (!decision) return null;
   var action = decision.action;
   var threadId = thread.getId();
   var lastMsg = messages[messages.length - 1];
+  var draftId = null;
 
   if (action === 'no_action' || action === 'no_bid') {
     hubLog('run', 'Worker: ' + action + ' for ' + mpn);
-    return;
+    return null;
   }
 
   if (action === 'add_to_stan') {
@@ -1118,10 +1121,10 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
       try {
         var draftTo = decision.buyer_email || replyTo;
         var rmHtml = buildSimpleHTML('Removing ' + removeMpn + ' from OEM EXCESS.');
-        createThreadedDraft(draftTo, 'Re: ' + subject, rmHtml, lastMsg.getId(), threadId, null);
+        draftId = createThreadedDraft(draftTo, 'Re: ' + subject, rmHtml, lastMsg.getId(), threadId, null);
       } catch(e) {}
     }
-    return;
+    return draftId;
   }
 
   if (decision.draft_body) {
@@ -1134,7 +1137,7 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
     }
     var ccEmail = (action === 'bill_handle') ? BILL_EMAIL : null;
     var htmlBody = origMsg ? buildDraftHTML(bodyText, origMsg) : buildSimpleHTML(bodyText);
-    var draftId = createThreadedDraft(replyTo, 'Re: ' + subject, htmlBody, lastMsg.getId(), threadId, ccEmail);
+    draftId = createThreadedDraft(replyTo, 'Re: ' + subject, htmlBody, lastMsg.getId(), threadId, ccEmail);
     var reasoning = decision.reasoning || action;
     hubPostDraft(threadId, mpn, replyTo, 'Re: ' + subject, bodyText, draftId, reasoning);
     hubLog('draft_created', 'Worker draft (' + action + '): ' + mpn, {mpn: mpn, type: action, tp: decision.target_price || null});
@@ -1163,6 +1166,97 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
       hubLog('run', 'Worker skipped Forte (60-day dup): ' + fe.mpn);
     }
   }
+
+  return draftId;
+}
+
+// Calls /api/audit-draft — Sonnet reviews the Haiku decision adversarially.
+// If wrong: trashes the bad draft, runs corrected decision, logs lesson.
+// Only audits actions that produce drafts worth checking.
+function auditAndCorrect(decision, draftId, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent) {
+  var auditableActions = ['msg_checking','request_tp_500','request_tp_2000','bill_handle','own_stock','stan_quoted','add_to_stan'];
+  if (auditableActions.indexOf(decision.action) < 0) return;
+  try {
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/audit-draft', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        decision: decision, mpn: mpn, subject: subject, sender: replyTo,
+        thread_content: threadContent,
+        oem_results: oemResults, forte_results: forteResults,
+        in_stock_results: inStockResults, stan_results: stanResults
+      }),
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) { Logger.log('auditAndCorrect HTTP ' + resp.getResponseCode()); return; }
+    var audit = JSON.parse(resp.getContentText());
+    if (!audit || audit.verdict !== 'wrong') return;
+
+    Logger.log('AUDIT CAUGHT MISTAKE for ' + mpn + ': ' + audit.reason);
+    hubLog('audit_corrected', 'Audit fixed ' + decision.action + ' for ' + mpn + ': ' + audit.reason, {mpn: mpn});
+
+    // Trash the wrong draft
+    if (draftId) {
+      try { GmailApp.getDraft(draftId).deleteDraft(); } catch(e) { Logger.log('trash draft err: ' + e); }
+    }
+
+    // Build corrected decision and re-execute
+    var corrected = {
+      action:        audit.corrected_action       || decision.action,
+      buyer_email:   audit.corrected_buyer_email  || decision.buyer_email,
+      draft_body:    audit.corrected_draft_body   || decision.draft_body,
+      forte_entry:   (audit.corrected_forte_entry === false) ? null : (audit.corrected_forte_entry || decision.forte_entry),
+      mpn:           decision.mpn,
+      qty:           decision.qty,
+      target_price:  decision.target_price,
+      buyer_country: decision.buyer_country,
+      reasoning:     'AUTO-CORRECTED by auditor: ' + audit.reason
+    };
+    executeWorkerDecision(corrected, thread, messages, mpn, subject, replyTo);
+  } catch(e) {
+    Logger.log('auditAndCorrect error: ' + e);
+  }
+}
+
+// Fetches yesterday's cost data from /api/cost-report and emails it to John.
+function sendDailyCostReport() {
+  try {
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/cost-report?days=1', {
+      method: 'GET', headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) { Logger.log('cost-report HTTP ' + resp.getResponseCode()); return; }
+    var data = JSON.parse(resp.getContentText());
+    var rows = data.rows || [];
+    var total = data.total_cost_usd || 0;
+
+    var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMMM d, yyyy');
+    var lines = ['Intransit Hub — Daily API Cost Report', 'Date: ' + today, ''];
+
+    if (!rows.length) {
+      lines.push('No API calls recorded in the last 24 hours.');
+    } else {
+      lines.push('TOTAL COST: $' + total.toFixed(4));
+      lines.push('');
+      lines.push('Breakdown:');
+      rows.forEach(function(r) {
+        var modelShort = r.model.indexOf('haiku') >= 0 ? 'Haiku' : 'Sonnet';
+        lines.push('  ' + r.endpoint + ' [' + modelShort + ']');
+        lines.push('    Calls:  ' + r.calls);
+        lines.push('    Tokens: ' + Number(r.total_input).toLocaleString() + ' in / ' + Number(r.total_output).toLocaleString() + ' out');
+        lines.push('    Cost:   $' + (r.total_cost || 0).toFixed(4));
+        lines.push('');
+      });
+    }
+    lines.push('—');
+    lines.push('Intransit Hub Automation');
+
+    var subject = 'Intransit Hub — Daily Cost ($' + total.toFixed(4) + ') ' + today;
+    GmailApp.sendEmail('john.fluman@intransittech.com', subject, lines.join('\n'));
+    Logger.log('Daily cost report sent: $' + total.toFixed(4));
+  } catch(e) {
+    Logger.log('sendDailyCostReport error: ' + e);
+  }
 }
 
 function checkInboxForNewRFQs() {
@@ -1172,7 +1266,7 @@ function checkInboxForNewRFQs() {
   try { archiveBlockedDomains(); } catch(e) { Logger.log('archiveBlockedDomains error: ' + e); }
   var BLOCKED_DOMAINS = getBlockedDomains();
   var _blockedFromFilter = BLOCKED_DOMAINS.map(function(d){return '-from:'+d;}).join(' ');
-  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
+  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR from:david@fortetechno.com OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
   var threads = GmailApp.search(query,0,10);
   hubLog('run', 'checkInboxForNewRFQs: ' + threads.length + ' thread(s)');
   if (!threads.length) return;
@@ -1245,8 +1339,10 @@ function checkInboxForNewRFQs() {
       return;
     }
 
-    executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo);
-    if (decision.action !== 'no_bid') thread.addLabel(label);
+    var draftId = executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo);
+    auditAndCorrect(decision, draftId, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
+    thread.addLabel(label);
+    if (decision.action === 'no_bid') thread.moveToArchive();
   });
 }
 
@@ -1592,7 +1688,8 @@ function setupTriggers() {
   ScriptApp.newTrigger('runEmailAgent').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processCommandQueue').timeBased().everyMinutes(5).create();
-  Logger.log('All 10 triggers installed.');
+  ScriptApp.newTrigger('sendDailyCostReport').timeBased().atHour(8).everyDays(1).create();
+  Logger.log('All 11 triggers installed.');
 }
 
 // ============================================================
@@ -2888,7 +2985,15 @@ function processThreadWithAgent(thread, agentLabel) {
   if (sender.toLowerCase().indexOf('intransittech.com') >= 0) { thread.addLabel(agentLabel); return; }
 
   var mpn = extractMPNFromSubject(subject) || extractMPN(subject);
+  var lastMsg = messages[messages.length - 1];
+  var firstBody = firstMsg.getPlainBody() || '';
   var replyTo = extractBuyerEmail(sender);
+  if (isNetcompEmail(sender, subject)) replyTo = extractNetcompsBuyerEmail(firstBody) || replyTo;
+  else if (isICSouceEmail(sender, subject)) replyTo = extractICSourcBuyerEmail(firstBody) || replyTo;
+  // Also block if the extracted buyer email domain is blocked
+  for (var bb = 0; bb < BLOCKED_DOMAINS.length; bb++) {
+    if (replyTo.toLowerCase().indexOf(BLOCKED_DOMAINS[bb]) >= 0) { thread.addLabel(agentLabel); thread.moveToArchive(); return; }
+  }
   var oemResults    = mpn ? searchOEMExcess(mpn)    : [];
   var inStockResults = mpn ? searchInStock(mpn)      : [];
   var stanResults   = mpn ? searchStanSheet(mpn)    : [];
@@ -2906,7 +3011,8 @@ function processThreadWithAgent(thread, agentLabel) {
   }
 
   hubLog('run', 'runEmailAgent [' + decision.action + ']: ' + subject + ' — ' + (decision.reasoning || ''));
-  executeWorkerDecision(decision, thread, messages, mpn || '', subject, replyTo);
+  var agentDraftId = executeWorkerDecision(decision, thread, messages, mpn || '', subject, replyTo);
+  auditAndCorrect(decision, agentDraftId, thread, messages, mpn || '', subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
 }
 
 function buildAgentThreadText(messages, maxChars) {

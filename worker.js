@@ -23,6 +23,24 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+const MODEL_PRICING = {
+  'claude-haiku-4-5-20251001': { input: 0.80,  output: 4.00  },
+  'claude-sonnet-4-6':         { input: 3.00,  output: 15.00 },
+};
+
+async function logApiCost(env, model, endpoint, usage, mpn, action) {
+  try {
+    const pricing = MODEL_PRICING[model] || { input: 3.00, output: 15.00 };
+    const inp = (usage && usage.input_tokens)  || 0;
+    const out = (usage && usage.output_tokens) || 0;
+    const cost = (inp * pricing.input + out * pricing.output) / 1_000_000;
+    await env.DB.prepare(
+      `INSERT INTO api_costs (model, endpoint, input_tokens, output_tokens, cost_usd, mpn, action)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(model, endpoint, inp, out, cost, mpn || null, action || null).run();
+  } catch(e) {}
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -73,7 +91,9 @@ export default {
 
       if (p === '/api/issues'    && m === 'GET')  return handleGetIssues(url, env);
       if (p === '/api/issues'    && m === 'POST') return handlePostIssue(request, env);
-      if (p === '/api/self-heal' && m === 'POST') return handleSelfHeal(request, env);
+      if (p === '/api/self-heal'   && m === 'POST') return handleSelfHeal(request, env);
+      if (p === '/api/audit-draft' && m === 'POST') return handleAuditDraft(request, env);
+      if (p === '/api/cost-report' && m === 'GET')  return handleCostReport(url, env);
 
       if (p === '/api/fix-queue' && m === 'GET')  return handleGetFixQueue(url, env);
       if (p === '/api/fix-queue' && m === 'POST') return handlePostFixQueue(request, env);
@@ -460,7 +480,7 @@ async function handleChat(request, env) {
   // Format rules
   const blockedDomains = rulesRows.filter(r => r.type === 'blocked_domain').map(r => r.key);
   const otherRules = rulesRows.filter(r => r.type !== 'blocked_domain');
-  let rulesText = blockedDomains.length ? `Blocked domains: ${blockedDomains.join(', ')}` : 'Blocked domains: sourceschip.com, bulechip.com, feelchips.com (defaults)';
+  let rulesText = blockedDomains.length ? `Blocked domains: ${blockedDomains.join(', ')}` : 'Blocked domains: sourceschip.com, bulechip.com, feelchips.com, chip-wintrading.com, qizhongsmart.com, heshengwei.com, qixunmicro-ic.com, jxcsilicon.com, xhtx-ic.com, yudexin-tech.com, lepaitek.cn, amperium.com.tr (defaults)';
   if (otherRules.length) {
     rulesText += '\nOther rules:\n' + otherRules.map(r => `  [${r.type}] ${r.key} = ${r.value}${r.notes ? ' — ' + r.notes : ''}`).join('\n');
   }
@@ -610,6 +630,8 @@ Return ONLY valid JSON (no markdown):
     return json({ error: 'parse failed', raw: data.content[0].text }, 500);
   }
 
+  await logApiCost(env, 'claude-haiku-4-5-20251001', 'learn', data.usage, mpn || null, action || null);
+
   const ts = (new Date()).toISOString().replace(/[^0-9]/g,'').substring(0,14);
   const slug = 'lesson_' + ts + '_' + (mpn||'gen').replace(/[^a-zA-Z0-9]/g,'').substring(0,8);
   const body_text = [
@@ -641,24 +663,27 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 - add_to_stan: Part IS in in_stock_results with Warehouse#3 rows AND stan_results is empty or not QUOTED → add to Stan sheet AND send buyer a checking draft (see ADD TO STAN draft format below).
 - msg_checking: Part IS in oem_results with at least one non-BILL-EXT row, buyer gave TP → draft checking reply + Forte entry. Regular OEM rows take priority over BILL EXT rows.
 - request_tp_500: Part IS in oem_results, buyer gave NO TP → ask for TP ($500 min). Default when no TP given, even when all OEM rows are BILL EXT.
-- request_tp_2000: Part IS in oem_results, buyer gave NO TP, at least one OEM note literally contains "$2000" or "$2,000", AND no non-BILL-EXT rows → ask for TP ($2,000 min).
+- request_tp_2000: Part IS in oem_results, buyer gave NO TP, at least one NON-BILL-EXT OEM row's notes literally contain "$2000" or "$2,000" → ask for TP ($2,000 min). Only non-BILL-EXT rows count for the $2,000 check — BILL EXT rows are ignored.
 - bill_handle: Part IS in oem_results, ALL rows have "BILL EXT" in notes (no non-BILL-EXT rows exist), AND buyer explicitly stated their own target price (a dollar amount they will pay) → "Bill will help with this request" CC bill.pratt@intransittech.com. NEVER use bill_handle when buyer has not given an explicit TP.
+
+BILL EXT DEFINITION: A row is BILL EXT if its OEM notes field starts with or contains "BILL EXT" — this includes "BILL EXT 117", "BILL EXT 234", "BILL EXT 99 - OEM EXCESS! $500 MIN TP REQUIRED", etc. The number after "BILL EXT" is an internal code reference, not part of the classification. Any note containing "BILL EXT" as a prefix followed by anything (a number, a dash, more text) is a BILL EXT row. A note like "OEM EXCESS! $500 MIN TP REQUIRED" with NO "BILL EXT" prefix is NOT a BILL EXT row.
 - no_bid: Part not found in any inventory (oem_results AND in_stock_results both empty) → silent, no draft.
 - remove_oem: (1) Email from David saying part has no stock → reply confirming removal. MPN format: "[MPN] #[num]" → before #; "#[num] [MPN]" → after #. NEVER use the issue number as MPN. (2) Email from bill.pratt@intransittech.com with "@John" + MPN → remove from OEM EXCESS and confirm to Bill. Set buyer_email = "bill.pratt@intransittech.com" so the draft goes to Bill, not the buyer.
-- no_action: Internal thread, cancellation notice, or already has "checking on it now" from John.
+- no_action: Internal thread, cancellation notice, Warehouse#3 operator email (Stan@amorelectronics.com), or already has "checking on it now" from John.
 - forward_deb: Payment advice / remittance from a bank or ERP → forward to deb@intransittech.com.
 
 ## DECISION RULES (in priority order)
 0. in_stock_results present with non-Warehouse#3 rows → own_stock. Overrides everything except remove_oem, no_action, forward_deb.
 0b. in_stock_results present with ONLY Warehouse#3 rows + stan_results has QUOTED entry → stan_quoted.
 0c. in_stock_results present with ONLY Warehouse#3 rows + stan_results empty/not-QUOTED → add_to_stan.
-1. TP = dollar amount buyer explicitly states they will pay per unit. Valid TP examples: "TP: 45", "target $2.50", "budget $X each", "$X/ea", European "0,18$/each", "our target price is $X". NOT a TP: buyer asking "what is your price?", "how much is your unit price?", "can you help me with quoting?", "please quote", "please send a price", "what can you offer?" — these are requests for OUR quote, not buyer targets. Blank TgtPrice in netCOMPONENTS table = no TP. If no explicit dollar amount with units is stated by the buyer → NO TP.
+1. TP = dollar amount buyer explicitly states they will pay per unit. Valid TP examples: "TP: 45", "target $2.50", "budget $X each", "$X/ea", European "0,18$/each", "our target price is $X". NOT a TP: buyer asking "what is your price?", "how much is your unit price?", "can you help me with quoting?", "please quote", "please send a price", "what can you offer?" — these are requests for OUR quote, not buyer targets. Blank, 0, or "NA" TgtPrice in netCOMPONENTS table = no TP. CRITICAL: The netCOMPONENTS Description field often contains our own listing text such as "OEM EXCESS! $500 MIN TP REQUIRED" — this is our listing descriptor, NOT the buyer's target price and NOT a per-unit minimum. The "$500" in that phrase means our minimum LINE ORDER VALUE (qty × TP must be ≥ $500), not a price-per-unit floor. A buyer's TgtPrice of any positive number (e.g., 3, 0.50, 150) IS a valid buyer TP regardless of how small it is. Only the explicit TgtPrice cell value entered by the buyer counts as their TP. Do NOT compare the buyer's TgtPrice to $500 — that comparison is not your job. If no explicit dollar amount with units is stated by the buyer → NO TP.
 2. oem_results AND in_stock_results both empty → no_bid.
 3. oem_results present + buyer gave TP + at least one non-BILL-EXT row → msg_checking. (Regular OEM rows take priority; BILL EXT rows in same result are irrelevant.)
-3b. oem_results present + buyer gave TP (explicit dollar amount) + ALL rows are BILL EXT (zero non-BILL-EXT rows) → bill_handle.
-4. oem_results present + NO TP → request_tp_500. This includes when all rows are BILL EXT but buyer gave no TP. bill_handle NEVER fires without an explicit buyer TP. Exception: note has "$2000"/"$2,000" AND no BILL EXT → request_tp_2000.
+3b. oem_results present + buyer gave TP (explicit dollar amount) + ALL rows are BILL EXT (zero non-BILL-EXT rows) → bill_handle. A row is BILL EXT if its notes contain "BILL EXT" anywhere — "BILL EXT 117 - OEM EXCESS! $500 MIN TP REQUIRED" IS a BILL EXT row. Classify each row by whether its notes contain "BILL EXT"; if ALL rows qualify → bill_handle (when buyer TP given).
+4. oem_results present + NO TP → request_tp_500 by default. This includes when all rows are BILL EXT but buyer gave no TP. bill_handle NEVER fires without an explicit buyer TP. Exception: if at least one NON-BILL-EXT OEM row's notes contain "$2000" or "$2,000" → request_tp_2000 instead of request_tp_500.
 5. Thread already has "We are checking on it now" from John → no_action.
 6. Sender @intransittech.com → no_action. EXCEPTION: if sender is bill.pratt@intransittech.com AND message body contains "@John" AND an MPN → remove_oem (set buyer_email = "bill.pratt@intransittech.com", draft confirms removal to Bill). Bill uses this pattern to tell John to remove a part from OEM EXCESS/NetComp.
+6b. Sender is Stan@amorelectronics.com (any @amorelectronics.com address) → no_action. Stan operates Intransit's Warehouse#3; his emails to John are internal W3 stock check-ins and RFQ list updates, not customer RFQs from new buyers. Never add_to_stan or reply based on Stan's own emails.
 7. forte_results has entry within 60 days → forte_entry: null (no duplicate).
 8. forte_entry only set when action=msg_checking AND qty AND target_price both known.
 9. Never invent qty or TP — only use what buyer explicitly stated.
@@ -666,6 +691,7 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 11. Cancellation email (buyer/supplier mentions "cancelled"/"cancel" on existing PO) → no_action.
 12. Never write sign-offs (Regards, Best, Sincerely) in draft_body. Signature added automatically.
 13. draft_body = clean buyer-facing text only. No advice, no notes, no bracketed hints, no meta-commentary of any kind.
+14. For netCOMPONENTS RFQs (sender = messagesend@netcomponents.com): buyer_email MUST be the email extracted from "RFQ From: [Name] ([email])" in the message body — NEVER set buyer_email = "messagesend@netcomponents.com". For IC Source RFQs (sender = autosend@icsource.com): extract buyer email from body similarly — never use autosend@icsource.com as buyer_email.
 
 ## STANDARD DRAFT TEXTS (copy exactly — no paraphrasing)
 MSG_CHECKING: "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
@@ -729,6 +755,33 @@ async function handleEmailAgent(request, env) {
     }
   } catch(e) {}
 
+  // Pre-flight blocked-domain check — catches buyer domains buried in messagesend@/autosend@ bodies
+  // (the AI prompt lists blocked domains but can't reliably match them when the buyer email is inside body text)
+  try {
+    const { results: blockRows } = await env.DB.prepare(
+      `SELECT key FROM rules WHERE type = 'blocked_domain'`
+    ).all();
+    const blockedSet = new Set(
+      blockRows && blockRows.length
+        ? blockRows.map(r => r.key.toLowerCase())
+        : ['sourceschip.com','bulechip.com','feelchips.com','chip-wintrading.com','qizhongsmart.com',
+           'heshengwei.com','qixunmicro-ic.com','jxcsilicon.com','xhtx-ic.com','yudexin-tech.com',
+           'lepaitek.cn','amperium.com.tr','stjkelectronics.com']
+    );
+    const PASSTHROUGH_DOMAINS = new Set(['intransittech.com','netcomponents.com','icsource.com','gmail.com']);
+    const senderDomainLC = (sender || '').replace(/.*@/, '').toLowerCase();
+    if (blockedSet.has(senderDomainLC)) {
+      return json({ action: 'no_bid', reasoning: `Sender domain ${senderDomainLC} is blocked`, mpn: null, buyer_email: null, draft_body: null, forte_entry: null });
+    }
+    const emailsInBody = (thread_content || '').match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [];
+    for (const email of emailsInBody) {
+      const domain = email.replace(/.*@/, '').toLowerCase();
+      if (!PASSTHROUGH_DOMAINS.has(domain) && blockedSet.has(domain)) {
+        return json({ action: 'no_bid', reasoning: `Buyer domain ${domain} is blocked`, mpn: null, buyer_email: null, draft_body: null, forte_entry: null });
+      }
+    }
+  } catch(e) {}
+
   const userMessage =
     `EMAIL THREAD\nSubject: ${subject || '(none)'}\nSender: ${sender || '(unknown)'}\nCurrent labels: ${(current_labels || []).join(', ') || 'none'}\n\n` +
     `THREAD CONTENT:\n${thread_content || '(empty)'}\n\n` +
@@ -766,6 +819,8 @@ async function handleEmailAgent(request, env) {
   } catch (e) {
     return json({ error: 'Claude returned non-JSON', raw: claudeData.content[0].text }, 500);
   }
+
+  await logApiCost(env, 'claude-haiku-4-5-20251001', 'email-agent', claudeData.usage, decision.mpn || null, decision.action || null);
 
   // Enforce exact template wording — override whatever Claude wrote for standard reply types.
   // Claude picks the action; the worker locks the text. No improvisation possible.
@@ -908,6 +963,99 @@ async function handlePostIssue(request, env) {
   return json({ ok: true, id: meta.last_row_id });
 }
 
+// ─── /api/audit-draft POST ──────────────────────────
+// Sonnet reviews a Haiku decision adversarially. Returns verdict + corrected fields.
+// Also auto-stores a lesson in ai_memory when it catches a systematic mistake.
+const AUDIT_PROMPT = `You are a STRICT AUDITOR reviewing an AI email agent decision for Intransit Technologies (OEM excess electronic component distributor). Your job is to FIND MISTAKES — not confirm correctness. Be adversarial and precise.
+
+KEY RULES TO VERIFY:
+1. ACTION: own_stock if non-Warehouse#3 in_stock rows exist. msg_checking if OEM + buyer TP + at least one non-BILL-EXT row. request_tp_500 if OEM + no buyer TP (default). request_tp_2000 if OEM + no buyer TP + at least one NON-BILL-EXT row has "$2000"/"$2,000" in its notes. bill_handle ONLY if ALL OEM rows are BILL EXT AND buyer gave an explicit dollar TP. no_bid if nothing in any inventory. add_to_stan if W3-only + not quoted.
+2. buyer_email: NEVER messagesend@netcomponents.com or autosend@icsource.com. Must be the REAL buyer email extracted from "RFQ From: Name (email)" in thread body.
+3. forte_entry: ONLY valid for msg_checking, AND only when BOTH qty AND target_price are real known buyer values. qty = buyer's QtyReq (NOT QtyListed — that is the listed stock qty). target_price = buyer's TgtPrice dollar value (NOT text from the Description field such as "$500 MIN TP REQUIRED" — that phrase is our listing descriptor, not the buyer's price). If forte_entry is present but qty or target_price came from the listing rather than the buyer → forte_entry is WRONG. ALSO: if buyer gave NO explicit dollar TP (TgtPrice blank/0/NA, or buyer only asked for a quote), action MUST be request_tp_500 or request_tp_2000, NEVER msg_checking. msg_checking with no buyer TP is always WRONG — the "$500 MIN TP REQUIRED" in the OEM listing is NOT the buyer's target price.
+4. No forte_entry for request_tp, bill_handle, no_bid, own_stock, stan_quoted, add_to_stan.
+5. BILL EXT: A row IS BILL EXT if its notes contain "BILL EXT" anywhere — including "BILL EXT 117", "BILL EXT 234 - OEM EXCESS! $500 MIN TP REQUIRED", etc. The trailing number or text does not change the classification. If ALL OEM rows are BILL EXT and buyer gave explicit TP → bill_handle is CORRECT. If even one row has no "BILL EXT" in notes → msg_checking or request_tp, not bill_handle.
+6. draft_body templates must match exactly: msg_checking="We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity." request_tp_500="We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away." request_tp_2000="We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away."
+
+Return ONLY valid JSON:
+{
+  "verdict": "correct" or "wrong",
+  "reason": "precise explanation of the mistake, or 'Looks correct'",
+  "corrected_action": "correct action string if wrong, else null",
+  "corrected_buyer_email": "correct email if wrong, else null",
+  "corrected_draft_body": "correct body text if wrong, else null",
+  "corrected_forte_entry": {"mpn":"...","qty":N,"target_price":N,"country":"XX"} or false (false = remove it entirely) or null (no change needed),
+  "is_systematic_bug": true if this mistake would happen again on similar emails, false if one-off data issue,
+  "lesson": "one concrete rule sentence to prevent this mistake, or null if verdict is correct"
+}`;
+
+async function handleAuditDraft(request, env) {
+  const body = await request.json();
+  const { decision, mpn, subject, sender, thread_content, oem_results, forte_results, in_stock_results, stan_results } = body;
+  if (!decision) return json({ error: 'decision required' }, 400);
+
+  const userMsg =
+    `DECISION TO AUDIT:\n${JSON.stringify(decision, null, 2)}\n\n` +
+    `EMAIL: Subject="${subject || ''}" | Sender="${sender || ''}"\n\n` +
+    `THREAD CONTENT:\n${(thread_content || '').slice(0, 3000)}\n\n` +
+    `IN STOCK RESULTS:\n${JSON.stringify(in_stock_results || [], null, 2)}\n\n` +
+    `STAN SHEET:\n${JSON.stringify(stan_results || [], null, 2)}\n\n` +
+    `OEM EXCESS RESULTS:\n${JSON.stringify(oem_results || [], null, 2)}\n\n` +
+    `FORTE 60-DAY CHECK:\n${JSON.stringify(forte_results || [], null, 2)}\n\n` +
+    `Is this decision correct? Find any mistakes.`;
+
+  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 800, system: AUDIT_PROMPT,
+      messages: [{ role: 'user', content: userMsg }] }),
+  });
+  const claudeData = await claudeRes.json();
+  await logApiCost(env, 'claude-sonnet-4-6', 'audit-draft', claudeData.usage, mpn || null, decision.action || null);
+
+  let audit;
+  try {
+    audit = JSON.parse(claudeData.content[0].text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim());
+  } catch(e) {
+    return json({ verdict: 'parse_error', raw: claudeData.content[0].text }, 500);
+  }
+
+  // Auto-store lesson when systematic bug caught
+  if (audit.verdict === 'wrong' && audit.lesson && audit.is_systematic_bug) {
+    try {
+      const slug = 'lesson_audit_' + Date.now().toString(36) + '_' + (mpn||'gen').replace(/[^a-zA-Z0-9]/g,'').slice(0,8);
+      const body_text = [
+        'RULE: ' + audit.lesson,
+        'TRIGGER: audit caught mistake on similar emails',
+        'EXAMPLE: Was: ' + decision.action + '. Should be: ' + (audit.corrected_action || decision.action),
+        'MPN: ' + (mpn||'n/a'), 'SENDER: ' + (sender||'n/a'),
+      ].join('\n');
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO ai_memory (slug, description, type, body, updated_at)
+         VALUES (?, ?, 'lesson', ?, datetime('now'))`
+      ).bind(slug, audit.lesson.slice(0, 200), body_text).run();
+    } catch(e) {}
+  }
+
+  return json(audit);
+}
+
+// ─── /api/cost-report GET ───────────────────────────
+async function handleCostReport(url, env) {
+  const days = Math.min(parseInt(url.searchParams.get('days') || '1'), 30);
+  const { results: rows } = await env.DB.prepare(`
+    SELECT date(created_at) as day, model, endpoint,
+           COUNT(*) as calls,
+           SUM(input_tokens) as total_input, SUM(output_tokens) as total_output,
+           SUM(cost_usd) as total_cost
+    FROM api_costs
+    WHERE created_at >= datetime('now', '-' || ? || ' days')
+    GROUP BY date(created_at), model, endpoint
+    ORDER BY day DESC, model, endpoint
+  `).bind(days).all();
+  const total = (rows || []).reduce((s, r) => s + (r.total_cost || 0), 0);
+  return json({ rows: rows || [], total_cost_usd: total, days });
+}
+
 // ─── /api/self-heal POST ────────────────────────────
 const HEAL_FORBIDDEN = [
   'env.HUB_SECRET', 'env.CLAUDE_API_KEY', 'env.GITHUB_TOKEN',
@@ -988,6 +1136,7 @@ Return JSON only:
     body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, messages: [{ role: 'user', content: fixPrompt }] }),
   });
   const claudeData = await claudeRes.json();
+  await logApiCost(env, 'claude-sonnet-4-6', 'self-heal', claudeData.usage, null, null);
   if (!claudeData.content || !claudeData.content[0]) {
     await env.DB.prepare(`UPDATE pending_issues SET status='failed', fix_description='Claude API error', updated_at=datetime('now') WHERE id=?`).bind(issue_id).run();
     return json({ error: 'Claude API error' }, 500);
