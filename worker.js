@@ -108,6 +108,13 @@ export default {
       const agentId = p.match(/^\/api\/agent-decisions\/(\d+)$/);
       if (agentId && m === 'PATCH') return handlePatchAgentDecision(request, env, parseInt(agentId[1]));
 
+      if (p === '/api/netcomp-check' && m === 'GET') {
+        const mpn = url.searchParams.get('mpn');
+        if (!mpn) return json({ error: 'mpn required' }, 400);
+        const result = await checkNetcomponentsListing(mpn, env);
+        return json({ mpn, result });
+      }
+
       return json({ error: 'Not found' }, 404);
     } catch (err) {
       return json({ error: err.message }, 500);
@@ -672,11 +679,20 @@ BILL EXT DEFINITION: A row is BILL EXT if its OEM notes field starts with or con
 - no_action: Internal thread, cancellation notice, Warehouse#3 operator email (Stan@amorelectronics.com), or already has "checking on it now" from John.
 - forward_deb: Payment advice / remittance from a bank or ERP → forward to deb@intransittech.com.
 
+## PARSED DATA (authoritative — trust over plain text)
+If the THREAD CONTENT starts with a line like:
+  [PARSED_RFQ: QtyReq=1000, TgtPrice=1.00]
+…this was extracted from the HTML table by the Apps Script parser and is 100% accurate. Use it directly:
+- TgtPrice=<number> → buyer gave TP equal to that number (positive = valid TP, treat as msg_checking or bill_handle as applicable)
+- TgtPrice=blank → buyer gave NO TP (treat as request_tp_500 or request_tp_2000)
+- QtyReq=<number> → buyer requested that quantity
+Do NOT try to re-extract TgtPrice or QtyReq from the messy plain text below — the Apps Script already did it correctly. The plain text from netCOMPONENTS collapses table columns together (e.g. "XFL4030-472MECCOIL1.00273810001.00") making values unreliable to parse. Trust [PARSED_RFQ] unconditionally.
+
 ## DECISION RULES (in priority order)
 0. in_stock_results present with non-Warehouse#3 rows → own_stock. Overrides everything except remove_oem, no_action, forward_deb.
 0b. in_stock_results present with ONLY Warehouse#3 rows + stan_results has QUOTED entry → stan_quoted.
 0c. in_stock_results present with ONLY Warehouse#3 rows + stan_results empty/not-QUOTED → add_to_stan.
-1. TP = dollar amount buyer explicitly states they will pay per unit. Valid TP examples: "TP: 45", "target $2.50", "budget $X each", "$X/ea", European "0,18$/each", "our target price is $X". NOT a TP: buyer asking "what is your price?", "how much is your unit price?", "can you help me with quoting?", "please quote", "please send a price", "what can you offer?" — these are requests for OUR quote, not buyer targets. Blank, 0, or "NA" TgtPrice in netCOMPONENTS table = no TP. CRITICAL: The netCOMPONENTS Description field often contains our own listing text such as "OEM EXCESS! $500 MIN TP REQUIRED" — this is our listing descriptor, NOT the buyer's target price and NOT a per-unit minimum. The "$500" in that phrase means our minimum LINE ORDER VALUE (qty × TP must be ≥ $500), not a price-per-unit floor. A buyer's TgtPrice of any positive number (e.g., 3, 0.50, 150) IS a valid buyer TP regardless of how small it is. Only the explicit TgtPrice cell value entered by the buyer counts as their TP. Do NOT compare the buyer's TgtPrice to $500 — that comparison is not your job. If no explicit dollar amount with units is stated by the buyer → NO TP.
+1. TP = dollar amount buyer explicitly states they will pay per unit. Valid TP examples: "TP: 45", "target $2.50", "budget $X each", "$X/ea", European "0,18$/each", "our target price is $X", "TP 4U" (= $4/unit — common Chinese broker shorthand where a number followed by "U" means dollar per unit), "TP 2.5U", "TP 10U/pc". NOT a TP: buyer asking "what is your price?", "how much is your unit price?", "can you help me with quoting?", "please quote", "please send a price", "what can you offer?" — these are requests for OUR quote, not buyer targets. Blank, 0, or "NA" TgtPrice in netCOMPONENTS table = no TP. CRITICAL: The netCOMPONENTS Description field often contains our own listing text such as "OEM EXCESS! $500 MIN TP REQUIRED" — this is our listing descriptor, NOT the buyer's target price and NOT a per-unit minimum. The "$500" in that phrase means our minimum LINE ORDER VALUE (qty × TP must be ≥ $500), not a price-per-unit floor. A buyer's TgtPrice of any positive number (e.g., 3, 0.50, 150, 7500) IS a valid buyer TP regardless of how small or large it is. The TgtPrice column in the netCOMPONENTS table is ALWAYS the buyer's target price if it is a positive number — do not second-guess or ignore it based on anything in the Description field. Only the explicit TgtPrice cell value entered by the buyer counts as their TP. Do NOT compare the buyer's TgtPrice to $500 — that comparison is not your job. If no explicit dollar amount with units is stated by the buyer → NO TP.
 2. oem_results AND in_stock_results both empty → no_bid.
 3. oem_results present + buyer gave TP + at least one non-BILL-EXT row → msg_checking. (Regular OEM rows take priority; BILL EXT rows in same result are irrelevant.)
 3b. oem_results present + buyer gave TP (explicit dollar amount) + ALL rows are BILL EXT (zero non-BILL-EXT rows) → bill_handle. A row is BILL EXT if its notes contain "BILL EXT" anywhere — "BILL EXT 117 - OEM EXCESS! $500 MIN TP REQUIRED" IS a BILL EXT row. Classify each row by whether its notes contain "BILL EXT"; if ALL rows qualify → bill_handle (when buyer TP given).
@@ -684,7 +700,7 @@ BILL EXT DEFINITION: A row is BILL EXT if its OEM notes field starts with or con
 5. Thread already has "We are checking on it now" from John → no_action.
 6. Sender @intransittech.com → no_action. EXCEPTION: if sender is bill.pratt@intransittech.com AND message body contains "@John" AND an MPN → remove_oem (set buyer_email = "bill.pratt@intransittech.com", draft confirms removal to Bill). Bill uses this pattern to tell John to remove a part from OEM EXCESS/NetComp.
 6b. Sender is Stan@amorelectronics.com (any @amorelectronics.com address) → no_action. Stan operates Intransit's Warehouse#3; his emails to John are internal W3 stock check-ins and RFQ list updates, not customer RFQs from new buyers. Never add_to_stan or reply based on Stan's own emails.
-7. forte_results has entry within 60 days → forte_entry: null (no duplicate).
+7. forte_results has entry within 60 days → forte_entry: null (no duplicate Forte row). IMPORTANT: this only suppresses the Forte entry — still choose the correct action (msg_checking, request_tp, etc.) and still create the draft as normal. A 60-day duplicate does NOT mean no_action.
 8. forte_entry only set when action=msg_checking AND qty AND target_price both known.
 9. Never invent qty or TP — only use what buyer explicitly stated.
 10. Country: 2-letter ISO from buyer's address. CN=China, CA=Canada, US=USA, NL=Netherlands, etc.
@@ -722,7 +738,7 @@ Please note these parts will need to go through our final inspection.
 There is a $100 minimum on stock items"
 
 ADD TO STAN draft format (use this exactly — no price, no details):
-"Our warehouse is checking on the details and I will update you as soon as possible."
+"Warehouse is checking details and I will update ASAP"
 
 ## RESPONSE FORMAT
 {
@@ -782,6 +798,18 @@ async function handleEmailAgent(request, env) {
     }
   } catch(e) {}
 
+  // Best-effort netCOMPONENTS listing check — extract MPN from oem_results if present
+  let ncResult = null;
+  const ncMpn = body.mpn || (Array.isArray(oem_results) && oem_results[0] && oem_results[0].mpn) || null;
+  if (ncMpn) {
+    try { ncResult = await checkNetcomponentsListing(ncMpn, env); } catch(e) {}
+  }
+  const ncSection = ncResult === null
+    ? 'NETCOMPONENTS CHECK: unavailable (auth/network issue)\n\n'
+    : ncResult.found
+      ? `NETCOMPONENTS CHECK: Listed — Part# ${ncResult.partNumber}, Qty ${ncResult.qty ?? 'unknown'} (searchApiId: ${ncResult.apiId})\n\n`
+      : `NETCOMPONENTS CHECK: Part searchable (apiId: ${ncResult.apiId}) but our listing row not found in result page\n\n`;
+
   const userMessage =
     `EMAIL THREAD\nSubject: ${subject || '(none)'}\nSender: ${sender || '(unknown)'}\nCurrent labels: ${(current_labels || []).join(', ') || 'none'}\n\n` +
     `THREAD CONTENT:\n${thread_content || '(empty)'}\n\n` +
@@ -790,6 +818,7 @@ async function handleEmailAgent(request, env) {
     `OEM EXCESS RESULTS:\n${JSON.stringify(oem_results || [], null, 2)}\n\n` +
     `FORTE 60-DAY DUPLICATE CHECK:\n${JSON.stringify(forte_results || [], null, 2)}\n\n` +
     `PRIOR SENT QUOTES:\n${prior_quotes || 'None found'}\n\n` +
+    ncSection +
     `Analyze this thread and return your JSON decision.`;
 
   const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -829,6 +858,7 @@ async function handleEmailAgent(request, env) {
     request_tp_2000: 'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.',
     msg_checking:    'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.',
     bill_handle:     'Bill will help with this request',
+    add_to_stan:     'Warehouse is checking details and I will update ASAP',
   };
   // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic — leave as-is
   if (DRAFT_TEMPLATES[decision.action]) {
@@ -968,10 +998,13 @@ async function handlePostIssue(request, env) {
 // Also auto-stores a lesson in ai_memory when it catches a systematic mistake.
 const AUDIT_PROMPT = `You are a STRICT AUDITOR reviewing an AI email agent decision for Intransit Technologies (OEM excess electronic component distributor). Your job is to FIND MISTAKES — not confirm correctness. Be adversarial and precise.
 
+PARSED DATA (authoritative — trust over plain text):
+If thread_content starts with "[PARSED_RFQ: QtyReq=..., TgtPrice=...]" this was extracted from the HTML table by the Apps Script parser and is 100% accurate. TgtPrice=<positive number> means buyer DID give TP. TgtPrice=blank means buyer gave NO TP. Do NOT try to re-extract from the garbled plain text — trust [PARSED_RFQ] unconditionally when present.
+
 KEY RULES TO VERIFY:
 1. ACTION: own_stock if non-Warehouse#3 in_stock rows exist. msg_checking if OEM + buyer TP + at least one non-BILL-EXT row. request_tp_500 if OEM + no buyer TP (default). request_tp_2000 if OEM + no buyer TP + at least one NON-BILL-EXT row has "$2000"/"$2,000" in its notes. bill_handle ONLY if ALL OEM rows are BILL EXT AND buyer gave an explicit dollar TP. no_bid if nothing in any inventory. add_to_stan if W3-only + not quoted.
 2. buyer_email: NEVER messagesend@netcomponents.com or autosend@icsource.com. Must be the REAL buyer email extracted from "RFQ From: Name (email)" in thread body.
-3. forte_entry: ONLY valid for msg_checking, AND only when BOTH qty AND target_price are real known buyer values. qty = buyer's QtyReq (NOT QtyListed — that is the listed stock qty). target_price = buyer's TgtPrice dollar value (NOT text from the Description field such as "$500 MIN TP REQUIRED" — that phrase is our listing descriptor, not the buyer's price). If forte_entry is present but qty or target_price came from the listing rather than the buyer → forte_entry is WRONG. ALSO: if buyer gave NO explicit dollar TP (TgtPrice blank/0/NA, or buyer only asked for a quote), action MUST be request_tp_500 or request_tp_2000, NEVER msg_checking. msg_checking with no buyer TP is always WRONG — the "$500 MIN TP REQUIRED" in the OEM listing is NOT the buyer's target price.
+3. forte_entry: ONLY valid for msg_checking, AND only when BOTH qty AND target_price are real known buyer values. qty = buyer's QtyReq (NOT QtyListed — that is the listed stock qty). target_price = buyer's TgtPrice dollar value (NOT text from the Description field such as "$500 MIN TP REQUIRED" — that phrase is our listing descriptor, not the buyer's price). If forte_entry is present but qty or target_price came from the listing rather than the buyer → forte_entry is WRONG. ALSO: if buyer gave NO explicit dollar TP (TgtPrice blank/0/NA, or buyer only asked for a quote), action MUST be request_tp_500 or request_tp_2000, NEVER msg_checking. msg_checking with no buyer TP is always WRONG. CONVERSELY: if the netCOMPONENTS TgtPrice column shows a positive number (e.g., 3, 15, 7500), the buyer DID give a TP — action MUST be msg_checking (or bill_handle if all BILL EXT), NEVER request_tp_500 or request_tp_2000. request_tp when buyer gave an explicit TgtPrice is always WRONG.
 4. No forte_entry for request_tp, bill_handle, no_bid, own_stock, stan_quoted, add_to_stan.
 5. BILL EXT: A row IS BILL EXT if its notes contain "BILL EXT" anywhere — including "BILL EXT 117", "BILL EXT 234 - OEM EXCESS! $500 MIN TP REQUIRED", etc. The trailing number or text does not change the classification. If ALL OEM rows are BILL EXT and buyer gave explicit TP → bill_handle is CORRECT. If even one row has no "BILL EXT" in notes → msg_checking or request_tp, not bill_handle.
 6. draft_body templates must match exactly: msg_checking="We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity." request_tp_500="We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away." request_tp_2000="We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away."
@@ -1201,4 +1234,114 @@ Return JSON only:
     .bind(fix.explanation, commitSha, issue_id).run();
 
   return json({ ok: true, explanation: fix.explanation, commit: commitSha, deploying: true, message: 'Fix pushed to GitHub — GitHub Actions is deploying now (~60 seconds)' });
+}
+
+// ─── netCOMPONENTS listing check ─────────────────────
+// Best-effort: returns { found, qty, partNumber, notes } or null on failure.
+// netCOMPONENTS is a SPA with ASP.NET session-based results — this replicates the browser flow.
+async function checkNetcomponentsListing(mpn, env) {
+  const NC  = 'https://www.netcomponents.com';
+  const UA  = 'curl/8.11.0';
+  const jar = {};
+
+  function cookieStr() {
+    return Object.entries(jar).map(([k,v]) => `${k}=${v}`).join('; ');
+  }
+
+  function updateJar(resp) {
+    try {
+      const all = resp.headers.getAll ? resp.headers.getAll('set-cookie') : [];
+      for (const h of all) {
+        const pair = h.split(';')[0];
+        const eq   = pair.indexOf('=');
+        if (eq > 0) jar[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+      }
+    } catch(e) {}
+  }
+
+  async function nc(url, opts = {}) {
+    const hdrs = { 'User-Agent': UA, ...(opts.headers || {}) };
+    if (cookieStr()) hdrs['Cookie'] = cookieStr();
+    const r = await fetch(url, { ...opts, headers: hdrs, redirect: 'manual' });
+    updateJar(r);
+    return r;
+  }
+
+  try {
+    // 1. Get login page for CSRF token
+    const r1 = await nc(`${NC}/account/login`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    const html1 = await r1.text();
+    const csrfM = html1.match(/name=__RequestVerificationToken[^>]*value=([^\s>]+)/);
+    if (!csrfM) return null;
+    const csrf = csrfM[1];
+
+    // 2. Login POST
+    const loginBody = new URLSearchParams({
+      __RequestVerificationToken: csrf,
+      AccountNumber: env.NC_ACCOUNT || '229644',
+      UserName:      env.NC_USERNAME || 'Intransit',
+      Password:      env.NC_PASSWORD || '',
+      RememberMe:    'false',
+    });
+    const r2 = await nc(`${NC}/account/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': `${NC}/account/login` },
+      body:    loginBody.toString(),
+    });
+    if (r2.status !== 302) return null;
+
+    // 3. GET /search (establishes session on a backend node)
+    await nc(`${NC}/search`, { headers: { 'Referer': `${NC}/account/login` } });
+
+    // 4. Kick off async API search
+    const r4 = await nc(`${NC}/search/startsearchapi?parts=${encodeURIComponent(mpn)}&searchlogic=Begins`, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `${NC}/search` },
+    });
+    const apiId = (await r4.text()).trim();
+    if (!apiId || isNaN(apiId)) return null;
+
+    // 5. POST search form (stores query in server session)
+    const searchBody = new URLSearchParams({
+      SearchId: '0', SearchLogic: 'Begins', SortBy: '0', SearchType: '0',
+      Demo: 'false', Filters: 'false', PSA: 'true',
+      'PartsSearched[0].PartNumber': mpn,
+    });
+    const r5 = await nc(`${NC}/search/result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': `${NC}/search` },
+      body:    searchBody.toString(),
+    });
+    if (r5.status !== 302) return null;
+
+    // 6. GET /search — parse result-batch data-url attributes
+    const r6 = await nc(`${NC}/search`, { headers: { 'Referer': `${NC}/search/result` } });
+    const html6 = await r6.text();
+    const batchUrls = [...html6.matchAll(/result-batch[^>]*data-url="([^"]+)"/g)].map(m => m[1]);
+
+    if (batchUrls.length === 0) {
+      // Session state wasn't persisted (load balancer node mismatch) — return searchable flag only
+      return { found: false, searchable: true, apiId };
+    }
+
+    // 7. Fetch first result batch (HTML fragment with supplier rows)
+    const r7 = await nc(`${NC}${batchUrls[0]}`, { headers: { 'Referer': `${NC}/search` } });
+    const html7 = await r7.text();
+
+    // 8. Look for our supplier row (account 229644 / "Intransit")
+    const ourRowM = html7.match(/229644|Intransit Technologies/i);
+    if (!ourRowM) return { found: false, searchable: true, apiId };
+
+    // Extract qty and part number from our row context
+    const idx = html7.search(/229644|Intransit Technologies/i);
+    const context = html7.slice(Math.max(0, idx - 500), idx + 500);
+    const qtyM = context.match(/<td[^>]*>\s*([\d,]+)\s*<\/td>/);
+    const qty  = qtyM ? parseInt(qtyM[1].replace(/,/g, '')) : null;
+    const pnM  = context.match(/>[^\s<]{5,30}[A-Z]{1}[0-9A-Z-]{2,}<\//i);
+    const partNumber = pnM ? pnM[0].replace(/[><\/]/g, '').trim() : mpn;
+
+    return { found: true, qty, partNumber, apiId };
+
+  } catch(e) {
+    return null;
+  }
 }

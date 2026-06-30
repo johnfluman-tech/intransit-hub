@@ -433,6 +433,38 @@ function extractMPNFromRFQBody(body) {
   return null;
 }
 
+// Extracts MPN from structured HTML RFQ table formats (e.g. Lintech, Abacus web portals).
+// Used as a third-level fallback when subject and plain-text extraction both fail.
+// Returns the MPN string even if all-digit — the caller trusts it came from a labelled column.
+function extractMPNFromHTMLRFQ(htmlBody) {
+  if (!htmlBody) return null;
+  // Lintech / rz-* class format: <td class="rz-detail-field-fullpartnumber ...">152145</td>
+  var rzMatch = htmlBody.match(/class="[^"]*rz-detail-field-fullpartnumber[^"]*"[^>]*>\s*([^<\s][^<]{0,50}?)\s*<\/td>/i);
+  if (rzMatch && rzMatch[1].trim().length >= 3) return rzMatch[1].trim();
+  // Generic: find table with a "Part Number" / "Part #" / "P/N" / "MPN" column header,
+  // then return the value from the same column index in the first data row.
+  var tableBlocks = htmlBody.match(/<table[^>]*>([\s\S]*?)<\/table>/gi) || [];
+  for (var t = 0; t < tableBlocks.length; t++) {
+    var rows = tableBlocks[t].match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+    if (rows.length < 2) continue;
+    var headerCells = (rows[0].match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [])
+      .map(function(c){ return c.replace(/<[^>]+>/g,'').trim(); });
+    var partColIdx = -1;
+    for (var h = 0; h < headerCells.length; h++) {
+      if (/^\s*(part\s*(number|#|no\.?)|p\/n|mpn)\s*$/i.test(headerCells[h])) { partColIdx = h; break; }
+    }
+    if (partColIdx < 0) continue;
+    // Find first data row (not all-header)
+    for (var r = 1; r < rows.length; r++) {
+      var dataCells = (rows[r].match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [])
+        .map(function(c){ return c.replace(/<[^>]+>/g,'').trim(); });
+      var val = dataCells[partColIdx];
+      if (val && val.length >= 3 && !/part\s*(number|#)/i.test(val)) return val;
+    }
+  }
+  return null;
+}
+
 function extractNetcompsQtyReq(htmlBody) {
   if (!htmlBody) return null;
   // Find the partlist table — capture the header row and first data row
@@ -1285,11 +1317,22 @@ function checkInboxForNewRFQs() {
     }
     // IC Source "IC Source RFQ on [MPN] from [Company]" uses all-digit MPNs — bypass letter+digit requirement
     var isIcSourceThread = isICSouceEmail(messages[0].getFrom(), subject);
+    var mpnFromHtmlTable = false;
     if (!mpn || (!isIcSourceThread && (!/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)))) {
       var bodyMpn = extractMPNFromRFQBody(fullBody);
-      if (bodyMpn) mpn = bodyMpn.replace(/#\w+$/, '');
+      if (bodyMpn) {
+        mpn = bodyMpn.replace(/#\w+$/, '');
+      } else {
+        // Third-level fallback: parse structured HTML RFQ tables (e.g. Lintech).
+        // These can have all-digit MPNs that the plain-text extractor rejects.
+        var htmlMpn = extractMPNFromHTMLRFQ(lastMsg.getBody());
+        if (htmlMpn) { mpn = htmlMpn; mpnFromHtmlTable = true; }
+      }
     }
-    if (!mpn){thread.addLabel(label);return;}
+    // Validate: must have a real MPN. All-digit is OK only from IC Source or a trusted HTML table.
+    if (!mpn || (!isIcSourceThread && !mpnFromHtmlTable && (!/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)))) {
+      thread.addLabel(label); return;
+    }
     var htmlBody = lastMsg.getBody();
 
     var buyerEmail = extractBuyerEmail(lastMsg.getFrom());
@@ -1330,6 +1373,14 @@ function checkInboxForNewRFQs() {
     var priorQuotes   = getPriorQuoteHistory(mpn);
     var currentLabels = thread.getLabels().map(function(l){ return l.getName(); });
     var threadContent = buildThreadContent(messages, subject, replyTo);
+
+    // Prepend parsed netCOMPONENTS data so worker sees explicit values instead of garbled plain text.
+    // Plain text from getPlainBody() merges table columns (e.g. "XFL4030-472MECCOIL/OEM EXCESS!1.00")
+    // making TgtPrice invisible to Claude. This structured block is the authoritative source.
+    if (netcomp && (tp || qty)) {
+      var parsedBlock = '[PARSED_RFQ: QtyReq=' + (qty || 'unknown') + ', TgtPrice=' + (tp || 'blank') + ']\n';
+      threadContent = parsedBlock + threadContent;
+    }
 
     // Route all decisions through the worker — it handles own_stock, add_to_stan, stan_quoted,
     // msg_checking, bill_handle, request_tp, no_bid, etc.
@@ -3001,6 +3052,18 @@ function processThreadWithAgent(thread, agentLabel) {
   var priorQuotes   = mpn ? getPriorQuoteHistory(mpn) : 'None found';
   var currentLabels = thread.getLabels().map(function(l){ return l.getName(); });
   var threadContent = buildThreadContent(messages, subject, replyTo);
+
+  // Prepend parsed netCOMPONENTS data — same fix as checkInboxForNewRFQs.
+  var netcompPTA = isNetcompEmail(sender, subject);
+  if (netcompPTA) {
+    var firstHtml = firstMsg.getBody();
+    var parsedTP  = extractNetcompsTgtPrice(firstBody, firstHtml);
+    var parsedQty = extractNetcompsQtyReq(firstHtml);
+    if (parsedTP || parsedQty) {
+      var parsedBlock = '[PARSED_RFQ: QtyReq=' + (parsedQty || 'unknown') + ', TgtPrice=' + (parsedTP || 'blank') + ']\n';
+      threadContent = parsedBlock + threadContent;
+    }
+  }
 
   thread.addLabel(agentLabel);
 

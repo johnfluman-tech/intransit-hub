@@ -1,3 +1,33 @@
+// ONE-TIME — Run updateStanQTY_June29() to fill in the missing QTY column for
+// the 3 Warehouse#3 parts added to Stan's RFQ sheet on 6/29/2026 (rows 324-326).
+// Quantities pulled from IN STOCK sheet: EP3SL150F780I3N=408, XC2S200E6FTG256C=120, EL4390CM=125
+function updateStanQTY_June29() {
+  var STAN_SHEET_ID = '1pGRDpkqftQNoEYna53MxRJfUY8jEf5_w32FNa56OUIM';
+  var sheet = SpreadsheetApp.openById(STAN_SHEET_ID).getSheets()[0];
+  // Col G (index 7, 1-based) = QTY
+  var updates = [
+    { row: 324, mpn: 'EP3SL150F780I3N', qty: 408 },
+    { row: 325, mpn: 'XC2S200E6FTG256C', qty: 120 },
+    { row: 326, mpn: 'EL4390CM',         qty: 125 },
+  ];
+  updates.forEach(function(u) {
+    sheet.getRange(u.row, 7).setValue(u.qty);
+    Logger.log('Updated Stan row ' + u.row + ' (' + u.mpn + ') QTY = ' + u.qty);
+  });
+}
+
+// ONE-TIME — Run addForte_WFM200S022XNN3() to add the missed Forte entry from
+// the WFM200S022XNN3 msg_checking that automation filed incorrectly on Jun 29.
+// Buyer: JICE ZHU / sales1@bzgj-ele.com, qty=500, TP=$3, CN
+function addForte_WFM200S022XNN3() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['6/29/2026', 'WFM200S022XNN3', 500, 3, '', 'CN',
+    '=C'+nextRow+'*D'+nextRow, '', '', '', 'Open']);
+  Logger.log('Added WFM200S022XNN3 to Forte row ' + nextRow);
+}
+
 // ONE-TIME — Run removeOemExcess_AT25DF321A() to stamp NO STK and delete the 2
 // OEM EXCESS rows for AT25DF321A-SH-T (rows 64430 and 64431).
 // Bill confirmed Jun 25 2026: "they're no longer available."
@@ -188,4 +218,73 @@ function addMissingForteRows_Jun25b() {
     Logger.log('Added: ' + r[0]);
   });
   Logger.log('Done — ' + rows.length + ' rows added.');
+}
+
+// ONE-TIME -- Run removeOemExcess_SN75ALS176DR() to stamp NO STK and delete OEM EXCESS row 120136.
+// David confirmed 2026-06-29: "#3930 SN75ALS176DR No stock"
+// NOTE: Forte row 3930 has buyerTP=500 (likely extracted from description bug, not a real buyer TP).
+// John: review Forte row 3930 (SN75ALS176DR, Jun 26, qty=2500, TP=500, CN) and delete if bogus.
+function removeOemExcess_SN75ALS176DR() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+  var data = sheet.getDataRange().getValues();
+  var rowsToDelete = [];
+  for (var i = 1; i < data.length; i++) {
+    var mpn = String(data[i][1]).trim();
+    if (mpn.toUpperCase() === 'SN75ALS176DR') {
+      sheet.getRange(i + 1, 5).setValue('NO STK ' + today);
+      rowsToDelete.push(i + 1);
+    }
+  }
+  rowsToDelete.reverse().forEach(function(r) { sheet.deleteRow(r); });
+  Logger.log('removeOemExcess_SN75ALS176DR: stamped and deleted ' + rowsToDelete.length + ' row(s)');
+}
+
+// ONE-TIME — Run addForte_LMK00304SQXNOPB() to add missed msg_checking Forte entry.
+// Carmen (carmen@mission-ic.com, Mission Electronics, CN) wrote "TP 4U" = $4/unit.
+// Agent misread as no TP and created wrong request_tp_500 draft (Jun 30 2026).
+function addForte_LMK00304SQXNOPB() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['6/30/2026', 'LMK00304SQX/NOPB', 5000, 4, '', 'CN',
+    '=C'+nextRow+'*D'+nextRow, '', '', '', 'Open']);
+  Logger.log('Added LMK00304SQX/NOPB to Forte row ' + nextRow);
+}
+
+// ONE-TIME — Run addForte_LCC110PTR() to add missed msg_checking Forte entry.
+// Deniss Dedkovski (ddedkovski@class-ic.com, Classic Components, US) gave TgtPrice=3.
+// Agent misread as no TP and created wrong request_tp_500 draft (Jun 30 2026).
+function addForte_LCC110PTR() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['6/30/2026', 'LCC110PTR', 1100, 3, '', 'US',
+    '=C'+nextRow+'*D'+nextRow, '', '', '', 'Open']);
+  Logger.log('Added LCC110PTR to Forte row ' + nextRow);
+}
+
+// ONE-TIME — Run addForte_MPM3695GRF250022() to add missed msg_checking Forte entry.
+// kunhua yao (zhongshi@zssx.top, Zhong Shi Sheng Xin, CN) gave TgtPrice=12, qty=1050.
+// Agent chose request_tp_500 (ignored TgtPrice column). Prior entry Apr 16 is outside 60 days.
+function addForte_MPM3695GRF250022() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['6/30/2026', 'MPM3695GRF-25-0022', 1050, 12, '', 'CN',
+    '=C'+nextRow+'*D'+nextRow, '', '', '', 'Open']);
+  Logger.log('Added MPM3695GRF-25-0022 to Forte row ' + nextRow);
+}
+
+// ONE-TIME — Run addForte_AL8860MP13() to add missed msg_checking Forte entry.
+// Joe Tucarella (joe@ableelectronics.com, Able Electronics, US) gave TgtPrice=0.09, qty=73473.
+// Agent chose request_tp_500 (ignored TgtPrice column). Jun 30 2026.
+function addForte_AL8860MP13() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['6/30/2026', 'AL8860MP-13', 73473, 0.09, '', 'US',
+    '=C'+nextRow+'*D'+nextRow, '', '', '', 'Open']);
+  Logger.log('Added AL8860MP-13 to Forte row ' + nextRow);
 }
