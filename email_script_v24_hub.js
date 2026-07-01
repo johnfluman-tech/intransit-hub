@@ -1323,11 +1323,14 @@ function checkInboxForNewRFQs() {
   if (!threads.length) return;
   var label = GmailApp.getUserLabelByName('oem-rfq-incoming-processed')||GmailApp.createLabel('oem-rfq-incoming-processed');
   threads.forEach(function(thread) {
+    // Claim the label immediately — prevents runEmailAgent from picking up the same thread
+    // concurrently and creating a duplicate draft (race condition with simultaneous 5-min triggers).
+    thread.addLabel(label);
     var messages = thread.getMessages();
     var johnReplied = messages.some(function(m){return m.getFrom().indexOf(JOHN_EMAIL)>=0;});
-    if (johnReplied){thread.addLabel(label);return;}
+    if (johnReplied){ return; }
     var lastMsg = messages[messages.length-1];
-    if (lastMsg.getFrom().indexOf('intransittech.com')>=0){thread.addLabel(label);return;}
+    if (lastMsg.getFrom().indexOf('intransittech.com')>=0){ return; }
     var subject = thread.getFirstMessageSubject();
     var mpn = extractMPN(subject);
     var fullBody = lastMsg.getPlainBody();
@@ -1411,7 +1414,6 @@ function checkInboxForNewRFQs() {
 
     var draftId = executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo);
     auditAndCorrect(decision, draftId, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
-    thread.addLabel(label);
     if (decision.action === 'no_bid') thread.moveToArchive();
   });
 }
