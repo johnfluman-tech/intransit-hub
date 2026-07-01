@@ -837,10 +837,10 @@ function addToForteSheet(mpn, qty, targetPrice, country, historyNote) {
   Logger.log('Added to Forte: ' + mpn + (priorHistory ? ' [history populated]' : ''));
 }
 
-function updateForteSheet(mpn) {
+function updateForteSheet(mpn, customDate) {
   var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
   var data = sheet.getDataRange().getValues();
-  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+  var today = customDate || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
   var newStatus = 'NO STK - ' + today;
   var updated = 0;
   for (var i = 1; i < data.length; i++) {
@@ -1168,6 +1168,7 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
     var removeMpn = decision.mpn || mpn;
     if (removeMpn) {
       deletePart(removeMpn, subject);
+      updateForteSheet(removeMpn);  // stamp Forte status NO STK - [date]
       hubLog('run', 'Worker remove_oem: ' + removeMpn, {mpn: removeMpn});
       try {
         var draftTo = decision.buyer_email || replyTo;

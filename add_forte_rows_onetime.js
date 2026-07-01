@@ -276,6 +276,85 @@ function addForte_LCC110PTR() {
   Logger.log('Added LCC110PTR to Forte row ' + nextRow);
 }
 
+// ONE-TIME — Run backfillForteNoStk() to stamp "NO STK - [date]" on all Forte rows
+// for parts David confirmed no-stock between 2026-06-24 and 2026-07-01.
+// The bug: executeWorkerDecision called deletePart() but never updateForteSheet(),
+// so every automation-based removal left Forte status stuck at "Open".
+// Each entry uses the date of David's email as the no-stock date.
+// Skips rows already stamped "NO STK" or "CLOSED".
+function backfillForteNoStk() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = sheet.getDataRange().getValues();
+
+  // MPN → date of David's confirmed no-stock email (M/d/yyyy format)
+  var removals = {
+    // 2026-07-01
+    'AD22283-B-R2':              '7/1/2026',
+    'MRF1513NT1':                '7/1/2026',
+    'S24SE05006PDFA':            '7/1/2026',
+    'FPF2700MPX':                '7/1/2026',
+    'BCR420UW6-7':               '7/1/2026',
+    // 2026-06-30
+    'VRF2933MP':                 '6/30/2026',
+    'ISZ080N10NM6':              '6/30/2026',
+    'UCC27282DR':                '6/30/2026',
+    'F1778447M2ILB0':            '6/30/2026',
+    'PM2120-330K-RC':            '6/30/2026',
+    'PM2120330KRC':              '6/30/2026',  // variant without dashes
+    'EPCS16SI8':                 '6/30/2026',
+    'EPCS16SI8N':                '6/30/2026',
+    'LMK00304SQX/NOPB':          '6/30/2026',
+    'DA721700U32':               '6/30/2026',
+    'DA7217-00U32':              '6/30/2026',  // variant with dashes
+    // 2026-06-29
+    'CL21A226MAYNNNE':           '6/29/2026',
+    'ADG5206BCPZ':               '6/29/2026',
+    'LTC2601IDDTRPBF':           '6/29/2026',
+    'LOCTITE3609':               '6/29/2026',
+    'MT25QL256ABA8ESF-0SIT':     '6/29/2026',
+    'SN75ALS176DR':              '6/29/2026',
+    // 2026-06-26
+    '88E1112-C2-NNC1C000':       '6/26/2026',
+    'BTS6143D':                  '6/26/2026',
+    'LCMXO3LF-4300C-5BG256I':   '6/26/2026',
+    // 2026-06-25
+    'AM3352BZCZD60':             '6/25/2026',
+    'CAR1AP80DC12-S':            '6/25/2026',
+    'LM25037QMTX/NOPB':          '6/25/2026',
+    'STPS20L15D':                '6/25/2026',
+    'LTC4357IMS8PBF':            '6/25/2026',
+    'AT25DF321A-SH-T':           '6/25/2026',
+    // 2026-06-24
+    'XC7A100T-1FTG256I':         '6/24/2026',
+    'LMZM23600V3SILT':           '6/24/2026',
+  };
+
+  var updated = 0, skipped = 0;
+  for (var i = 1; i < data.length; i++) {
+    var mpn = String(data[i][1]).trim();
+    var status = String(data[i][10] || '').trim();
+    var noStkDate = removals[mpn] || removals[mpn.toUpperCase()] || removals[mpn.replace(/[-\/]/g, '')];
+    if (!noStkDate) continue;
+    // Skip already stamped or closed rows
+    if (status.toUpperCase().indexOf('NO STK') >= 0 || status.toUpperCase() === 'CLOSED') {
+      skipped++;
+      continue;
+    }
+    var newStatus = 'NO STK - ' + noStkDate;
+    var cell = sheet.getRange(i + 1, 11);  // col K = index 11 (1-based)
+    cell.clearDataValidations();
+    cell.setValue(newStatus);
+    cell.setBackground('#000000');
+    cell.setFontColor('#FFFFFF');
+    cell.setFontWeight('bold');
+    updated++;
+    Logger.log('Stamped Forte row ' + (i + 1) + ': ' + mpn + ' → ' + newStatus);
+  }
+  SpreadsheetApp.flush();
+  Logger.log('backfillForteNoStk complete — updated: ' + updated + ', skipped (already done): ' + skipped);
+}
+
 // ONE-TIME — Run removeForte_MRF1513NT1_S24SE05006PDFA() to delete the two wrong
 // Forte entries created on 2026-07-01:
 //   Row 3965 — MRF1513NT1: worker returned msg_checking but all OEM rows were BILL EXT;
