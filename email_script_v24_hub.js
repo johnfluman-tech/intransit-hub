@@ -1206,8 +1206,13 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
     }
   }
 
+  // Guard: only write forte_entry when action is msg_checking.
+  // Worker rule 4 prohibits forte_entry for bill_handle/request_tp/no_bid/own_stock/stan_quoted,
+  // but if the model makes a wrong decision (e.g., msg_checking when all rows are BILL EXT)
+  // the audit corrects the DRAFT but can't undo a Forte row already written.
+  // This guard prevents the Forte write in that scenario.
   var fe = decision.forte_entry;
-  if (fe && fe.mpn && fe.qty && fe.target_price) {
+  if (action === 'msg_checking' && fe && fe.mpn && fe.qty && fe.target_price) {
     var alreadyThere = checkForteForMPN(fe.mpn, 60);
     var hasRecent = alreadyThere.some(function(r){ return r.recent && r.status.toLowerCase() !== 'closed'; });
     if (!hasRecent) {

@@ -276,6 +276,23 @@ function addForte_LCC110PTR() {
   Logger.log('Added LCC110PTR to Forte row ' + nextRow);
 }
 
+// ONE-TIME — Run removeForte_MRF1513NT1_S24SE05006PDFA() to delete the two wrong
+// Forte entries created on 2026-07-01:
+//   Row 3965 — MRF1513NT1: worker returned msg_checking but all OEM rows were BILL EXT;
+//              should have been bill_handle (no Forte). Audit fixed the draft but Forte
+//              was already written before the audit ran.
+//   Row 3963 — S24SE05006PDFA: part was in OEM EXCESS at time of RFQ so msg_checking
+//              was technically correct, but David immediately confirmed no stock
+//              ("Cant find"), making the Forte entry useless/misleading.
+function removeForte_MRF1513NT1_S24SE05006PDFA() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  // Delete row 3965 first (higher row number), then 3963, to keep indices valid
+  sheet.deleteRow(3965);
+  sheet.deleteRow(3963);
+  Logger.log('Deleted wrong Forte rows 3963 (S24SE05006PDFA) and 3965 (MRF1513NT1)');
+}
+
 // ONE-TIME — Run deleteWrongDrafts() to remove duplicate drafts created by the
 // race condition between Trigger 3 and Trigger 7 (both fired simultaneously before
 // the optimistic-label fix was deployed on 2026-07-01). For each affected thread,
