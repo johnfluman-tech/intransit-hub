@@ -561,6 +561,14 @@ function extractTargetPrice(text) {
     if (hi > lo && hi < 100000 && (hasCurrency || hasDecimal)) return '$' + hi;
   }
 
+  // Slash-separated range: "25/30$ each" or "$25/30 each" — take the lower value
+  var slashRange = text.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*\$\s*(?:each|ea)?/i)
+    || text.match(/\$\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*(?:each|ea)?/i);
+  if (slashRange) {
+    var srLo = parseFloat(slashRange[1]), srHi = parseFloat(slashRange[2]);
+    if (srLo > 0 && srHi > srLo && srHi < 100000) return '$' + srLo;
+  }
+
   // Unit Price($) tabular format: "Unit Price($)\n0.35" or "Unit Price($) 0.35"
   var unitPriceMatch = text.match(/Unit\s*Price\s*\(\$\)\s*[\r\n\s]+(\d+(?:\.\d+)?)/i);
   if (!unitPriceMatch) unitPriceMatch = text.match(/Unit\s*Price\s*\(\$\)\s*\t(\d+(?:\.\d+)?)/i);
@@ -1020,8 +1028,8 @@ function checkInboxForTPReplies() {
       country = extractCountryFromEmail(m.getFrom());
       var qBody = m.getPlainBody();
       // QtyReq / Qty= patterns first
-      var qTagM = qBody.match(/QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)/i);
-      if (qTagM && !qty) { var n=parseQtyValue(qTagM[1]||qTagM[2]||'', country); if(n>=1) qty=String(n); }
+      var qTagM = qBody.match(/QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)|q\.ty\s+(\d+)/i);
+      if (qTagM && !qty) { var n=parseQtyValue(qTagM[1]||qTagM[2]||qTagM[3]||'', country); if(n>=1) qty=String(n); }
       // Inline quantity — iterate all "N pcs/ea/each" matches; take first whole-number result >= 1
       // This skips decimal price values like "0.084 each" which appear before "6000 each"
       if (!qty) {
@@ -1379,9 +1387,9 @@ function checkInboxForNewRFQs() {
     }
 
     var qty = '';
-    var qtyMatch = fullBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)/i);
+    var qtyMatch = fullBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)|q\.ty\s+(\d+)/i);
     if (qtyMatch) {
-      var rawQty = qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || '';
+      var rawQty = qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || qtyMatch[4] || '';
       var qtyNum = parseQtyValue(rawQty, country);
       if (qtyNum > 0) qty = String(qtyNum);
     }
@@ -1479,9 +1487,9 @@ function checkSentCheckingReplies() {
           var netcompTP = extractNetcompsTgtPrice(directText, msg.getBody());
           if (netcompTP && !tp) tp = netcompTP;
         }
-          var qtyMatch = fullMsgBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)/i);
+          var qtyMatch = fullMsgBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)|q\.ty\s+(\d+)/i);
           if (qtyMatch && !qty) {
-            var rawQty = qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || '';
+            var rawQty = qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || qtyMatch[4] || '';
             var qtyNum = parseQtyValue(rawQty, country);
             if (qtyNum > 0) qty = String(qtyNum);
           }
@@ -3107,6 +3115,8 @@ function processThreadWithAgent(thread, agentLabel) {
   }
 
   thread.addLabel(agentLabel);
+  var _rfqIncomingLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
+  thread.addLabel(_rfqIncomingLabel);
 
   var decision = callEmailAgent(thread.getId(), subject, replyTo, threadContent, oemResults, forteResults, currentLabels, inStockResults, stanResults, priorQuotes);
   if (!decision) {

@@ -461,3 +461,14 @@ function addForte_AL8860MP13() {
     '=C'+nextRow+'*D'+nextRow, '', '', '', 'Open']);
   Logger.log('Added AL8860MP-13 to Forte row ' + nextRow);
 }
+
+// ONE-TIME — Run removeForte_AFCT5765ATPZ() to delete the wrong Forte entry for
+// AFCT5765ATPZ (row 3964). Bug: agent wrote forte_entry before forte_entry guard
+// was in place. Line value was $125 (5 pcs × $25) — below $500 MOV, should have
+// been declined, never added to Forte. Decline draft r4983561768500791146 created.
+function removeForte_AFCT5765ATPZ() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  sheet.deleteRow(3964);
+  Logger.log('Deleted wrong Forte row 3964 (AFCT5765ATPZ)');
+}
