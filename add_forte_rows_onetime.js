@@ -276,6 +276,72 @@ function addForte_LCC110PTR() {
   Logger.log('Added LCC110PTR to Forte row ' + nextRow);
 }
 
+// ONE-TIME — Run deleteWrongDrafts() to remove duplicate drafts created by the
+// race condition between Trigger 3 and Trigger 7 (both fired simultaneously before
+// the optimistic-label fix was deployed on 2026-07-01). For each affected thread,
+// keeps the newest draft and deletes all older ones.
+function deleteWrongDrafts() {
+  // Threads confirmed to have duplicate drafts as of 2026-07-01 list_drafts audit
+  var TARGET_THREADS = [
+    '19f1d56c8ab92920',  // AD5504BRUZ (also has old wrong-format draft)
+    '19f1d5d1abfa7ea8',  // MRF1513NT1
+    '19f1cc652555ffd6',  // AR8035-AL1B (Cyclops Electronics)
+    '19f1cbdcf7fac6f0',  // LMX2594RHAT
+    '19f1c917760eace1',  // OPA377AIDBVR
+    '19f1c8cfdfd74d76',  // SCT070HU120G3AG
+    '19f1c88d7eaf466d',  // RMLV1616AGSA-5S2#AA0 (Artel)
+    '19f1c71f9111d2a2',  // BCX56-10
+    '19f1c6147ae7e525',  // 357002K38M09 (thread 1)
+    '19f1c597afdd914c',  // 357002K38M09 (thread 2)
+    '19f1c445fc095bbb',  // HRF-AT4520-FL-TR
+    '19f1c4478d1b79e5',  // M41T62LC6F
+    '19f1c38fd8bae17d',  // CY8C5868AXI-LP035
+    '19f1b9eb6683918b',  // 8A34001E-000AJG8
+    '19f1b8ac36899753',  // RMLV1616AGSA-5S2#AA0 (Speed Supply)
+  ];
+
+  var allDrafts = GmailApp.getDrafts();
+  var byThread = {};
+
+  allDrafts.forEach(function(draft) {
+    try {
+      var threadId = draft.getMessage().getThread().getId();
+      if (TARGET_THREADS.indexOf(threadId) === -1) return;
+      if (!byThread[threadId]) byThread[threadId] = [];
+      byThread[threadId].push({ draft: draft, date: draft.getMessage().getDate(), id: draft.getId() });
+    } catch(e) {
+      Logger.log('Error reading draft: ' + e.message);
+    }
+  });
+
+  var deleted = 0;
+  TARGET_THREADS.forEach(function(threadId) {
+    var drafts = byThread[threadId];
+    if (!drafts || drafts.length === 0) {
+      Logger.log('Thread ' + threadId + ': no drafts found (already cleaned up)');
+      return;
+    }
+    if (drafts.length === 1) {
+      Logger.log('Thread ' + threadId + ': 1 draft — OK, nothing to delete');
+      return;
+    }
+    // Keep newest, delete all older ones
+    drafts.sort(function(a, b) { return b.date - a.date; });
+    Logger.log('Thread ' + threadId + ': keeping ' + drafts[0].id + ' (' + drafts[0].date + ')');
+    for (var i = 1; i < drafts.length; i++) {
+      try {
+        drafts[i].draft.deleteDraft();
+        deleted++;
+        Logger.log('  Deleted older draft: ' + drafts[i].id + ' (' + drafts[i].date + ')');
+      } catch(e) {
+        Logger.log('  Failed to delete ' + drafts[i].id + ': ' + e.message);
+      }
+    }
+  });
+
+  Logger.log('deleteWrongDrafts complete — deleted ' + deleted + ' duplicate draft(s)');
+}
+
 // ONE-TIME — Run addForte_MPM3695GRF250022() to add missed msg_checking Forte entry.
 // kunhua yao (zhongshi@zssx.top, Zhong Shi Sheng Xin, CN) gave TgtPrice=12, qty=1050.
 // Agent chose request_tp_500 (ignored TgtPrice column). Prior entry Apr 16 is outside 60 days.
