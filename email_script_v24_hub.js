@@ -1166,7 +1166,7 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
 
   if (action === 'add_to_stan') {
     var country = extractCountryFromEmail(replyTo);
-    addToStanSheet(mpn, country, '', '');
+    addToStanSheet(mpn, country, decision.qty || '', decision.target_price || '');
     hubLog('run', 'Worker add_to_stan: ' + mpn, {mpn: mpn});
     Logger.log('Worker add_to_stan: ' + mpn);
     // fall through to draft creation below — worker sets draft_body with checking message

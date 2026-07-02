@@ -1,3 +1,52 @@
+// ONE-TIME — Run fixStanSheet_July2() to:
+//   1. Set QTY (col G) for LT1424CS8-5#PBF (row 327) = 200 (buyer: Bonnie Chan)
+//   2. Set QTY (col G) for BCM5338MKQM (row 329) = 300 (buyer: Amy Gu)
+//   3. Delete row 330 (LP2951ACMX-3.3/NOPB — wrongly added, OEM EXCESS part not W3)
+//   4. Delete the wrong BCM5338MKQM draft (msg id 19f1e76df0013aa7) that had
+//      model-hallucinated body text instead of "Warehouse is checking details..."
+function fixStanSheet_July2() {
+  var STAN_SHEET_ID = '1pGRDpkqftQNoEYna53MxRJfUY8jEf5_w32FNa56OUIM';
+  var sheet = SpreadsheetApp.openById(STAN_SHEET_ID).getSheets()[0];
+
+  // Fix QTYs (col G = column index 7, 1-based)
+  sheet.getRange(327, 7).setValue(200);
+  Logger.log('Updated Stan row 327 (LT1424CS8-5#PBF) QTY = 200');
+
+  sheet.getRange(329, 7).setValue(300);
+  Logger.log('Updated Stan row 329 (BCM5338MKQM) QTY = 300');
+
+  // Delete LP2951ACMX-3.3/NOPB — row 330 (OEM EXCESS part, was wrongly added via fuzzy match)
+  sheet.deleteRow(330);
+  Logger.log('Deleted Stan row 330 (LP2951ACMX-3.3/NOPB — was OEM EXCESS, not W3)');
+
+  // Delete the wrong BCM5338MKQM draft (message id: 19f1e76df0013aa7)
+  // Body had hallucinated debugging text instead of the correct add_to_stan body
+  var token = ScriptApp.getOAuthToken();
+  var wrongMsgId = '19f1e76df0013aa7';
+  var pageToken = '';
+  var deleted = false;
+  do {
+    var url = 'https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=100' +
+              (pageToken ? '&pageToken=' + pageToken : '');
+    var resp = UrlFetchApp.fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    var body = JSON.parse(resp.getContentText());
+    var drafts = body.drafts || [];
+    for (var i = 0; i < drafts.length; i++) {
+      if (drafts[i].message && drafts[i].message.id === wrongMsgId) {
+        UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + drafts[i].id, {
+          method: 'delete',
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        Logger.log('Deleted wrong BCM5338MKQM draft id: ' + drafts[i].id);
+        deleted = true;
+        break;
+      }
+    }
+    pageToken = body.nextPageToken || '';
+  } while (pageToken && !deleted);
+  if (!deleted) Logger.log('Wrong BCM5338MKQM draft not found — may already be deleted');
+}
+
 // ONE-TIME — Run updateStanQTY_June29() to fill in the missing QTY column for
 // the 3 Warehouse#3 parts added to Stan's RFQ sheet on 6/29/2026 (rows 324-326).
 // Quantities pulled from IN STOCK sheet: EP3SL150F780I3N=408, XC2S200E6FTG256C=120, EL4390CM=125

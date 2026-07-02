@@ -167,7 +167,7 @@ Key functions:
 - `processCommandQueue()` — Trigger 10, runs inventory commands (remove stock, send NetCOMPONENTS email)
 - `setupTriggers()` — installs all 10 triggers (run once after script update)
 
-BLOCKED_DOMAINS: `['sourceschip.com', 'bulechip.com', 'feelchips.com', 'chip-wintrading.com', 'qizhongsmart.com']`
+BLOCKED_DOMAINS: `['sourceschip.com', 'bulechip.com', 'feelchips.com', 'chip-wintrading.com', 'qizhongsmart.com', 'lcgyzzonline.com']`
 
 When John pastes a new version of the script into Apps Script editor:
 1. Paste full file content
