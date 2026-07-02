@@ -115,6 +115,9 @@ export default {
         return json({ mpn, result });
       }
 
+      if (p === '/api/sheet-lookup' && m === 'GET') return handleSheetLookup(url, env);
+      if (p === '/api/diagnose'     && m === 'POST') return handleDiagnose(request, env);
+
       return json({ error: 'Not found' }, 404);
     } catch (err) {
       return json({ error: err.message }, 500);
@@ -1230,6 +1233,92 @@ Return JSON only:
     .bind(fix.explanation, commitSha, issue_id).run();
 
   return json({ ok: true, explanation: fix.explanation, commit: commitSha, deploying: true, message: 'Fix pushed to GitHub — GitHub Actions is deploying now (~60 seconds)' });
+}
+
+// ─── /api/sheet-lookup GET ───────────────────────────
+// Proxies the OEM EXCESS web app so the API key stays server-side.
+// Returns the same JSON the web app returns: { oem_excess, in_stock, stan_sheet, forte_sheet }
+async function handleSheetLookup(url, env) {
+  const mpn = url.searchParams.get('mpn');
+  if (!mpn) return json({ error: 'mpn required' }, 400);
+  const WEB_APP = 'https://script.google.com/macros/s/AKfycbyuuBmiYVW5mKI82D5YQGPh1nNGLJZzlLKoxuOdtmOUwUe75VlhhakqgwKooZu5LHFK/exec';
+  try {
+    const resp = await fetch(`${WEB_APP}?key=baSDJ%23444FE%268&mpn=${encodeURIComponent(mpn)}`, { redirect: 'follow' });
+    if (!resp.ok) return json({ error: 'Sheet lookup failed: ' + resp.status }, 502);
+    const data = await resp.json();
+    return json(data);
+  } catch(e) {
+    return json({ error: e.message }, 500);
+  }
+}
+
+// ─── /api/diagnose POST ──────────────────────────────
+// Accepts an email (subject, sender, content) + optional inventory context.
+// Calls Claude to diagnose what action should have fired and why the automation missed it.
+async function handleDiagnose(request, env) {
+  const { subject, sender, content, oem_results, in_stock_results, forte_results } = await request.json();
+  if (!content && !subject) return json({ error: 'content or subject required' }, 400);
+
+  const fmt = (arr, fn) => (arr && arr.length) ? arr.map(fn).join('\n') : 'None found';
+  const oemText      = fmt(oem_results,      r => `  MPN=${r.mpn} | QTY=${r.qty} | Notes=${r.notes}`);
+  const inStockText  = fmt(in_stock_results, r => `  MPN=${r.mpn} | QTY=${r.qty}`);
+  const forteText    = fmt(forte_results,    r => `  ${r.date}: QTY=${r.qty} | TP=${r.buyerTP} | Status=${r.status}`);
+
+  const prompt = `You are diagnosing why an email was NOT automatically handled by John Fluman's email automation at Intransit Technologies (OEM excess electronic components distributor). The system runs via Google Apps Script + Cloudflare Worker.
+
+EMAIL:
+Subject: ${subject || '(not provided)'}
+From: ${sender || '(not provided)'}
+Content:
+${content || '(not provided)'}
+
+INVENTORY CONTEXT:
+OEM EXCESS: ${oemText}
+IN STOCK: ${inStockText}
+FORTE HISTORY (60d): ${forteText}
+
+AUTOMATION TRIGGERS:
+- Trigger 3 (checkInboxForNewRFQs): inbox NOT labeled oem-rfq-incoming-processed → if MPN in OEM EXCESS, draft request_tp_500 and apply oem-rfq-incoming-processed label
+- Trigger 4 (checkInboxForTPReplies): inbox labeled oem-rfq-incoming-processed, buyer replies with price → if qty×TP≥$500 and not BILL EXT: msg_checking+Forte; if <$500: decline; if BILL EXT: bill_handle
+- Trigger 7 (runEmailAgent): inbox NOT labeled oem-agent-processed AND NOT labeled oem-rfq-incoming-processed → handles direct/IC Source/non-netCOMPS emails; applies both oem-agent-processed AND oem-rfq-incoming-processed
+- Trigger 8 (checkBillNetcompRemovals): Bill's "@John Fluman -MPN" removal emails
+- Blocked domains → auto-archive. Internal @intransittech.com → no_action.
+- David (david@fortetechno.com) no-stock → remove_oem
+- BILL EXT-only OEM rows: forward to Bill after TP, never Forte
+
+KNOWN BUGS FIXED AS OF 2026-07-01 (commit 7ee5146):
+- Trigger 7 now also applies oem-rfq-incoming-processed (was only applying oem-agent-processed)
+- extractTargetPrice now handles "25/30$ each" slash-range format
+- qty extraction now handles "q.ty 5" format
+
+Based on the email above, reason step-by-step about what should have happened and why it was missed.
+Return valid JSON only (no markdown wrapper):
+{
+  "action_should_have_been": "request_tp_500 | msg_checking | bill_handle | own_stock | no_bid | decline | remove_oem | etc",
+  "trigger_responsible": "Trigger 3 | Trigger 4 | Trigger 7 | Trigger 8 | none",
+  "reason_missed": "1-2 sentence plain English — be specific about the label state or parsing bug",
+  "confidence": "high | medium | low",
+  "fix_needed": "what code or manual action fixes this, or Already fixed in 7ee5146 if it matches a known bug"
+}`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 600, messages: [{ role: 'user', content: prompt }] })
+    });
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    let result;
+    try { result = JSON.parse(text); }
+    catch(e) {
+      const m = text.match(/\{[\s\S]+\}/);
+      result = m ? JSON.parse(m[0]) : { action_should_have_been: 'unknown', trigger_responsible: 'unknown', reason_missed: text, confidence: 'low', fix_needed: 'manual review' };
+    }
+    return json(result);
+  } catch(e) {
+    return json({ error: e.message }, 500);
+  }
 }
 
 // ─── netCOMPONENTS listing check ─────────────────────

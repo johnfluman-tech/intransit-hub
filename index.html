@@ -898,12 +898,74 @@
       <div class="section-header">
         <h2>📤 Post to NetCOMPONENTS</h2>
       </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:28px">
         <p style="font-size:13px;color:var(--text-dim);margin-bottom:8px">Exports OEM Excess + InStock sheets and emails them to NetCOMPONENTS — matching your standard format.</p>
         <p style="font-size:11px;color:var(--muted);margin-bottom:16px">Subject: "Please post" &nbsp;·&nbsp; To: john.fluman@intransittech.com &nbsp;·&nbsp; BCC: datamaster@netcomponents.com &nbsp;·&nbsp; Attachments: OEM_EXCESS.xlsx, IN STOCK.xlsx</p>
         <div style="display:flex;gap:10px;align-items:center">
           <button class="btn primary" onclick="sendNetComEmail()">📤 Send to NetCOMPONENTS</button>
           <span id="inv-send-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>
+
+      <!-- OEM EXCESS Controls -->
+      <div class="section-header">
+        <h2>📦 OEM EXCESS Controls</h2>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:28px">
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Remove a part from OEM EXCESS, or verify whether a part is still on either sheet. Quote History shows all prior Forte entries for the MPN.</p>
+        <div class="cfg-field" style="margin-bottom:12px">
+          <label>Part Number (MPN)</label>
+          <input type="text" id="oem-ctrl-mpn" placeholder="e.g. ISZ080N10NM6" style="text-transform:uppercase">
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+          <button class="btn primary" onclick="removeFromOEM()">🗑 Remove from OEM EXCESS</button>
+          <button class="btn" onclick="verifyOEMRemoved()">✓ Verify OEM Removed</button>
+          <button class="btn" onclick="verifyInStockRemoved()">✓ Verify InStock Removed</button>
+          <button class="btn" onclick="checkQuoteHistory()">📋 Quote History</button>
+        </div>
+        <div id="oem-ctrl-status" style="font-size:12px;color:var(--muted)"></div>
+        <div id="oem-ctrl-result" style="margin-top:12px"></div>
+      </div>
+
+      <!-- Jiggle My Mind -->
+      <div class="section-header">
+        <h2>🧠 Jiggle My Mind</h2>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:28px">
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:4px">Paste an email the automation should have handled. I'll diagnose what action should have fired, which trigger was responsible, and why it was missed.</p>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:16px">Paste subject + body. The MPN from the OEM Controls field above is used for inventory lookup — fill that in first for the best diagnosis.</p>
+        <div class="cfg-field" style="margin-bottom:8px">
+          <label>Subject</label>
+          <input type="text" id="diag-subject" placeholder="e.g. RFQ for BCM5461SA2KQMG">
+        </div>
+        <div class="cfg-field" style="margin-bottom:8px">
+          <label>From</label>
+          <input type="text" id="diag-sender" placeholder="e.g. buyer@company.com">
+        </div>
+        <div class="cfg-field" style="margin-bottom:12px">
+          <label>Email Body</label>
+          <textarea id="diag-content" rows="5" placeholder="Paste the email body here…" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;resize:vertical;box-sizing:border-box"></textarea>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+          <button class="btn primary" onclick="diagnoseEmail()">🧠 Diagnose</button>
+          <span id="diag-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <div id="diag-result" style="display:none">
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:12px">
+            <div style="display:grid;grid-template-columns:140px 1fr;row-gap:8px;font-size:13px">
+              <span style="color:var(--muted)">Should have been:</span><span id="diag-action" style="font-weight:600;color:var(--accent)"></span>
+              <span style="color:var(--muted)">Trigger:</span><span id="diag-trigger"></span>
+              <span style="color:var(--muted)">Confidence:</span><span id="diag-confidence"></span>
+              <span style="color:var(--muted)">Why missed:</span><span id="diag-reason"></span>
+              <span style="color:var(--muted)">Fix needed:</span><span id="diag-fix"></span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn primary" onclick="agreeWithDiagnosis()" id="diag-agree-btn">✓ Agree — Log as Training</button>
+            <textarea id="diag-correction" rows="2" placeholder="Edit John's correction here…" style="flex:1;min-width:200px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;resize:vertical"></textarea>
+            <button class="btn" onclick="logCorrection()">💬 Log Correction</button>
+          </div>
+          <div id="diag-log-status" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
         </div>
       </div>
 
@@ -1676,6 +1738,187 @@ async function sendNetComEmail() {
   } catch(e) {
     el.textContent = 'Error: ' + e.message; el.style.color = 'var(--error)';
   }
+}
+
+// ─── OEM EXCESS Controls ─────────────────────────
+function oemCtrlMpn() {
+  return (document.getElementById('oem-ctrl-mpn').value || '').trim().toUpperCase();
+}
+function oemCtrlStatus(msg, color) {
+  const el = document.getElementById('oem-ctrl-status');
+  el.textContent = msg; el.style.color = color || 'var(--muted)';
+}
+function oemCtrlResult(html) {
+  document.getElementById('oem-ctrl-result').innerHTML = html;
+}
+
+async function removeFromOEM() {
+  const mpn = oemCtrlMpn();
+  if (!mpn) { oemCtrlStatus('Enter an MPN first.', 'var(--error)'); return; }
+  oemCtrlStatus('Queuing…', 'var(--muted)'); oemCtrlResult('');
+  try {
+    await apiPost('/api/command-queue', { type: 'remove_oem_mpn', data: { mpn } });
+    oemCtrlStatus('✓ Queued — OEM EXCESS row will be removed within 5 min.', 'var(--success)');
+    document.getElementById('oem-ctrl-mpn').value = '';
+  } catch(e) { oemCtrlStatus('Error: ' + e.message, 'var(--error)'); }
+}
+
+async function sheetLookup(mpn) {
+  const data = await apiGet('/api/sheet-lookup?mpn=' + encodeURIComponent(mpn));
+  return data;
+}
+
+async function verifyOEMRemoved() {
+  const mpn = oemCtrlMpn();
+  if (!mpn) { oemCtrlStatus('Enter an MPN first.', 'var(--error)'); return; }
+  oemCtrlStatus('Checking OEM EXCESS…', 'var(--muted)'); oemCtrlResult('');
+  try {
+    const data = await sheetLookup(mpn);
+    const rows = (data && data.oem_excess) || [];
+    if (!rows.length) {
+      oemCtrlStatus('', '');
+      oemCtrlResult(`<div style="color:var(--success);font-size:13px;font-weight:600">✓ ${mpn} is NOT in OEM EXCESS — successfully removed.</div>`);
+    } else {
+      oemCtrlStatus('', '');
+      oemCtrlResult(`<div style="color:var(--error);font-size:13px;font-weight:600">⚠ ${mpn} still found in OEM EXCESS (${rows.length} row${rows.length>1?'s':''}):</div>` +
+        `<div style="font-size:12px;color:var(--text-dim);margin-top:6px">${rows.map(r=>`Row ${r.row}: QTY=${r.qty} | Notes=${r.notes||'—'}`).join('<br>')}</div>`);
+    }
+  } catch(e) { oemCtrlStatus('Error: ' + e.message, 'var(--error)'); }
+}
+
+async function verifyInStockRemoved() {
+  const mpn = oemCtrlMpn();
+  if (!mpn) { oemCtrlStatus('Enter an MPN first.', 'var(--error)'); return; }
+  oemCtrlStatus('Checking IN STOCK…', 'var(--muted)'); oemCtrlResult('');
+  try {
+    const data = await sheetLookup(mpn);
+    const rows = (data && data.in_stock) || [];
+    if (!rows.length) {
+      oemCtrlStatus('', '');
+      oemCtrlResult(`<div style="color:var(--success);font-size:13px;font-weight:600">✓ ${mpn} is NOT in IN STOCK — successfully removed.</div>`);
+    } else {
+      oemCtrlStatus('', '');
+      oemCtrlResult(`<div style="color:var(--error);font-size:13px;font-weight:600">⚠ ${mpn} still found in IN STOCK (${rows.length} row${rows.length>1?'s':''}):</div>` +
+        `<div style="font-size:12px;color:var(--text-dim);margin-top:6px">${rows.map(r=>`Row ${r.row}: QTY=${r.qty}${r.notes?' | Notes='+r.notes:''}`).join('<br>')}</div>`);
+    }
+  } catch(e) { oemCtrlStatus('Error: ' + e.message, 'var(--error)'); }
+}
+
+async function checkQuoteHistory() {
+  const mpn = oemCtrlMpn();
+  if (!mpn) { oemCtrlStatus('Enter an MPN first.', 'var(--error)'); return; }
+  oemCtrlStatus('Looking up quote history…', 'var(--muted)'); oemCtrlResult('');
+  try {
+    const data = await sheetLookup(mpn);
+    const forte = (data && data.forte_sheet) || [];
+    const oem   = (data && data.oem_excess)  || [];
+    const stock = (data && data.in_stock)    || [];
+
+    let html = '';
+
+    // Current stock
+    const stockSummary = [];
+    if (oem.length)   stockSummary.push(`OEM EXCESS: ${oem.reduce((s,r)=>s+(parseInt(r.qty)||0),0).toLocaleString()} pcs`);
+    if (stock.length) stockSummary.push(`IN STOCK: ${stock.reduce((s,r)=>s+(parseInt(r.qty)||0),0).toLocaleString()} pcs`);
+    html += `<div style="margin-bottom:12px;font-size:13px">
+      <span style="color:var(--muted)">Current stock: </span>
+      <span style="color:${stockSummary.length?'var(--text)':'var(--error)'}">${stockSummary.length ? stockSummary.join(' · ') : 'Not in any sheet'}</span>
+    </div>`;
+
+    if (!forte.length) {
+      html += `<div style="font-size:13px;color:var(--muted)">No prior Forte entries found for ${mpn}.</div>`;
+    } else {
+      const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      html += `<div style="font-size:12px;color:var(--muted);margin-bottom:6px">${forte.length} prior quote${forte.length>1?'s':''} in Forte:</div>`;
+      html += forte.map(r => {
+        const d = new Date(r.date); const stale = isNaN(d) || d < sixMonthsAgo;
+        const pot = r.qty && r.buyerTP ? '$' + (parseFloat(r.qty)*parseFloat(r.buyerTP)).toLocaleString(undefined,{maximumFractionDigits:2}) : '—';
+        return `<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;font-size:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-weight:600;color:${stale?'var(--muted)':'var(--text)'}">${r.date||'—'}${stale?' <span style="color:var(--error);font-size:10px">STALE</span>':''}</span>
+            <span class="status-badge ${(r.status||'').toLowerCase()}" style="font-size:10px">${r.status||'—'}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;color:var(--text-dim)">
+            <span>QTY: <b style="color:var(--text)">${r.qty||'—'}</b></span>
+            <span>TP: <b style="color:var(--text)">${r.buyerTP?'$'+r.buyerTP:'—'}</b></span>
+            <span>Potential: <b style="color:var(--text)">${pot}</b></span>
+            <span>Country: <b style="color:var(--text)">${r.country||'—'}</b></span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+    oemCtrlStatus('', ''); oemCtrlResult(html);
+  } catch(e) { oemCtrlStatus('Error: ' + e.message, 'var(--error)'); }
+}
+
+// ─── Jiggle My Mind ──────────────────────────────
+let _lastDiagnosis = null;
+
+async function diagnoseEmail() {
+  const subject = (document.getElementById('diag-subject').value || '').trim();
+  const sender  = (document.getElementById('diag-sender').value  || '').trim();
+  const content = (document.getElementById('diag-content').value || '').trim();
+  const statusEl = document.getElementById('diag-status');
+  const resultEl = document.getElementById('diag-result');
+  if (!subject && !content) { statusEl.textContent = 'Paste an email first.'; statusEl.style.color = 'var(--error)'; return; }
+  statusEl.textContent = 'Thinking…'; statusEl.style.color = 'var(--muted)';
+  resultEl.style.display = 'none';
+
+  // Optionally enrich with inventory if MPN is in the OEM controls field
+  let oem_results = [], in_stock_results = [], forte_results = [];
+  const mpn = oemCtrlMpn();
+  if (mpn) {
+    try {
+      const inv = await sheetLookup(mpn);
+      oem_results      = (inv && inv.oem_excess)  || [];
+      in_stock_results = (inv && inv.in_stock)    || [];
+      forte_results    = (inv && inv.forte_sheet) || [];
+    } catch(e) {}
+  }
+
+  try {
+    const result = await apiPost('/api/diagnose', { subject, sender, content, oem_results, in_stock_results, forte_results });
+    _lastDiagnosis = { subject, sender, content, result };
+    const confColor = result.confidence === 'high' ? 'var(--success)' : result.confidence === 'low' ? 'var(--error)' : 'var(--accent)';
+    document.getElementById('diag-action').textContent    = result.action_should_have_been || '—';
+    document.getElementById('diag-trigger').textContent   = result.trigger_responsible     || '—';
+    document.getElementById('diag-confidence').innerHTML  = `<span style="color:${confColor}">${result.confidence || '—'}</span>`;
+    document.getElementById('diag-reason').textContent    = result.reason_missed            || '—';
+    document.getElementById('diag-fix').textContent       = result.fix_needed               || '—';
+    statusEl.textContent = ''; resultEl.style.display = 'block';
+    document.getElementById('diag-log-status').textContent = '';
+  } catch(e) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = 'var(--error)'; }
+}
+
+async function agreeWithDiagnosis() {
+  if (!_lastDiagnosis) return;
+  const logStatus = document.getElementById('diag-log-status');
+  logStatus.textContent = 'Logging…'; logStatus.style.color = 'var(--muted)';
+  try {
+    await apiPost('/api/logs', {
+      app_name: 'email_automation', event_type: 'training',
+      summary: 'Jiggle My Mind — AGREED: ' + (_lastDiagnosis.result.action_should_have_been || '?') + ' missed by ' + (_lastDiagnosis.result.trigger_responsible || '?'),
+      details: JSON.stringify({ subject: _lastDiagnosis.subject, sender: _lastDiagnosis.sender, diagnosis: _lastDiagnosis.result })
+    });
+    logStatus.textContent = '✓ Logged as training data.'; logStatus.style.color = 'var(--success)';
+  } catch(e) { logStatus.textContent = 'Error: ' + e.message; logStatus.style.color = 'var(--error)'; }
+}
+
+async function logCorrection() {
+  if (!_lastDiagnosis) return;
+  const correction = (document.getElementById('diag-correction').value || '').trim();
+  if (!correction) { document.getElementById('diag-log-status').textContent = 'Enter your correction first.'; return; }
+  const logStatus = document.getElementById('diag-log-status');
+  logStatus.textContent = 'Logging…'; logStatus.style.color = 'var(--muted)';
+  try {
+    await apiPost('/api/logs', {
+      app_name: 'email_automation', event_type: 'training',
+      summary: 'Jiggle My Mind — CORRECTION: ' + correction.substring(0, 80),
+      details: JSON.stringify({ subject: _lastDiagnosis.subject, sender: _lastDiagnosis.sender, original_diagnosis: _lastDiagnosis.result, john_correction: correction })
+    });
+    logStatus.textContent = '✓ Correction logged as training data.'; logStatus.style.color = 'var(--success)';
+    document.getElementById('diag-correction').value = '';
+  } catch(e) { logStatus.textContent = 'Error: ' + e.message; logStatus.style.color = 'var(--error)'; }
 }
 
 // ─── Login ───────────────────────────────────────

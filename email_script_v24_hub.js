@@ -1706,6 +1706,16 @@ function processCommandQueue() {
           rowsToDelete.forEach(function(row) { sheet.deleteRow(row); });
           hubLog('inventory', 'Removed ' + rowsToDelete.length + ' row(s) for MPN ' + mpn + ' from InStock', { mpn: mpn, rows_deleted: rowsToDelete.length });
 
+        } else if (cmd.type === 'remove_oem_mpn') {
+          var mpn = (data.mpn || '').trim();
+          if (!mpn) throw new Error('No MPN provided');
+          var result = deletePart(mpn, 'Hub command: remove_oem_mpn');
+          if (result === 'NOT_FOUND') throw new Error('MPN not found in OEM EXCESS: ' + mpn);
+          if (result === 'MULTIPLE') throw new Error('Multiple exact matches for ' + mpn + ' — review email sent to John');
+          if (result === 'FUZZY_REVIEW') throw new Error('Ambiguous match for ' + mpn + ' — review email sent to John');
+          updateForteSheet(mpn);
+          hubLog('inventory', 'Hub command: removed ' + mpn + ' from OEM EXCESS (result: ' + result + ')', { mpn: mpn, result: result });
+
         } else if (cmd.type === 'send_datamaster_email') {
           var token = ScriptApp.getOAuthToken();
           var fetchOpts = { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true };
