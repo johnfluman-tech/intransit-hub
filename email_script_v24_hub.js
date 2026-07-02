@@ -1331,7 +1331,7 @@ function checkInboxForNewRFQs() {
   try { archiveBlockedDomains(); } catch(e) { Logger.log('archiveBlockedDomains error: ' + e); }
   var BLOCKED_DOMAINS = getBlockedDomains();
   var _blockedFromFilter = BLOCKED_DOMAINS.map(function(d){return '-from:'+d;}).join(' ');
-  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR from:david@fortetechno.com OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
+  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:partalert@netcomponents.com -from:david@fortetechno.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
   var threads = GmailApp.search(query,0,10);
   hubLog('run', 'checkInboxForNewRFQs: ' + threads.length + ' thread(s)');
   if (!threads.length) return;

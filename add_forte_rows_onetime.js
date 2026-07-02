@@ -472,3 +472,17 @@ function removeForte_AFCT5765ATPZ() {
   sheet.deleteRow(3964);
   Logger.log('Deleted wrong Forte row 3964 (AFCT5765ATPZ)');
 }
+
+// ── One-time: remove oem-rfq-incoming-processed from David threads stuck by Trigger 3 bug ──
+// Run once after pasting the fixed script. Trigger 7 will then pick them up on next 5-min cycle.
+function unlabelStuckDavidThreads() {
+  var label = GmailApp.getUserLabelByName('oem-rfq-incoming-processed');
+  if (!label) { Logger.log('Label not found'); return; }
+  var threads = GmailApp.search('from:david@fortetechno.com label:oem-rfq-incoming-processed -label:oem-agent-processed in:inbox', 0, 20);
+  Logger.log('Found ' + threads.length + ' stuck David thread(s)');
+  threads.forEach(function(t) {
+    t.removeLabel(label);
+    Logger.log('Unlabeled: ' + t.getFirstMessageSubject());
+  });
+  Logger.log('Done — Trigger 7 will process these on next run.');
+}
