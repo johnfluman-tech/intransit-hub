@@ -115,8 +115,9 @@ export default {
         return json({ mpn, result });
       }
 
-      if (p === '/api/sheet-lookup' && m === 'GET') return handleSheetLookup(url, env);
-      if (p === '/api/diagnose'     && m === 'POST') return handleDiagnose(request, env);
+      if (p === '/api/sheet-lookup'  && m === 'GET')  return handleSheetLookup(url, env);
+      if (p === '/api/diagnose'      && m === 'POST') return handleDiagnose(request, env);
+      if (p === '/api/session-log'   && m === 'GET')  return handleSessionLog(env);
 
       return json({ error: 'Not found' }, 404);
     } catch (err) {
@@ -1256,7 +1257,70 @@ async function handleSheetLookup(url, env) {
 // Accepts an email (subject, sender, content) + optional inventory context.
 // Calls Claude to diagnose what action should have fired and why the automation missed it.
 async function handleDiagnose(request, env) {
-  const { subject, sender, content, oem_results, in_stock_results, forte_results } = await request.json();
+  const body = await request.json();
+  const { subject, sender, content, oem_results, in_stock_results, forte_results, draft_body, mode } = body;
+  if (!content && !subject && !draft_body) return json({ error: 'content, subject, or draft_body required' }, 400);
+
+  // ── Draft diagnosis mode ────────────────────────────────────────────────
+  if (mode === 'draft' && draft_body) {
+    const fmt = (arr, fn) => (arr && arr.length) ? arr.map(fn).join('\n') : 'None found';
+    const oemText     = fmt(oem_results,      r => `  MPN=${r.mpn} | QTY=${r.qty} | Notes=${r.notes}`);
+    const inStockText = fmt(in_stock_results, r => `  MPN=${r.mpn} | QTY=${r.qty}`);
+    const forteText   = fmt(forte_results,    r => `  ${r.date}: QTY=${r.qty} | TP=${r.buyerTP} | Status=${r.status}`);
+    const draftPrompt = `You are reviewing a Gmail draft that John Fluman thinks is WRONG. Diagnose exactly what the mistake is.
+
+EMAIL THREAD:
+Subject: ${subject || '(not provided)'}
+From: ${sender || '(not provided)'}
+Buyer message:
+${content || '(not provided)'}
+
+EXISTING DRAFT (the one John thinks is wrong):
+${draft_body}
+
+INVENTORY CONTEXT:
+OEM EXCESS: ${oemText}
+IN STOCK: ${inStockText}
+FORTE HISTORY (60d): ${forteText}
+
+AUTOMATION RULES:
+- $500 MOV: qty×TP must be ≥$500 to send msg_checking. Below → decline.
+- BILL EXT parts: forward to Bill after buyer gives TP — never add to Forte, never MSG_CHECKING
+- request_tp_500: sent when buyer gives no TP; we ask for target price + note $500 minimum
+- msg_checking: sent when TP qualifies — "We are checking on it now..."
+- Forte entry: only when msg_checking is correct action AND part is NOT BILL EXT
+- Blocked domains: auto-archive, no reply
+- David (david@fortetechno.com) no-stock email → remove_oem action (delete from OEM sheet)
+
+Look at the draft and figure out what it should say instead, and why the draft is wrong.
+Return valid JSON only (no markdown wrapper):
+{
+  "what_is_wrong": "1-2 sentence description of the exact mistake in the draft",
+  "what_it_should_say": "request_tp_500 | msg_checking | bill_handle | decline | no_reply | etc — the correct action",
+  "corrected_instruction": "one clear instruction John can use to fix the draft — e.g. 'This should be a decline: qty×TP=$125 is below $500 MOV'",
+  "confidence": "high | medium | low"
+}`;
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 500, messages: [{ role: 'user', content: draftPrompt }] })
+      });
+      const data = await resp.json();
+      const text = data.content?.[0]?.text || '';
+      let result;
+      try { result = JSON.parse(text); }
+      catch(e) {
+        const m = text.match(/\{[\s\S]+\}/);
+        result = m ? JSON.parse(m[0]) : { what_is_wrong: text, what_it_should_say: 'unknown', corrected_instruction: 'manual review', confidence: 'low' };
+      }
+      return json(result);
+    } catch(e) {
+      return json({ error: e.message }, 500);
+    }
+  }
+
+  // ── Missed email diagnosis mode (original) ──────────────────────────────
   if (!content && !subject) return json({ error: 'content or subject required' }, 400);
 
   const fmt = (arr, fn) => (arr && arr.length) ? arr.map(fn).join('\n') : 'None found';
@@ -1319,6 +1383,63 @@ Return valid JSON only (no markdown wrapper):
   } catch(e) {
     return json({ error: e.message }, 500);
   }
+}
+
+// ─── /api/session-log GET ────────────────────────────
+// Returns last N hub log entries + last 10 GitHub commits as formatted copyable text.
+async function handleSessionLog(env) {
+  const lines = [];
+  const now = new Date().toISOString();
+  lines.push(`=== INTRANSIT HUB SESSION LOG — ${now} ===\n`);
+
+  // Hub logs (last 50)
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT app_name, event_type, summary, created_at FROM app_logs ORDER BY created_at DESC LIMIT 50`
+    ).all();
+    lines.push('── RECENT HUB ACTIVITY (last 50 entries) ──');
+    if (results && results.length) {
+      for (const r of results) {
+        lines.push(`[${r.created_at}] ${r.app_name}/${r.event_type}: ${r.summary}`);
+      }
+    } else {
+      lines.push('(no log entries)');
+    }
+  } catch(e) {
+    lines.push('(hub logs unavailable: ' + e.message + ')');
+  }
+
+  lines.push('');
+
+  // GitHub commits (last 10)
+  try {
+    const ghResp = await fetch('https://api.github.com/repos/johnfluman-tech/intransit-hub/commits?per_page=10', {
+      headers: {
+        'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'intransit-hub-worker'
+      }
+    });
+    if (ghResp.ok) {
+      const commits = await ghResp.json();
+      lines.push('── RECENT CODE CHANGES (last 10 commits) ──');
+      for (const c of commits) {
+        const sha = c.sha.slice(0, 7);
+        const msg = c.commit.message.split('\n')[0];
+        const date = c.commit.author.date;
+        lines.push(`${sha} [${date}] ${msg}`);
+      }
+    } else {
+      lines.push('── RECENT CODE CHANGES ──');
+      lines.push(`(GitHub API returned ${ghResp.status} — token may be missing or expired)`);
+    }
+  } catch(e) {
+    lines.push('── RECENT CODE CHANGES ──');
+    lines.push('(GitHub unavailable: ' + e.message + ')');
+  }
+
+  lines.push('\n=== END OF LOG ===');
+  return new Response(lines.join('\n'), { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
 }
 
 // ─── netCOMPONENTS listing check ─────────────────────

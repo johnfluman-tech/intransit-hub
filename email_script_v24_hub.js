@@ -2130,9 +2130,16 @@ function buildContextualCard(e) {
           .setParameters({ draftId: matchDraftId, threadId: gmailThreadId, hasAdvice: '0' })));
 
       var fixSection = CardService.newCardSection().setHeader('Something wrong?');
+      fixSection.addWidget(CardService.newTextButton()
+        .setText('🤔 Figure Out What\'s Wrong')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#7b1fa2')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonDiagnoseDraft')
+          .setParameters({ draftId: matchDraftId, threadId: gmailThreadId, subject: subject, fromH: fromH, toEmail: matchToH })));
       fixSection.addWidget(CardService.newTextInput()
         .setFieldName(fbField)
-        .setTitle('What was wrong / how to fix?')
+        .setTitle('Or type what was wrong:')
         .setHint('e.g. "Should ask for TP" or "Wrong MPN extracted"')
         .setMultiline(false));
       fixSection.addWidget(CardService.newTextButton()
@@ -3143,6 +3150,169 @@ function addonLogDiagnosis(e) {
     });
     return notify('✅ ' + (agreed ? 'Agreed and logged as training data.' : 'Correction logged as training data.'));
   } catch(err) { return notify('❌ Error: ' + err.toString()); }
+}
+
+// ── Draft Diagnosis — figure out what's wrong with an existing draft ──────
+function addonDiagnoseDraft(e) {
+  try {
+    var params    = e.commonEventObject.parameters;
+    var draftId   = params.draftId   || '';
+    var threadId  = params.threadId  || '';
+    var subject   = params.subject   || '';
+    var fromH     = params.fromH     || '';
+    var toEmail   = params.toEmail   || '';
+
+    if (!draftId) return notify('No draft ID found.');
+
+    // Fetch current draft body
+    var token = ScriptApp.getOAuthToken();
+    var fetchResp = UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+    );
+    if (fetchResp.getResponseCode() !== 200) return notify('Could not load draft.');
+    var draft = JSON.parse(fetchResp.getContentText());
+    var htmlBody = extractDraftHtmlBody(draft.message && draft.message.payload);
+    var draftBody = htmlBody ? htmlBody.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+
+    // Read buyer's last message from thread
+    var buyerContent = '';
+    if (threadId) {
+      try {
+        var thread = GmailApp.getThreadById(threadId);
+        var msgs = thread ? thread.getMessages() : [];
+        if (msgs.length) buyerContent = stripQuotedLines(msgs[msgs.length - 1].getPlainBody()).substring(0, 800);
+      } catch(e2) {}
+    }
+
+    // Look up inventory
+    var mpn = extractMPNFromSubject(subject) || extractMPN(subject);
+    var oem_results = [], in_stock_results = [], forte_results = [];
+    if (mpn) {
+      try {
+        var inv = addonSheetLookup(mpn);
+        oem_results      = (inv && inv.oem_excess)  || [];
+        in_stock_results = (inv && inv.in_stock)    || [];
+        forte_results    = (inv && inv.forte_sheet) || [];
+      } catch(e3) {}
+    }
+
+    // Call /api/diagnose in draft mode
+    var diagResp = UrlFetchApp.fetch(HUB_URL + '/api/diagnose', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        mode: 'draft',
+        draft_body: draftBody,
+        subject: subject, sender: fromH, content: buyerContent,
+        oem_results: oem_results, in_stock_results: in_stock_results, forte_results: forte_results
+      }),
+      muteHttpExceptions: true
+    });
+    var result = JSON.parse(diagResp.getContentText());
+
+    var confLabel = result.confidence === 'high' ? '🟢 High' : result.confidence === 'low' ? '🔴 Low' : '🟡 Medium';
+    var card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('🤔 Draft Diagnosis').setSubtitle(subject ? subject.substring(0,50) : 'Draft'));
+
+    var diagSection = CardService.newCardSection().setHeader('What I found');
+    diagSection.addWidget(CardService.newTextParagraph().setText('❌ Wrong: ' + (result.what_is_wrong || '—')));
+    diagSection.addWidget(CardService.newTextParagraph().setText('✅ Should be: ' + (result.what_it_should_say || '—')));
+    diagSection.addWidget(CardService.newTextParagraph().setText('Fix: ' + (result.corrected_instruction || '—')));
+    diagSection.addWidget(CardService.newTextParagraph().setText('Confidence: ' + confLabel));
+    card.addSection(diagSection);
+
+    var agreeSection = CardService.newCardSection().setHeader('Your verdict');
+    agreeSection.addWidget(CardService.newTextButton()
+      .setText('✓ Agree — Fix the Draft')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1a7340')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonAgreeAndFixDraft')
+        .setParameters({
+          draftId: draftId, threadId: threadId, subject: subject, toEmail: toEmail,
+          correction: (result.corrected_instruction || '').substring(0, 250)
+        })));
+    agreeSection.addWidget(CardService.newTextInput()
+      .setFieldName('draftDiagCorrection')
+      .setTitle('Or type your own correction')
+      .setHint('e.g. "It should be a decline — qty×TP < $500"')
+      .setMultiline(false));
+    agreeSection.addWidget(CardService.newTextButton()
+      .setText('💬 Use My Correction')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#37474f')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonManualFixDraftFromDiag')
+        .setParameters({ draftId: draftId, threadId: threadId, subject: subject, toEmail: toEmail })));
+    card.addSection(agreeSection);
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
+  } catch(err) { return notify('❌ Diagnose draft error: ' + err.toString()); }
+}
+
+// ── Agree with auto-diagnosis and fix the draft ───────
+function addonAgreeAndFixDraft(e) {
+  try {
+    var params     = e.commonEventObject.parameters;
+    var draftId    = params.draftId    || '';
+    var threadId   = params.threadId   || '';
+    var subject    = params.subject    || '';
+    var toEmail    = params.toEmail    || '';
+    var correction = params.correction || '';
+    if (!correction.trim()) return notify('No correction found from diagnosis.');
+
+    var token = ScriptApp.getOAuthToken();
+    var fetchResp = UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+    );
+    if (fetchResp.getResponseCode() !== 200) return notify('Could not load draft to fix.');
+    var draft = JSON.parse(fetchResp.getContentText());
+    var htmlBody = extractDraftHtmlBody(draft.message && draft.message.payload);
+    var currentBody = htmlBody ? htmlBody.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+
+    var fixResp = UrlFetchApp.fetch(HUB_URL + '/api/fix-draft', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ draft_body: currentBody, feedback: correction, subject: subject, to_email: toEmail, thread_id: threadId }),
+      muteHttpExceptions: true
+    });
+    if (fixResp.getResponseCode() !== 200) return notify('Fix failed: ' + fixResp.getContentText().substring(0, 100));
+    var fixResult = JSON.parse(fixResp.getContentText());
+    var correctedBody = fixResult.corrected_body || '';
+
+    var newHtml = buildSimpleHTML(correctedBody.replace(/\n/g, '<br>'));
+    var rebuilt = rebuildRawMessage(draft, newHtml);
+    var putResp = UrlFetchApp.fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId,
+      { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        payload: JSON.stringify({ message: { raw: rebuilt.raw, threadId: threadId || undefined } }),
+        muteHttpExceptions: true }
+    );
+    if (JSON.parse(putResp.getContentText()).error) return notify('Could not update draft.');
+
+    hubPostDraft(threadId, null, toEmail, subject, correctedBody, draftId, 'Auto-diagnosis fix: ' + correction);
+    hubLearn('auto-diagnosis: ' + correction, currentBody, correctedBody, threadId, subject, toEmail, null, null);
+    hubLog('run', 'addonAgreeAndFixDraft: draft corrected via auto-diagnosis — ' + subject, { correction: correction });
+
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification()
+        .setText('✅ Draft fixed! 🧠 Mistake logged for training.'))
+      .build();
+  } catch(err) { return notify('Error: ' + err.toString()); }
+}
+
+// ── Manual fix from diagnosis card (John typed own correction) ────────────
+function addonManualFixDraftFromDiag(e) {
+  var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+  var correction = (formInputs.draftDiagCorrection && formInputs.draftDiagCorrection.stringInputs && formInputs.draftDiagCorrection.stringInputs.value && formInputs.draftDiagCorrection.stringInputs.value[0] || '').trim();
+  if (!correction) return notify('Please type your correction first.');
+  var params = e.commonEventObject.parameters;
+  // Build a synthetic params with correction injected, reuse agreeAndFix logic
+  e.commonEventObject.parameters.correction = correction;
+  return addonAgreeAndFixDraft(e);
 }
 
 // ── Report Issue → self-heal ─────────────────────────
