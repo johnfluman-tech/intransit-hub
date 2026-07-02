@@ -47,6 +47,18 @@ function fixStanSheet_July2() {
   if (!deleted) Logger.log('Wrong BCM5338MKQM draft not found — may already be deleted');
 }
 
+// ONE-TIME — Run removeOemExcess_XGL4020() to stamp NO STK and delete OEM EXCESS
+// row 133100 (XGL4020-472MEC, COILCRAFT, 44466 qty). David Poggi confirmed
+// "Cant share" on 7/1/2026 (#3907 = Forte row reference).
+function removeOemExcess_XGL4020() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+  sheet.getRange(133100, 5).setValue('NO STK ' + today);
+  sheet.deleteRow(133100);
+  Logger.log('Stamped NO STK and deleted OEM row 133100 for XGL4020-472MEC');
+}
+
 // ONE-TIME — Run addForte_ADG1606BRUZ_2v7() to add the Forte entry for Owen Dai's
 // updated $2.7 TP on ADG1606BRUZ-REEL7 (qty=943, CN). Original $2.2 entry already
 // exists at Forte row 3959. This adds a new row reflecting the raised offer.
