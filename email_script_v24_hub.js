@@ -1977,8 +1977,8 @@ function buildHomepageCard() {
     var invSectionHome = CardService.newCardSection().setHeader('📦 Inventory');
     invSectionHome.addWidget(CardService.newTextInput()
       .setFieldName('invMpn')
-      .setTitle('Remove MPN from InStock')
-      .setHint('Enter MPN of sold/shipped part')
+      .setTitle('Part Number (MPN)')
+      .setHint('Used by all buttons below')
       .setMultiline(false));
     invSectionHome.addWidget(CardService.newTextButton()
       .setText('🗑 Remove from InStock')
@@ -1987,6 +1987,34 @@ function buildHomepageCard() {
       .setOnClickAction(CardService.newAction()
         .setFunctionName('addonRemoveStock')
         .setParameters({ threadId: '' })));
+    invSectionHome.addWidget(CardService.newTextButton()
+      .setText('🗑 Remove from OEM EXCESS')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#6a1b9a')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonRemoveOEM')
+        .setParameters({})));
+    invSectionHome.addWidget(CardService.newTextButton()
+      .setText('✓ Verify OEM Removed')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1b5e20')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonVerifyOEMRemoved')
+        .setParameters({})));
+    invSectionHome.addWidget(CardService.newTextButton()
+      .setText('✓ Verify InStock Removed')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1b5e20')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonVerifyInStockRemoved')
+        .setParameters({})));
+    invSectionHome.addWidget(CardService.newTextButton()
+      .setText('📋 Quote History')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#37474f')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonQuoteHistory')
+        .setParameters({})));
     invSectionHome.addWidget(CardService.newTextButton()
       .setText('📤 Send to NetCOMPONENTS')
       .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
@@ -2173,8 +2201,8 @@ function buildContextualCard(e) {
     var invSection = CardService.newCardSection().setHeader('📦 Inventory');
     invSection.addWidget(CardService.newTextInput()
       .setFieldName('invMpn')
-      .setTitle('Remove MPN from InStock')
-      .setHint('Part sold/shipped — enter MPN to delete row')
+      .setTitle('Part Number (MPN)')
+      .setHint('Used by all buttons below')
       .setValue(invMpnHint)
       .setMultiline(false));
     invSection.addWidget(CardService.newTextButton()
@@ -2185,6 +2213,34 @@ function buildContextualCard(e) {
         .setFunctionName('addonRemoveStock')
         .setParameters({ threadId: gmailThreadId })));
     invSection.addWidget(CardService.newTextButton()
+      .setText('🗑 Remove from OEM EXCESS')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#6a1b9a')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonRemoveOEM')
+        .setParameters({})));
+    invSection.addWidget(CardService.newTextButton()
+      .setText('✓ Verify OEM Removed')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1b5e20')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonVerifyOEMRemoved')
+        .setParameters({})));
+    invSection.addWidget(CardService.newTextButton()
+      .setText('✓ Verify InStock Removed')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1b5e20')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonVerifyInStockRemoved')
+        .setParameters({})));
+    invSection.addWidget(CardService.newTextButton()
+      .setText('📋 Quote History')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#37474f')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonQuoteHistory')
+        .setParameters({})));
+    invSection.addWidget(CardService.newTextButton()
       .setText('📤 Send to NetCOMPONENTS')
       .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
       .setBackgroundColor('#1565c0')
@@ -2192,6 +2248,19 @@ function buildContextualCard(e) {
         .setFunctionName('addonSendNetCom')
         .setParameters({})));
     builder.addSection(invSection);
+
+    // ── Jiggle My Mind — diagnose why this email was missed ────────────────
+    var jiggleSection = CardService.newCardSection().setHeader('🧠 Jiggle My Mind');
+    jiggleSection.addWidget(CardService.newTextParagraph()
+      .setText('Think this email should have been drafted? Let me diagnose what went wrong.'));
+    jiggleSection.addWidget(CardService.newTextButton()
+      .setText('🧠 Diagnose This Email')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#263238')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonDiagnoseEmail')
+        .setParameters({ threadId: gmailThreadId, subject: subject, fromH: fromH })));
+    builder.addSection(jiggleSection);
 
     return [builder.build()];
   } catch(err) {
@@ -2847,6 +2916,233 @@ function addonSendNetCom(e) {
       .setNotification(CardService.newNotification().setText('❌ Error: ' + err.toString()))
       .build();
   }
+}
+
+// ── Remove MPN from OEM EXCESS ───────────────────────
+function addonRemoveOEM(e) {
+  try {
+    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+    var mpn = (formInputs.invMpn && formInputs.invMpn.stringInputs && formInputs.invMpn.stringInputs.value && formInputs.invMpn.stringInputs.value[0] || '').trim().toUpperCase();
+    if (!mpn) return notify('Enter an MPN first.');
+    UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ type: 'remove_oem_mpn', data: { mpn: mpn } }),
+      muteHttpExceptions: true
+    });
+    return notify('✅ Queued: removing ' + mpn + ' from OEM EXCESS (~5 min)');
+  } catch(err) { return notify('❌ Error: ' + err.toString()); }
+}
+
+// ── Sheet lookup helper ───────────────────────────────
+function addonSheetLookup(mpn) {
+  var resp = UrlFetchApp.fetch(HUB_URL + '/api/sheet-lookup?mpn=' + encodeURIComponent(mpn), {
+    headers: { Authorization: 'Bearer ' + HUB_SECRET },
+    muteHttpExceptions: true, followRedirects: true
+  });
+  return JSON.parse(resp.getContentText());
+}
+
+// ── Verify OEM EXCESS removed ─────────────────────────
+function addonVerifyOEMRemoved(e) {
+  try {
+    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+    var mpn = (formInputs.invMpn && formInputs.invMpn.stringInputs && formInputs.invMpn.stringInputs.value && formInputs.invMpn.stringInputs.value[0] || '').trim().toUpperCase();
+    if (!mpn) return notify('Enter an MPN first.');
+    var data = addonSheetLookup(mpn);
+    var rows = (data && data.oem_excess) || [];
+    var card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('OEM EXCESS — ' + mpn).setSubtitle(rows.length === 0 ? '✓ Removed' : '⚠ Still present'));
+    var section = CardService.newCardSection();
+    if (rows.length === 0) {
+      section.addWidget(CardService.newTextParagraph().setText('✅ ' + mpn + ' is NOT in OEM EXCESS. Successfully removed.'));
+    } else {
+      section.addWidget(CardService.newTextParagraph().setText('⚠️ ' + mpn + ' still found — ' + rows.length + ' row(s):'));
+      rows.forEach(function(r) {
+        section.addWidget(CardService.newTextParagraph().setText('Row ' + r.row + ': QTY=' + r.qty + ' | Notes=' + (r.notes || '—')));
+      });
+    }
+    card.addSection(section);
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
+  } catch(err) { return notify('❌ Error: ' + err.toString()); }
+}
+
+// ── Verify IN STOCK removed ───────────────────────────
+function addonVerifyInStockRemoved(e) {
+  try {
+    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+    var mpn = (formInputs.invMpn && formInputs.invMpn.stringInputs && formInputs.invMpn.stringInputs.value && formInputs.invMpn.stringInputs.value[0] || '').trim().toUpperCase();
+    if (!mpn) return notify('Enter an MPN first.');
+    var data = addonSheetLookup(mpn);
+    var rows = (data && data.in_stock) || [];
+    var card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('IN STOCK — ' + mpn).setSubtitle(rows.length === 0 ? '✓ Removed' : '⚠ Still present'));
+    var section = CardService.newCardSection();
+    if (rows.length === 0) {
+      section.addWidget(CardService.newTextParagraph().setText('✅ ' + mpn + ' is NOT in IN STOCK. Successfully removed.'));
+    } else {
+      section.addWidget(CardService.newTextParagraph().setText('⚠️ ' + mpn + ' still found — ' + rows.length + ' row(s):'));
+      rows.forEach(function(r) {
+        section.addWidget(CardService.newTextParagraph().setText('Row ' + r.row + ': QTY=' + r.qty + (r.notes ? ' | Notes=' + r.notes : '')));
+      });
+    }
+    card.addSection(section);
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
+  } catch(err) { return notify('❌ Error: ' + err.toString()); }
+}
+
+// ── Quote History ─────────────────────────────────────
+function addonQuoteHistory(e) {
+  try {
+    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+    var mpn = (formInputs.invMpn && formInputs.invMpn.stringInputs && formInputs.invMpn.stringInputs.value && formInputs.invMpn.stringInputs.value[0] || '').trim().toUpperCase();
+    if (!mpn) return notify('Enter an MPN first.');
+    var data = addonSheetLookup(mpn);
+    var forte = (data && data.forte_sheet) || [];
+    var oem   = (data && data.oem_excess)  || [];
+    var stock = (data && data.in_stock)    || [];
+    var card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('Quote History — ' + mpn)
+        .setSubtitle(forte.length + ' prior quote' + (forte.length !== 1 ? 's' : '') + ' in Forte'));
+    var stockParts = [];
+    if (oem.length)   stockParts.push('OEM: ' + oem.reduce(function(s,r){return s+(parseInt(r.qty)||0);},0).toLocaleString() + ' pcs');
+    if (stock.length) stockParts.push('InStock: ' + stock.reduce(function(s,r){return s+(parseInt(r.qty)||0);},0).toLocaleString() + ' pcs');
+    var stockSection = CardService.newCardSection().setHeader('Current Stock');
+    stockSection.addWidget(CardService.newTextParagraph().setText(stockParts.length ? stockParts.join(' · ') : 'Not in any sheet'));
+    card.addSection(stockSection);
+    if (!forte.length) {
+      var noSection = CardService.newCardSection();
+      noSection.addWidget(CardService.newTextParagraph().setText('No prior Forte entries found.'));
+      card.addSection(noSection);
+    } else {
+      var sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      forte.forEach(function(r) {
+        var d = new Date(r.date); var stale = isNaN(d.getTime()) || d < sixMonthsAgo;
+        var pot = (r.qty && r.buyerTP) ? '$' + (parseFloat(r.qty) * parseFloat(r.buyerTP)).toFixed(2) : '—';
+        var entrySection = CardService.newCardSection().setHeader((stale ? '⚠ STALE — ' : '') + (r.date || '—') + ' · ' + (r.status || '—'));
+        entrySection.addWidget(CardService.newTextParagraph()
+          .setText('QTY: ' + (r.qty||'—') + '  TP: ' + (r.buyerTP?'$'+r.buyerTP:'—') + '  Potential: ' + pot + '  Country: ' + (r.country||'—')));
+        card.addSection(entrySection);
+      });
+    }
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
+  } catch(err) { return notify('❌ Error: ' + err.toString()); }
+}
+
+// ── Jiggle My Mind — diagnose missed email ────────────
+function addonDiagnoseEmail(e) {
+  try {
+    var params    = e.commonEventObject.parameters;
+    var threadId  = params.threadId  || '';
+    var subject   = params.subject   || '';
+    var fromH     = params.fromH     || '';
+
+    // Read email body from thread
+    var content = '';
+    if (threadId) {
+      try {
+        var thread = GmailApp.getThreadById(threadId);
+        var msgs = thread ? thread.getMessages() : [];
+        if (msgs.length) content = stripQuotedLines(msgs[msgs.length - 1].getPlainBody()).substring(0, 800);
+      } catch(e2) {}
+    }
+
+    // Look up inventory if we can extract an MPN
+    var mpn = extractMPNFromSubject(subject) || extractMPN(subject);
+    var oem_results = [], in_stock_results = [], forte_results = [];
+    if (mpn) {
+      try {
+        var inv = addonSheetLookup(mpn);
+        oem_results      = (inv && inv.oem_excess)  || [];
+        in_stock_results = (inv && inv.in_stock)    || [];
+        forte_results    = (inv && inv.forte_sheet) || [];
+      } catch(e3) {}
+    }
+
+    // Call /api/diagnose
+    var diagResp = UrlFetchApp.fetch(HUB_URL + '/api/diagnose', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ subject: subject, sender: fromH, content: content, oem_results: oem_results, in_stock_results: in_stock_results, forte_results: forte_results }),
+      muteHttpExceptions: true
+    });
+    var result = JSON.parse(diagResp.getContentText());
+
+    var confLabel = result.confidence === 'high' ? '🟢 High' : result.confidence === 'low' ? '🔴 Low' : '🟡 Medium';
+    var card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('🧠 Diagnosis').setSubtitle(subject ? subject.substring(0,50) : 'Email'));
+    var diagSection = CardService.newCardSection().setHeader('What should have happened');
+    diagSection.addWidget(CardService.newTextParagraph().setText('Action: ' + (result.action_should_have_been || '—')));
+    diagSection.addWidget(CardService.newTextParagraph().setText('Trigger: ' + (result.trigger_responsible || '—')));
+    diagSection.addWidget(CardService.newTextParagraph().setText('Confidence: ' + confLabel));
+    diagSection.addWidget(CardService.newTextParagraph().setText('Why missed: ' + (result.reason_missed || '—')));
+    diagSection.addWidget(CardService.newTextParagraph().setText('Fix: ' + (result.fix_needed || '—')));
+    card.addSection(diagSection);
+
+    var agreeSection = CardService.newCardSection().setHeader('Your verdict');
+    agreeSection.addWidget(CardService.newTextButton()
+      .setText('✓ Agree — Log as Training')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1a7340')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonLogDiagnosis')
+        .setParameters({
+          subject: subject, fromH: fromH,
+          action: result.action_should_have_been || '',
+          trigger: result.trigger_responsible || '',
+          reason: (result.reason_missed || '').substring(0, 200),
+          agreed: 'true'
+        })));
+    agreeSection.addWidget(CardService.newTextInput()
+      .setFieldName('diagCorrection')
+      .setTitle('Or enter your correction')
+      .setHint('e.g. "Should have been bill_handle — BILL EXT part"')
+      .setMultiline(false));
+    agreeSection.addWidget(CardService.newTextButton()
+      .setText('💬 Log Correction')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#37474f')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonLogDiagnosis')
+        .setParameters({
+          subject: subject, fromH: fromH,
+          action: result.action_should_have_been || '',
+          trigger: result.trigger_responsible || '',
+          reason: (result.reason_missed || '').substring(0, 200),
+          agreed: 'false'
+        })));
+    card.addSection(agreeSection);
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
+  } catch(err) { return notify('❌ Diagnose error: ' + err.toString()); }
+}
+
+// ── Log Diagnosis / Correction ────────────────────────
+function addonLogDiagnosis(e) {
+  try {
+    var params = e.commonEventObject.parameters;
+    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+    var correction = (formInputs.diagCorrection && formInputs.diagCorrection.stringInputs && formInputs.diagCorrection.stringInputs.value && formInputs.diagCorrection.stringInputs.value[0] || '').trim();
+    var agreed = params.agreed === 'true';
+    var summary = agreed
+      ? 'Jiggle My Mind — AGREED: ' + params.action + ' missed by ' + params.trigger
+      : 'Jiggle My Mind — CORRECTION: ' + (correction || '(no text)');
+    UrlFetchApp.fetch(HUB_URL + '/api/logs', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        app_name: 'email_automation', event_type: 'training',
+        summary: summary,
+        details: JSON.stringify({ subject: params.subject, from: params.fromH, action: params.action, trigger: params.trigger, reason: params.reason, john_correction: correction || null, agreed: agreed })
+      }),
+      muteHttpExceptions: true
+    });
+    return notify('✅ ' + (agreed ? 'Agreed and logged as training data.' : 'Correction logged as training data.'));
+  } catch(err) { return notify('❌ Error: ' + err.toString()); }
 }
 
 // ── Report Issue → self-heal ─────────────────────────
