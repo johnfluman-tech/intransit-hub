@@ -1196,6 +1196,20 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
       }
     }
     var ccEmail = (action === 'bill_handle') ? BILL_EMAIL : null;
+    // Safety: replyTo must never be an @intransittech.com address — scan backwards for external buyer
+    if (!replyTo || replyTo.indexOf('intransittech.com') >= 0) {
+      for (var si = messages.length - 1; si >= 0; si--) {
+        var sf = messages[si].getFrom();
+        if (sf.indexOf('intransittech.com') < 0 && sf.indexOf('netcomponents.com') < 0 && sf.indexOf('icsource.com') < 0) {
+          replyTo = extractBuyerEmail(sf);
+          break;
+        }
+      }
+    }
+    if (!replyTo || replyTo.indexOf('intransittech.com') >= 0) {
+      hubLog('error', 'SAFETY ABORT: replyTo resolved to intransittech.com for ' + mpn + ' — no draft created');
+      return null;
+    }
     var htmlBody = origMsg ? buildDraftHTML(bodyText, origMsg) : buildSimpleHTML(bodyText);
     draftId = createThreadedDraft(replyTo, 'Re: ' + subject, htmlBody, lastMsg.getId(), threadId, ccEmail);
     var reasoning = decision.reasoning || action;
