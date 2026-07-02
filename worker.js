@@ -118,6 +118,7 @@ export default {
       if (p === '/api/sheet-lookup'  && m === 'GET')  return handleSheetLookup(url, env);
       if (p === '/api/diagnose'      && m === 'POST') return handleDiagnose(request, env);
       if (p === '/api/session-log'   && m === 'GET')  return handleSessionLog(env);
+      if (p === '/api/smart-reply'   && m === 'POST') return handleSmartReply(request, env);
 
       return json({ error: 'Not found' }, 404);
     } catch (err) {
@@ -1391,6 +1392,64 @@ Include 2-3 reply_options ordered by likelihood. Use no_bid or decline as an opt
     catch(e) {
       const m = text.match(/\{[\s\S]+\}/);
       result = m ? JSON.parse(m[0]) : { action_should_have_been: 'unknown', trigger_responsible: 'unknown', reason_missed: text, confidence: 'low', fix_needed: 'manual review' };
+    }
+    return json(result);
+  } catch(e) {
+    return json({ error: e.message }, 500);
+  }
+}
+
+// ─── /api/smart-reply POST ───────────────────────────
+// Reads full thread + inventory, generates the best reply John should send.
+async function handleSmartReply(request, env) {
+  const { subject, sender, thread_context, oem_results, in_stock_results, forte_results } = await request.json();
+  if (!thread_context && !subject) return json({ error: 'thread_context required' }, 400);
+
+  const fmt = (arr, fn) => (arr && arr.length) ? arr.map(fn).join('\n') : 'None found';
+  const oemText     = fmt(oem_results,      r => `  MPN=${r.mpn} | QTY=${r.qty} | Notes=${r.notes}`);
+  const inStockText = fmt(in_stock_results, r => `  MPN=${r.mpn} | QTY=${r.qty}`);
+  const forteText   = fmt(forte_results,    r => `  ${r.date}: QTY=${r.qty} | TP=${r.buyerTP} | Status=${r.status}`);
+
+  const prompt = `You are an expert email assistant for John Fluman at Intransit Technologies — an ISO 9001 certified OEM excess electronic components distributor in California.
+
+COMPANY RULES (follow exactly):
+- $500 minimum line value (qty × target price). If the buyer's line is below $500, decline or note the minimum.
+- If stock exists in OEM EXCESS and buyer gave a qualifying TP → MSG_CHECKING: "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
+- If buyer gave no target price → request it: "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away."
+- BILL EXT parts: forward to Bill Pratt — reply "Bill will help with this request"
+- John's style: professional, concise, no fluff
+- Do NOT include the email signature — it will be added automatically
+
+FULL EMAIL THREAD (oldest → newest):
+${thread_context || '(not provided)'}
+
+INVENTORY:
+OEM EXCESS: ${oemText}
+IN STOCK: ${inStockText}
+FORTE HISTORY (60 days): ${forteText}
+
+Based on all of the above, draft the ideal reply. Consider whether John has the part, whether a TP was given, whether the line value qualifies, whether this is a follow-up needing an update, or any other nuance visible in the thread.
+
+Return JSON only (no markdown wrapper):
+{
+  "reply_text": "complete reply body — no signature, no 'Regards John' — just the message body",
+  "action": "request_tp_500 | msg_checking | bill_handle | follow_up | no_bid | decline | custom",
+  "reasoning": "1-2 sentences on why this reply"
+}`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 800, messages: [{ role: 'user', content: prompt }] })
+    });
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    let result;
+    try { result = JSON.parse(text); }
+    catch(e) {
+      const m = text.match(/\{[\s\S]+\}/);
+      result = m ? JSON.parse(m[0]) : { reply_text: text, action: 'custom', reasoning: 'raw output' };
     }
     return json(result);
   } catch(e) {

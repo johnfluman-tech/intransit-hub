@@ -2269,6 +2269,19 @@ function buildContextualCard(e) {
         .setParameters({ threadId: gmailThreadId, subject: subject, fromH: fromH })));
     builder.addSection(jiggleSection);
 
+    // ── Smart Reply ─────────────────────────────────────────────────────────
+    var smartSection = CardService.newCardSection().setHeader('🤖 Smart Reply');
+    smartSection.addWidget(CardService.newTextParagraph()
+      .setText('AI reads the full thread + your inventory and drafts the best reply. Review it, then copy or create as draft.'));
+    smartSection.addWidget(CardService.newTextButton()
+      .setText('🤖 Generate Smart Reply')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#0d47a1')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonSmartReply')
+        .setParameters({ threadId: gmailThreadId, subject: subject, fromH: fromH })));
+    builder.addSection(smartSection);
+
     return [builder.build()];
   } catch(err) {
     return [buildAddonError(err.toString())];
@@ -3290,6 +3303,125 @@ function addonLogDiagnosis(e) {
 function addonDismissCard(e) {
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().popCard()).build();
+}
+
+// ── Smart Reply — AI generates best reply using full thread + inventory ────
+function addonSmartReply(e) {
+  try {
+    var params   = e.commonEventObject.parameters;
+    var threadId = params.threadId || '';
+    var subject  = params.subject  || '';
+    var fromH    = params.fromH    || '';
+
+    // Read ALL messages in thread for full context
+    var threadContext = '';
+    if (threadId) {
+      try {
+        var thread = GmailApp.getThreadById(threadId);
+        var msgs = thread ? thread.getMessages() : [];
+        var parts = [];
+        msgs.forEach(function(msg) {
+          var from = msg.getFrom();
+          var body = msg.getPlainBody().substring(0, 600);
+          parts.push('FROM: ' + from + '\n' + body);
+        });
+        threadContext = parts.join('\n\n---\n\n').substring(0, 3000);
+      } catch(e2) {}
+    }
+
+    // Extract MPN — handle netCOMPONENTS pipe format too
+    var mpn = '';
+    var ncPipe = subject.match(/\|\s*([A-Z0-9][A-Z0-9\-\.\/]{3,})\s*\)/i);
+    if (ncPipe) mpn = ncPipe[1];
+    else mpn = extractMPNFromSubject(subject) || extractMPN(subject) || '';
+
+    var oem_results = [], in_stock_results = [], forte_results = [];
+    if (mpn) {
+      try {
+        var inv = addonSheetLookup(mpn);
+        oem_results      = (inv && inv.oem_excess)  || [];
+        in_stock_results = (inv && inv.in_stock)    || [];
+        forte_results    = (inv && inv.forte_sheet) || [];
+      } catch(e3) {}
+    }
+
+    // Call /api/smart-reply
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/smart-reply', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        subject: subject, sender: fromH,
+        thread_context: threadContext,
+        oem_results: oem_results, in_stock_results: in_stock_results, forte_results: forte_results
+      }),
+      muteHttpExceptions: true
+    });
+    var result = JSON.parse(resp.getContentText());
+    if (result.error) return notify('Smart Reply error: ' + result.error);
+
+    var replyText = result.reply_text || '';
+    var reasoning = result.reasoning || '';
+
+    var card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader()
+        .setTitle('🤖 Smart Reply')
+        .setSubtitle((result.action || '') + (mpn ? ' — ' + mpn : '')));
+
+    if (reasoning) {
+      var reasonSection = CardService.newCardSection();
+      reasonSection.addWidget(CardService.newTextParagraph().setText('💡 ' + reasoning));
+      card.addSection(reasonSection);
+    }
+
+    var replySection = CardService.newCardSection().setHeader('Suggested reply — edit and copy:');
+    replySection.addWidget(CardService.newTextInput()
+      .setFieldName('smart_reply_body')
+      .setTitle('Reply text')
+      .setMultiline(true)
+      .setValue(replyText));
+    card.addSection(replySection);
+
+    var actSection = CardService.newCardSection();
+    actSection.addWidget(CardService.newTextButton()
+      .setText('✉ Create as Draft in Gmail')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1a7340')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonSmartReplyCreateDraft')
+        .setParameters({ threadId: threadId, subject: subject, toEmail: extractBuyerEmail(fromH) })));
+    card.addSection(actSection);
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
+  } catch(err) { return notify('❌ Smart Reply error: ' + err.toString()); }
+}
+
+// ── Smart Reply — create the draft from the (possibly edited) text ─────────
+function addonSmartReplyCreateDraft(e) {
+  try {
+    var params     = e.commonEventObject.parameters;
+    var threadId   = params.threadId   || '';
+    var subject    = params.subject    || '';
+    var toEmail    = params.toEmail    || '';
+    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+    var body = (formInputs.smart_reply_body && formInputs.smart_reply_body.stringInputs && formInputs.smart_reply_body.stringInputs.value && formInputs.smart_reply_body.stringInputs.value[0] || '').trim();
+    if (!body) return notify('No reply text — please type or generate a reply first.');
+
+    var thread = GmailApp.getThreadById(threadId);
+    if (!thread) return notify('Thread not found.');
+    var msgs = thread.getMessages();
+    var lastMsg = msgs[msgs.length - 1];
+    if (!toEmail) toEmail = extractBuyerEmail(lastMsg.getReplyTo() || lastMsg.getFrom());
+
+    var html = buildSimpleHTML(body.replace(/\n/g, '<br>'));
+    createThreadedDraft(toEmail, 'Re: ' + subject, html, threadId, lastMsg.getId());
+    hubLog('run', 'addonSmartReplyCreateDraft: draft created for ' + subject, { to: toEmail });
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().popCard())
+      .setNotification(CardService.newNotification().setText('✅ Draft created — check Gmail!'))
+      .build();
+  } catch(err) { return notify('Error creating draft: ' + err.toString()); }
 }
 
 // ── Draft Diagnosis — figure out what's wrong with an existing draft ──────
