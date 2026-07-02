@@ -47,6 +47,29 @@ function fixStanSheet_July2() {
   if (!deleted) Logger.log('Wrong BCM5338MKQM draft not found — may already be deleted');
 }
 
+// ONE-TIME — Run fixAERI_RP604K331A() to:
+//   1. Delete the wrong MOV-decline draft (r5557525408424450768) that said "7 pcs at $7/EA"
+//      The qty parser grabbed 7 from "$7 each" (price) instead of 250 from the original RFQ.
+//   2. Add correct Forte entry: RP604K331A-TR, 250 qty, $7 TP, US (Luzmaria Orozco / AERI)
+//   NOTE: msg_checking draft to Luzmaria already created manually (r6502891987470216417).
+function fixAERI_RP604K331A() {
+  // Delete wrong draft
+  var token = ScriptApp.getOAuthToken();
+  UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/r5557525408424450768', {
+    method: 'delete',
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  Logger.log('Deleted wrong MOV-decline draft r5557525408424450768 for RP604K331A-TR');
+
+  // Add Forte entry
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/2/2026', 'RP604K331A-TR', 250, 7, '', 'US',
+    '=C'+nextRow+'*D'+nextRow, '', '', '', 'Open']);
+  Logger.log('Added RP604K331A-TR to Forte row ' + nextRow + ' (250 qty, $7 TP, US)');
+}
+
 // ONE-TIME — Run removeOemExcess_XGL4020() to stamp NO STK and delete OEM EXCESS
 // row 133100 (XGL4020-472MEC, COILCRAFT, 44466 qty). David Poggi confirmed
 // "Cant share" on 7/1/2026 (#3907 = Forte row reference).

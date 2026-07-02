@@ -1031,11 +1031,14 @@ function checkInboxForTPReplies() {
       var qTagM = qBody.match(/QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)|q\.ty\s+(\d+)/i);
       if (qTagM && !qty) { var n=parseQtyValue(qTagM[1]||qTagM[2]||qTagM[3]||'', country); if(n>=1) qty=String(n); }
       // Inline quantity — iterate all "N pcs/ea/each" matches; take first whole-number result >= 1
-      // This skips decimal price values like "0.084 each" which appear before "6000 each"
+      // Skips decimal price values like "0.084 each" and price-per-unit phrases like "$7 each"
       if (!qty) {
         var qRegex = /(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)/ig;
         var qMatch;
         while ((qMatch = qRegex.exec(qBody)) !== null) {
+          // Skip if immediately preceded by $ or / — it's a unit price, not a quantity
+          var charBefore = qMatch.index > 0 ? qBody.charAt(qMatch.index - 1) : '';
+          if (charBefore === '$' || charBefore === '/') continue;
           var n = parseQtyValue(qMatch[1], country);
           if (n >= 1) { qty = String(n); break; }
         }
