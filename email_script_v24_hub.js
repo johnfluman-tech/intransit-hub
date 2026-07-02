@@ -1345,7 +1345,7 @@ function checkInboxForNewRFQs() {
   try { archiveBlockedDomains(); } catch(e) { Logger.log('archiveBlockedDomains error: ' + e); }
   var BLOCKED_DOMAINS = getBlockedDomains();
   var _blockedFromFilter = BLOCKED_DOMAINS.map(function(d){return '-from:'+d;}).join(' ');
-  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:partalert@netcomponents.com -from:david@fortetechno.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
+  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:partalert@netcomponents.com -from:david@fortetechno.com -from:steve@fortetechno.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
   var threads = GmailApp.search(query,0,10);
   hubLog('run', 'checkInboxForNewRFQs: ' + threads.length + ' thread(s)');
   if (!threads.length) return;
@@ -3845,6 +3845,7 @@ function processThreadWithAgent(thread, agentLabel) {
     if (sender.toLowerCase().indexOf(BLOCKED_DOMAINS[b]) >= 0) { thread.addLabel(agentLabel); thread.moveToArchive(); return; }
   }
   if (sender.toLowerCase().indexOf('intransittech.com') >= 0) { thread.addLabel(agentLabel); return; }
+  if (sender.toLowerCase().indexOf('fortetechno.com') >= 0) { thread.addLabel(agentLabel); return; }
 
   var mpn = extractMPNFromSubject(subject) || extractMPN(subject);
   var lastMsg = messages[messages.length - 1];

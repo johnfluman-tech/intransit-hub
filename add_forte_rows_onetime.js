@@ -47,6 +47,18 @@ function fixStanSheet_July2() {
   if (!deleted) Logger.log('Wrong BCM5338MKQM draft not found — may already be deleted');
 }
 
+// ONE-TIME — Run addForte_ADG1606BRUZ_2v7() to add the Forte entry for Owen Dai's
+// updated $2.7 TP on ADG1606BRUZ-REEL7 (qty=943, CN). Original $2.2 entry already
+// exists at Forte row 3959. This adds a new row reflecting the raised offer.
+function addForte_ADG1606BRUZ_2v7() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/2/2026', 'ADG1606BRUZ-REEL7', 943, 2.7, '', 'CN',
+    '=C'+nextRow+'*D'+nextRow, '', '', '', 'Open']);
+  Logger.log('Added ADG1606BRUZ-REEL7 $2.7 TP to Forte row ' + nextRow);
+}
+
 // ONE-TIME — Run updateStanQTY_June29() to fill in the missing QTY column for
 // the 3 Warehouse#3 parts added to Stan's RFQ sheet on 6/29/2026 (rows 324-326).
 // Quantities pulled from IN STOCK sheet: EP3SL150F780I3N=408, XC2S200E6FTG256C=120, EL4390CM=125
