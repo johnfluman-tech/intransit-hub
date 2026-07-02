@@ -706,6 +706,7 @@ Do NOT try to re-extract TgtPrice or QtyReq from the messy plain text below — 
 6. Sender @intransittech.com → no_action. EXCEPTION: if sender is bill.pratt@intransittech.com AND message body contains "@John" AND an MPN → remove_oem (set buyer_email = "bill.pratt@intransittech.com", draft confirms removal to Bill). Bill uses this pattern to tell John to remove a part from OEM EXCESS/NetComp.
 6b. Sender is Stan@amorelectronics.com (any @amorelectronics.com address) → no_action. Stan operates Intransit's Warehouse#3; his emails to John are internal W3 stock check-ins and RFQ list updates, not customer RFQs from new buyers. Never add_to_stan or reply based on Stan's own emails.
 7. forte_results has entry within 60 days → forte_entry: null (no duplicate Forte row). IMPORTANT: this only suppresses the Forte entry — still choose the correct action (msg_checking, request_tp, etc.) and still create the draft as normal. A 60-day duplicate does NOT mean no_action.
+7b. prior_quotes is historical context only — NEVER use it to decide no_action. A prior TP request or msg_checking sent to the same buyer for the same MPN does NOT mean no_action. The buyer re-submitted the RFQ and needs a new response now. Apply the decision rules to the CURRENT thread state regardless of prior quote history.
 8. forte_entry only set when action=msg_checking AND qty AND target_price both known.
 9. Never invent qty or TP — only use what buyer explicitly stated.
 10. Country: 2-letter ISO from buyer's address. CN=China, CA=Canada, US=USA, NL=Netherlands, etc.

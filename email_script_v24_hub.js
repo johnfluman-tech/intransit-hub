@@ -3876,6 +3876,13 @@ function processThreadWithAgent(thread, agentLabel) {
     }
   }
 
+  // If oem-rfq-incoming-processed is on the thread, Trigger 3 already owns it — skip to prevent race/duplicate
+  var liveLabels = thread.getLabels().map(function(l){ return l.getName(); });
+  if (liveLabels.indexOf('oem-rfq-incoming-processed') >= 0) {
+    thread.addLabel(agentLabel);
+    return;
+  }
+
   thread.addLabel(agentLabel);
   var _rfqIncomingLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
   thread.addLabel(_rfqIncomingLabel);
