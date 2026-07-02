@@ -3047,18 +3047,25 @@ function addonDiagnoseEmail(e) {
     var subject   = params.subject   || '';
     var fromH     = params.fromH     || '';
 
-    // Read email body from thread
+    // Read email body from thread (full body, not stripped — stripping can hide context)
     var content = '';
     if (threadId) {
       try {
         var thread = GmailApp.getThreadById(threadId);
         var msgs = thread ? thread.getMessages() : [];
-        if (msgs.length) content = stripQuotedLines(msgs[msgs.length - 1].getPlainBody()).substring(0, 800);
+        if (msgs.length) {
+          var raw = msgs[msgs.length - 1].getPlainBody();
+          content = raw.substring(0, 1000);
+        }
       } catch(e2) {}
     }
 
-    // Look up inventory if we can extract an MPN
-    var mpn = extractMPNFromSubject(subject) || extractMPN(subject);
+    // Extract MPN — handle netCOMPONENTS "Company | MPN)" format first
+    var mpn = '';
+    var ncPipe = subject.match(/\|\s*([A-Z0-9][A-Z0-9\-\.\/]{3,})\s*\)/i);
+    if (ncPipe) mpn = ncPipe[1];
+    else mpn = extractMPNFromSubject(subject) || extractMPN(subject) || '';
+
     var oem_results = [], in_stock_results = [], forte_results = [];
     if (mpn) {
       try {
@@ -3079,37 +3086,76 @@ function addonDiagnoseEmail(e) {
     var result = JSON.parse(diagResp.getContentText());
 
     var confLabel = result.confidence === 'high' ? '🟢 High' : result.confidence === 'low' ? '🔴 Low' : '🟡 Medium';
+    var options = result.reply_options || [];
+    var needsScript = result.needs_script_change === true;
+    var scriptNote = result.script_change_note || '';
+
     var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle('🧠 Diagnosis').setSubtitle(subject ? subject.substring(0,50) : 'Email'));
-    var diagSection = CardService.newCardSection().setHeader('What should have happened');
-    diagSection.addWidget(CardService.newTextParagraph().setText('Action: ' + (result.action_should_have_been || '—')));
-    diagSection.addWidget(CardService.newTextParagraph().setText('Trigger: ' + (result.trigger_responsible || '—')));
-    diagSection.addWidget(CardService.newTextParagraph().setText('Confidence: ' + confLabel));
+      .setHeader(CardService.newCardHeader().setTitle('🧠 Jiggle My Mind').setSubtitle(mpn || subject.substring(0,40)));
+
+    // Analysis — brief
+    var diagSection = CardService.newCardSection().setHeader('Analysis — ' + confLabel);
+    diagSection.addWidget(CardService.newTextParagraph().setText('Should be: ' + (result.action_should_have_been || '—')));
     diagSection.addWidget(CardService.newTextParagraph().setText('Why missed: ' + (result.reason_missed || '—')));
-    diagSection.addWidget(CardService.newTextParagraph().setText('Fix: ' + (result.fix_needed || '—')));
+    if (needsScript) {
+      diagSection.addWidget(CardService.newTextParagraph().setText('⚠️ Code fix needed: ' + scriptNote));
+    }
     card.addSection(diagSection);
 
-    var agreeSection = CardService.newCardSection().setHeader('Your verdict');
-    agreeSection.addWidget(CardService.newTextButton()
-      .setText('✓ Agree — Log as Training')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#1a7340')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonLogDiagnosis')
-        .setParameters({
-          subject: subject, fromH: fromH,
-          action: result.action_should_have_been || '',
-          trigger: result.trigger_responsible || '',
-          reason: (result.reason_missed || '').substring(0, 200),
-          agreed: 'true'
-        })));
-    agreeSection.addWidget(CardService.newTextInput()
+    // Reply options — one section per option with preview + button
+    if (options.length) {
+      var optSection = CardService.newCardSection().setHeader('Choose the correct reply:');
+      options.forEach(function(opt, i) {
+        var preview = (opt.draft || '(No reply sent)').substring(0, 130);
+        if ((opt.draft || '').length > 130) preview += '…';
+        optSection.addWidget(CardService.newTextParagraph().setText((i === 0 ? '▶ ' : '  ') + (opt.label || opt.action) + '\n"' + preview + '"'));
+        if (opt.action !== 'no_bid' && opt.action !== 'decline' && opt.draft && opt.draft !== '(No reply sent)') {
+          optSection.addWidget(CardService.newTextButton()
+            .setText('✓ Use: ' + (opt.label || opt.action))
+            .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+            .setBackgroundColor('#1a7340')
+            .setOnClickAction(CardService.newAction()
+              .setFunctionName('addonUseReplyOption')
+              .setParameters({
+                threadId: threadId, subject: subject, fromH: fromH,
+                action: opt.action || '',
+                optLabel: (opt.label || opt.action).substring(0, 80),
+                draft: (opt.draft || '').substring(0, 500),
+                diagAction: result.action_should_have_been || '',
+                diagReason: (result.reason_missed || '').substring(0, 200),
+                needsScript: needsScript ? 'true' : 'false',
+                scriptNote: scriptNote.substring(0, 200)
+              })));
+        } else {
+          optSection.addWidget(CardService.newTextButton()
+            .setText('✓ Log: No reply sent')
+            .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+            .setBackgroundColor('#37474f')
+            .setOnClickAction(CardService.newAction()
+              .setFunctionName('addonLogDiagnosis')
+              .setParameters({
+                subject: subject, fromH: fromH,
+                action: opt.action || result.action_should_have_been || '',
+                trigger: result.trigger_responsible || '',
+                reason: (result.reason_missed || '').substring(0, 200),
+                agreed: 'true',
+                needsScript: needsScript ? 'true' : 'false',
+                scriptNote: scriptNote.substring(0, 200)
+              })));
+        }
+      });
+      card.addSection(optSection);
+    }
+
+    // Correction fallback
+    var corrSection = CardService.newCardSection().setHeader('Or — enter your own correction:');
+    corrSection.addWidget(CardService.newTextInput()
       .setFieldName('diagCorrection')
-      .setTitle('Or enter your correction')
-      .setHint('e.g. "Should have been bill_handle — BILL EXT part"')
+      .setTitle('What should have happened?')
+      .setHint('e.g. "Should have been request_tp_500 — BCM5338 is in OEM EXCESS"')
       .setMultiline(false));
-    agreeSection.addWidget(CardService.newTextButton()
-      .setText('💬 Log Correction')
+    corrSection.addWidget(CardService.newTextButton()
+      .setText('💬 Log Correction as Training')
       .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
       .setBackgroundColor('#37474f')
       .setOnClickAction(CardService.newAction()
@@ -3119,37 +3165,131 @@ function addonDiagnoseEmail(e) {
           action: result.action_should_have_been || '',
           trigger: result.trigger_responsible || '',
           reason: (result.reason_missed || '').substring(0, 200),
-          agreed: 'false'
+          agreed: 'false',
+          needsScript: needsScript ? 'true' : 'false',
+          scriptNote: scriptNote.substring(0, 200)
         })));
-    card.addSection(agreeSection);
+    card.addSection(corrSection);
 
     return CardService.newActionResponseBuilder()
       .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
   } catch(err) { return notify('❌ Diagnose error: ' + err.toString()); }
 }
 
-// ── Log Diagnosis / Correction ────────────────────────
+// ── Use a reply option — create the draft, then show training confirmation ─
+function addonUseReplyOption(e) {
+  try {
+    var params   = e.commonEventObject.parameters;
+    var threadId = params.threadId || '';
+    var subject  = params.subject  || '';
+    var fromH    = params.fromH    || '';
+    var draft    = params.draft    || '';
+    var action   = params.action   || '';
+    var optLabel = params.optLabel || action;
+
+    // Create draft reply in thread
+    var thread = GmailApp.getThreadById(threadId);
+    if (!thread) return notify('Thread not found.');
+    var msgs = thread.getMessages();
+    var lastMsg = msgs[msgs.length - 1];
+    var toEmail = fromH || lastMsg.getReplyTo() || lastMsg.getFrom();
+    toEmail = extractBuyerEmail(toEmail);
+
+    var sig = buildJohnSignatureHtml();
+    var html = buildSimpleHTML(draft.replace(/\n/g, '<br>'));
+    createThreadedDraft(toEmail, 'Re: ' + subject, html, threadId, lastMsg.getId());
+
+    // Show training confirmation card
+    var card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('✅ Draft Created').setSubtitle(optLabel));
+    var confirmSection = CardService.newCardSection().setHeader('Log as training?');
+    confirmSection.addWidget(CardService.newTextParagraph().setText('Draft created using: ' + optLabel + '\n\nSave this as training so the worker learns from it?'));
+    confirmSection.addWidget(CardService.newTextButton()
+      .setText('✓ Yes — Save to Worker Memory')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1a7340')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonLogDiagnosis')
+        .setParameters({
+          subject: subject, fromH: fromH,
+          action: action,
+          trigger: '',
+          reason: params.diagReason || '',
+          agreed: 'true',
+          needsScript: params.needsScript || 'false',
+          scriptNote: params.scriptNote || ''
+        })));
+    confirmSection.addWidget(CardService.newTextButton()
+      .setText('✗ Skip — Draft only')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonDismissCard')
+        .setParameters({})));
+    card.addSection(confirmSection);
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
+  } catch(err) { return notify('Error creating draft: ' + err.toString()); }
+}
+
+// ── Log Diagnosis / Correction + save to worker memory on the fly ─────────
 function addonLogDiagnosis(e) {
   try {
     var params = e.commonEventObject.parameters;
     var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
     var correction = (formInputs.diagCorrection && formInputs.diagCorrection.stringInputs && formInputs.diagCorrection.stringInputs.value && formInputs.diagCorrection.stringInputs.value[0] || '').trim();
     var agreed = params.agreed === 'true';
+    var finalAction = agreed ? (params.action || '') : (correction || params.action || '');
+    var needsScript = params.needsScript === 'true';
+    var scriptNote = params.scriptNote || '';
+
     var summary = agreed
-      ? 'Jiggle My Mind — AGREED: ' + params.action + ' missed by ' + params.trigger
+      ? 'Jiggle My Mind — AGREED: ' + params.action + ' missed'
       : 'Jiggle My Mind — CORRECTION: ' + (correction || '(no text)');
+
+    // 1. Log to hub
     UrlFetchApp.fetch(HUB_URL + '/api/logs', {
       method: 'POST', contentType: 'application/json',
       headers: { Authorization: 'Bearer ' + HUB_SECRET },
       payload: JSON.stringify({
         app_name: 'email_automation', event_type: 'training',
         summary: summary,
-        details: JSON.stringify({ subject: params.subject, from: params.fromH, action: params.action, trigger: params.trigger, reason: params.reason, john_correction: correction || null, agreed: agreed })
+        details: JSON.stringify({ subject: params.subject, from: params.fromH, action: finalAction, trigger: params.trigger, reason: params.reason, john_correction: correction || null, agreed: agreed, needs_script_change: needsScript })
       }),
       muteHttpExceptions: true
     });
-    return notify('✅ ' + (agreed ? 'Agreed and logged as training data.' : 'Correction logged as training data.'));
+
+    // 2. Save to worker AI memory so it applies on the next email decision
+    var memSlug = 'training-' + (finalAction || 'correction').replace(/[^a-z0-9]/gi, '-').toLowerCase() + '-' + new Date().getTime();
+    var memBody = 'John corrected the automation:\n'
+      + 'Subject: ' + (params.subject || '') + '\n'
+      + 'From: ' + (params.fromH || '') + '\n'
+      + 'Correct action: ' + finalAction + '\n'
+      + 'Why missed: ' + (params.reason || '') + '\n'
+      + (correction ? 'John\'s note: ' + correction : '');
+    UrlFetchApp.fetch(HUB_URL + '/api/memory', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({
+        slug: memSlug,
+        description: 'Training: ' + (params.subject || '').substring(0, 80) + ' → ' + finalAction,
+        type: 'training',
+        body: memBody
+      }),
+      muteHttpExceptions: true
+    });
+
+    var msg = '✅ Saved to worker memory — agent will use this on next email.';
+    if (needsScript && scriptNote) {
+      msg += '\n\n⚠️ Apps Script update also needed:\n' + scriptNote;
+    }
+    return notify(msg);
   } catch(err) { return notify('❌ Error: ' + err.toString()); }
+}
+
+// ── Dismiss card helper ───────────────────────────────
+function addonDismissCard(e) {
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().popCard()).build();
 }
 
 // ── Draft Diagnosis — figure out what's wrong with an existing draft ──────

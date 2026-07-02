@@ -1355,6 +1355,12 @@ KNOWN BUGS FIXED AS OF 2026-07-01 (commit 7ee5146):
 - extractTargetPrice now handles "25/30$ each" slash-range format
 - qty extraction now handles "q.ty 5" format
 
+STANDARD REPLY TEMPLATES (use exact wording in reply_options drafts):
+- request_tp_500: "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away."
+- msg_checking: "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
+- bill_handle: "Bill will help with this request"
+- no_bid/decline: (no reply — silence is the no-bid; or a brief "we are not able to help with this at this time")
+
 Based on the email above, reason step-by-step about what should have happened and why it was missed.
 Return valid JSON only (no markdown wrapper):
 {
@@ -1362,8 +1368,15 @@ Return valid JSON only (no markdown wrapper):
   "trigger_responsible": "Trigger 3 | Trigger 4 | Trigger 7 | Trigger 8 | none",
   "reason_missed": "1-2 sentence plain English — be specific about the label state or parsing bug",
   "confidence": "high | medium | low",
-  "fix_needed": "what code or manual action fixes this, or Already fixed in 7ee5146 if it matches a known bug"
-}`;
+  "fix_needed": "what code or manual action fixes this, or Already fixed in 7ee5146 if it matches a known bug",
+  "reply_options": [
+    { "action": "request_tp_500", "label": "Request TP ($500 MOV)", "draft": "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away." },
+    { "action": "msg_checking",   "label": "MSG_CHECKING",           "draft": "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity." }
+  ],
+  "needs_script_change": false,
+  "script_change_note": ""
+}
+Include 2-3 reply_options ordered by likelihood. Use no_bid or decline as an option when appropriate (draft = "(No reply sent)"). Set needs_script_change=true only when the fix requires editing Apps Script code (new pattern, trigger logic change, domain rule, etc.) — not for one-off email issues.`;
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
