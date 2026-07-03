@@ -739,6 +739,20 @@ function removeOem_K471K15X7RF5UH5_Jul3() {
   Logger.log('Stamped Forte row 3981 K471K15X7RF5UH5 → NO STK - 7/3/2026');
 }
 
+// ONE-TIME — Run addForte_PVA1OAH21_Jul3()
+// LAYTEC DESIGN & CONSULTING INC (ikalman@laytec.com) — website RFQ 7/3/2026
+// PVA1OAH21.2NV2;PVA1OAH2SNA, 2200 qty, TP $0.60, Canada
+// Automation missed: semicolon in MPN broke extractor → empty oem_results → no_bid
+// msg_checking draft r2099275116509180978 created manually.
+function addForte_PVA1OAH21_Jul3() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/3/2026', 'PVA1OAH21.2NV2;PVA1OAH2SNA', 2200, 0.60, '', 'CA',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte: PVA1OAH21.2NV2;PVA1OAH2SNA qty=2200 TP=0.60 CA');
+}
+
 // ── One-time: remove oem-rfq-incoming-processed from David threads stuck by Trigger 3 bug ──
 // Run once after pasting the fixed script. Trigger 7 will then pick them up on next 5-min cycle.
 function unlabelStuckDavidThreads() {

@@ -378,6 +378,12 @@ function extractMPNFromBody(body) {
 
 function extractMPNFromRFQBody(body) {
   if (!body) return null;
+  // IC Source "Request for Quote from your Website" format:
+  // table header: Quantity    Part Number    Mfg    Date Code    List Price    Req Unit Price    Total Price
+  // data row:     2200        PVA1OAH21.2NV2;PVA1OAH2SNA    ITT Corpo    ...
+  // MPN may contain semicolons (alternate PN) and dots — split on first semicolon and return first part.
+  var icsWebMatch = body.match(/Part\s+Number\s+Mfg[\s\S]*?\n\s*(\d[\d,]*)\s+([A-Za-z0-9][A-Za-z0-9\.\-\/]{3,})/i);
+  if (icsWebMatch && icsWebMatch[2]) return icsWebMatch[2].trim().split(';')[0].trim();
   // Abacus "REQUEST FOR QUOTE FROM" format: table with columns LN# | QUOTE NO | QTY | DESCRIPTION | MFR
   // The DESCRIPTION column contains the MPN — skip columns by looking for the data row after the header
   var abacusMatch = body.match(/LN#[\s\t]+QUOTE\s*NO[\s\t]+[\s\S]*?DESCRIPTION[\s\S]*?\n([\s\S]*?)(?:\n\n|\n[A-Z])/i);
@@ -1352,6 +1358,11 @@ function checkInboxForNewRFQs() {
     if (!tp) {
       var bodyBeforeListing = fullBody.split('OEM EXCESS')[0];
       tp = extractTargetPrice(bodyBeforeListing) || extractTargetPrice(subject.split('|')[0]);
+    }
+    // IC Source website table: "Req Unit Price    .60" — plain decimal without $ sign
+    if (!tp) {
+      var icsWebTpMatch = fullBody.match(/Req(?:uested)?\s+Unit\s+Price[\s\S]*?\n[^\n]*?\s+([\d]+\.[\d]+|\.[\d]+)\s/i);
+      if (icsWebTpMatch) tp = icsWebTpMatch[1];
     }
 
     var qty = '';
