@@ -608,6 +608,7 @@ function fixBillExtForteErrors() {
 //   r-4586403387947820516 — NRF52833-QIAA-R (old, body unknown; new request_tp_500 draft r-4410992122938450026 created)
 //   r1716529454449499559 — BAS4002ARPPE6327 (old, body unknown; new msg_checking draft r-6402756441308139034 created)
 //   r-1733567911978935294 — BCM56980B0KFSBG msg_checking (David confirmed "Cant find" 7/3/2026 — do NOT send to buyer)
+//   r-3837120187750311243 — DTMH04-3PA msg_checking (stephen@haleinst.com) — wrong; OEM EXCESS + no TP = no_bid, never msg_checking
 function deleteOldWrongDrafts_Jul3() {
   var token = ScriptApp.getOAuthToken();
   var toDelete = [
@@ -615,6 +616,7 @@ function deleteOldWrongDrafts_Jul3() {
     'r-4586403387947820516',
     'r1716529454449499559',
     'r-1733567911978935294',
+    'r-3837120187750311243',
   ];
   toDelete.forEach(function(draftId) {
     try {
@@ -643,18 +645,6 @@ function addForte_BAS4002ARPPE6327() {
   Logger.log('Added BAS4002ARPPE6327 to Forte row ' + nextRow + ' (12204 qty, no TP, CN)');
 }
 
-// ONE-TIME — Run addForte_DTMH04_3PA_Stephen() to add Forte entry for Stephen at HALE Instruments.
-// Subject was just "RFQ" — automation couldn't extract MPN, fell to no_action.
-// OEM has 182 qty (row 78552, TE Connectivity). Buyer wants 1500, no TP given.
-// msg_checking draft r-3837120187750311243 created manually 7/3/2026.
-function addForte_DTMH04_3PA_Stephen() {
-  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
-  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var nextRow = sheet.getLastRow() + 1;
-  sheet.appendRow(['7/3/2026', 'DTMH04-3PA', 1500, '', '', 'GB',
-    '', '', '', '', 'Open']);
-  Logger.log('Added DTMH04-3PA to Forte row ' + nextRow + ' (1500 qty, no TP, GB — HALE Instruments)');
-}
 
 // ONE-TIME — Run processAllDavidNoStk_Jul3() to process 12 David no-stk/cant-find
 // emails received 2026-07-03. Performs:

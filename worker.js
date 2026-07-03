@@ -649,12 +649,10 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 - stan_quoted: Part IS in in_stock_results where notes contain "Warehouse#3" AND stan_results has a QUOTED entry → reply using Stan's exact colB + colC text verbatim — do NOT reformat or rebuild. See STAN QUOTED draft format below.
 - add_to_stan: Part IS in in_stock_results with Warehouse#3 rows AND stan_results is empty or not QUOTED → add to Stan sheet AND send buyer a checking draft (see ADD TO STAN draft format below).
 - msg_checking: Part IS in oem_results with at least one non-BILL-EXT row, buyer gave TP → draft checking reply + Forte entry. Regular OEM rows take priority over BILL EXT rows.
-- request_tp_500: Part IS in oem_results, buyer gave NO TP → ask for TP ($500 min). Default when no TP given, even when all OEM rows are BILL EXT.
-- request_tp_2000: Part IS in oem_results, buyer gave NO TP, at least one NON-BILL-EXT OEM row's notes literally contain "$2000" or "$2,000" → ask for TP ($2,000 min). Only non-BILL-EXT rows count for the $2,000 check — BILL EXT rows are ignored.
 - bill_handle: Part IS in oem_results, ALL rows have "BILL EXT" in notes (no non-BILL-EXT rows exist), AND buyer explicitly stated their own target price (a dollar amount they will pay) → "Bill will help with this request" CC bill.pratt@intransittech.com. NEVER use bill_handle when buyer has not given an explicit TP.
 
 BILL EXT DEFINITION: A row is BILL EXT if its OEM notes field starts with or contains "BILL EXT" — this includes "BILL EXT 117", "BILL EXT 234", "BILL EXT 99 - OEM EXCESS! $500 MIN TP REQUIRED", etc. The number after "BILL EXT" is an internal code reference, not part of the classification. Any note containing "BILL EXT" as a prefix followed by anything (a number, a dash, more text) is a BILL EXT row. A note like "OEM EXCESS! $500 MIN TP REQUIRED" with NO "BILL EXT" prefix is NOT a BILL EXT row.
-- no_bid: Part not found in any inventory (oem_results AND in_stock_results both empty) → silent, no draft.
+- no_bid: (a) Part not found in any inventory (oem_results AND in_stock_results both empty), OR (b) Part IS in oem_results but buyer gave NO TP → silent, no draft. OEM EXCESS requires a buyer target price; without one we do not pursue.
 - remove_oem: (1) Email from David saying part has no stock → reply confirming removal. MPN format: "[MPN] #[num]" → before #; "#[num] [MPN]" → after #. NEVER use the issue number as MPN. (2) Email from bill.pratt@intransittech.com with "@John" + MPN → remove from OEM EXCESS and confirm to Bill. Set buyer_email = "bill.pratt@intransittech.com" so the draft goes to Bill, not the buyer.
 - no_action: Internal thread, cancellation notice, Warehouse#3 operator email (Stan@amorelectronics.com), or already has "checking on it now" from John.
 - forward_deb: Payment advice / remittance from a bank or ERP → forward to deb@intransittech.com.
@@ -664,7 +662,7 @@ If the THREAD CONTENT starts with a line like:
   [PARSED_RFQ: QtyReq=1000, TgtPrice=1.00]
 …this was extracted from the HTML table by the Apps Script parser and is 100% accurate. Use it directly:
 - TgtPrice=<number> → buyer gave TP equal to that number (positive = valid TP, treat as msg_checking or bill_handle as applicable)
-- TgtPrice=blank → buyer gave NO TP (treat as request_tp_500 or request_tp_2000)
+- TgtPrice=blank → buyer gave NO TP → no_bid (OEM EXCESS requires buyer TP; without one we do not pursue)
 - QtyReq=<number> → buyer requested that quantity
 Do NOT try to re-extract TgtPrice or QtyReq from the messy plain text below — the Apps Script already did it correctly. The plain text from netCOMPONENTS collapses table columns together (e.g. "XFL4030-472MECCOIL1.00273810001.00") making values unreliable to parse. Trust [PARSED_RFQ] unconditionally.
 
@@ -677,7 +675,7 @@ IMPORTANT MPN MATCHING: in_stock_results may contain fuzzy MPN matches (e.g., "L
 2. oem_results AND in_stock_results both empty → no_bid.
 3. oem_results present + buyer gave TP + at least one non-BILL-EXT row → msg_checking. (Regular OEM rows take priority; BILL EXT rows in same result are irrelevant.)
 3b. oem_results present + buyer gave TP (explicit dollar amount) + ALL rows are BILL EXT (zero non-BILL-EXT rows) → bill_handle. A row is BILL EXT if its notes contain "BILL EXT" anywhere — "BILL EXT 117 - OEM EXCESS! $500 MIN TP REQUIRED" IS a BILL EXT row. Classify each row by whether its notes contain "BILL EXT"; if ALL rows qualify → bill_handle (when buyer TP given).
-4. oem_results present + NO TP → request_tp_500 by default. This includes when all rows are BILL EXT but buyer gave no TP. bill_handle NEVER fires without an explicit buyer TP. Exception: if at least one NON-BILL-EXT OEM row's notes contain "$2000" or "$2,000" → request_tp_2000 instead of request_tp_500.
+4. oem_results present + NO TP → no_bid. OEM EXCESS requires a buyer target price to proceed; without one we do not pursue. bill_handle NEVER fires without an explicit buyer TP.
 5. Thread already has "We are checking on it now" from John → no_action.
 6. Sender @intransittech.com → no_action. EXCEPTION: if sender is bill.pratt@intransittech.com AND message body contains "@John" AND an MPN → remove_oem (set buyer_email = "bill.pratt@intransittech.com", draft confirms removal to Bill). Bill uses this pattern to tell John to remove a part from OEM EXCESS/NetComp.
 6b. Sender is Stan@amorelectronics.com (any @amorelectronics.com address) → no_action. Stan operates Intransit's Warehouse#3; his emails to John are internal W3 stock check-ins and RFQ list updates, not customer RFQs from new buyers. Never add_to_stan or reply based on Stan's own emails.
@@ -967,11 +965,11 @@ PARSED DATA (authoritative — trust over plain text):
 If thread_content starts with "[PARSED_RFQ: QtyReq=..., TgtPrice=...]" this was extracted from the HTML table by the Apps Script parser and is 100% accurate. TgtPrice=<positive number> means buyer DID give TP. TgtPrice=blank means buyer gave NO TP. Do NOT try to re-extract from the garbled plain text — trust [PARSED_RFQ] unconditionally when present.
 
 KEY RULES TO VERIFY:
-1. ACTION: own_stock if non-Warehouse#3 in_stock rows exist. msg_checking if OEM + buyer TP + at least one non-BILL-EXT row. request_tp_500 if OEM + no buyer TP (default). request_tp_2000 if OEM + no buyer TP + at least one NON-BILL-EXT row has "$2000"/"$2,000" in its notes. bill_handle ONLY if ALL OEM rows are BILL EXT AND buyer gave an explicit dollar TP. no_bid if nothing in any inventory. add_to_stan if W3-only + not quoted.
+1. ACTION: own_stock if non-Warehouse#3 in_stock rows exist. msg_checking if OEM + buyer TP + at least one non-BILL-EXT row. no_bid if OEM + NO buyer TP — OEM EXCESS requires a buyer TP; without one it is a no_bid NOT request_tp. bill_handle ONLY if ALL OEM rows are BILL EXT AND buyer gave an explicit dollar TP. no_bid if nothing in any inventory. add_to_stan if W3-only + not quoted.
 2. buyer_email: NEVER messagesend@netcomponents.com, autosend@icsource.com, OR any @intransittech.com address (including john.fluman@intransittech.com). The draft goes to the EXTERNAL buyer — never to John or anyone internal. If sender field contains an intransittech.com address, that means the parser got the wrong email — extract the real buyer from "RFQ From: Name (email)" in thread_content.
-3. forte_entry: ONLY valid for msg_checking, AND only when BOTH qty AND target_price are real known buyer values. qty = buyer's QtyReq (NOT QtyListed — that is the listed stock qty). target_price = buyer's TgtPrice dollar value (NOT text from the Description field such as "$500 MIN TP REQUIRED" — that phrase is our listing descriptor, not the buyer's price). If forte_entry is present but qty or target_price came from the listing rather than the buyer → forte_entry is WRONG. ALSO: if buyer gave NO explicit dollar TP (TgtPrice blank/0/NA, or buyer only asked for a quote), action MUST be request_tp_500 or request_tp_2000, NEVER msg_checking. msg_checking with no buyer TP is always WRONG. CONVERSELY: if the netCOMPONENTS TgtPrice column shows a positive number (e.g., 3, 15, 7500), the buyer DID give a TP — action MUST be msg_checking (or bill_handle if all BILL EXT), NEVER request_tp_500 or request_tp_2000. request_tp when buyer gave an explicit TgtPrice is always WRONG.
+3. forte_entry: ONLY valid for msg_checking, AND only when BOTH qty AND target_price are real known buyer values. qty = buyer's QtyReq (NOT QtyListed — that is the listed stock qty). target_price = buyer's TgtPrice dollar value (NOT text from the Description field such as "$500 MIN TP REQUIRED" — that phrase is our listing descriptor, not the buyer's price). If forte_entry is present but qty or target_price came from the listing rather than the buyer → forte_entry is WRONG. ALSO: if buyer gave NO explicit dollar TP (TgtPrice blank/0/NA, or buyer only asked for a quote), action MUST be no_bid, NEVER msg_checking or request_tp. msg_checking with no buyer TP is always WRONG. request_tp_500/2000 with OEM EXCESS and no TP is also WRONG — correct action is no_bid. CONVERSELY: if the netCOMPONENTS TgtPrice column shows a positive number (e.g., 3, 15, 7500), the buyer DID give a TP — action MUST be msg_checking (or bill_handle if all BILL EXT), NEVER request_tp_500 or request_tp_2000. request_tp when buyer gave an explicit TgtPrice is always WRONG.
 4. No forte_entry for request_tp, bill_handle, no_bid, own_stock, stan_quoted, add_to_stan.
-5. BILL EXT: A row IS BILL EXT if its notes contain "BILL EXT" anywhere — including "BILL EXT 117", "BILL EXT 234 - OEM EXCESS! $500 MIN TP REQUIRED", etc. The trailing number or text does not change the classification. If ALL OEM rows are BILL EXT and buyer gave explicit TP → bill_handle is CORRECT. If even one row has no "BILL EXT" in notes → msg_checking or request_tp, not bill_handle. BILL EXT flow: (1) No buyer TP → request_tp_500 is CORRECT; (2) Buyer gave TP + all BILL EXT → bill_handle is CORRECT. For bill_handle: draft goes to buyer (external email) with CC to bill.pratt@intransittech.com — NEVER the other way around. Never msg_checking for all-BILL-EXT parts even when buyer gives TP.
+5. BILL EXT: A row IS BILL EXT if its notes contain "BILL EXT" anywhere — including "BILL EXT 117", "BILL EXT 234 - OEM EXCESS! $500 MIN TP REQUIRED", etc. The trailing number or text does not change the classification. If ALL OEM rows are BILL EXT and buyer gave explicit TP → bill_handle is CORRECT. If even one row has no "BILL EXT" in notes → msg_checking or request_tp, not bill_handle. BILL EXT flow: (1) No buyer TP → no_bid is CORRECT (OEM EXCESS requires TP; without one = no bid, never request_tp); (2) Buyer gave TP + all BILL EXT → bill_handle is CORRECT. For bill_handle: draft goes to buyer (external email) with CC to bill.pratt@intransittech.com — NEVER the other way around. Never msg_checking for all-BILL-EXT parts even when buyer gives TP.
 6. draft_body templates must match exactly: msg_checking="We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity." request_tp_500="We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away." request_tp_2000="We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away."
 
 Return ONLY valid JSON:
@@ -1245,8 +1243,8 @@ FORTE HISTORY (60d): ${forteText}
 AUTOMATION RULES:
 - $500 MOV: qty×TP must be ≥$500 to send msg_checking. Below → decline.
 - BILL EXT parts: forward to Bill after buyer gives TP — never add to Forte, never MSG_CHECKING
-- request_tp_500: sent when buyer gives no TP; we ask for target price + note $500 minimum
-- msg_checking: sent when TP qualifies — "We are checking on it now..."
+- OEM EXCESS + no buyer TP → no_bid (silent). We do NOT ask for TP on OEM parts; without a target price it is a no bid.
+- msg_checking: sent when OEM EXCESS + buyer TP ≥$500 MOV qualifies — "We are checking on it now..."
 - Forte entry: only when msg_checking is correct action AND part is NOT BILL EXT
 - Blocked domains: auto-archive, no reply
 - David (david@fortetechno.com) no-stock email → remove_oem action (delete from OEM sheet)
@@ -1301,7 +1299,7 @@ IN STOCK: ${inStockText}
 FORTE HISTORY (60d): ${forteText}
 
 AUTOMATION TRIGGERS:
-- Trigger 3 (checkInboxForNewRFQs): inbox NOT labeled oem-rfq-incoming-processed → if MPN in OEM EXCESS, draft request_tp_500 and apply oem-rfq-incoming-processed label
+- Trigger 3 (checkInboxForNewRFQs): inbox NOT labeled oem-rfq-incoming-processed → if MPN in OEM EXCESS + buyer HAS TP: msg_checking; if OEM EXCESS + NO TP: no_bid (silent). Apply oem-rfq-incoming-processed label either way.
 - Trigger 4 (checkInboxForTPReplies): inbox labeled oem-rfq-incoming-processed, buyer replies with price → if qty×TP≥$500 and not BILL EXT: msg_checking+Forte; if <$500: decline; if BILL EXT: bill_handle
 - Trigger 7 (runEmailAgent): inbox NOT labeled oem-agent-processed AND NOT labeled oem-rfq-incoming-processed → handles direct/IC Source/non-netCOMPS emails; applies both oem-agent-processed AND oem-rfq-incoming-processed
 - Trigger 8 (checkBillNetcompRemovals): Bill's "@John Fluman -MPN" removal emails
@@ -1371,8 +1369,8 @@ async function handleSmartReply(request, env) {
 
 COMPANY RULES (follow exactly):
 - $500 minimum line value (qty × target price). If the buyer's line is below $500, decline or note the minimum.
-- If stock exists in OEM EXCESS and buyer gave a qualifying TP → MSG_CHECKING: "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
-- If buyer gave no target price → request it: "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away."
+- OEM EXCESS + buyer gave TP + MOV ≥$500 → MSG_CHECKING: "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
+- OEM EXCESS + buyer gave NO target price → no bid (silent, no draft). We do NOT ask for TP on OEM parts.
 - BILL EXT parts: forward to Bill Pratt — reply "Bill will help with this request"
 - John's style: professional, concise, no fluff
 - Do NOT include the email signature — it will be added automatically
