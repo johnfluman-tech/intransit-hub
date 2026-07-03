@@ -609,6 +609,9 @@ function fixBillExtForteErrors() {
 //   r1716529454449499559 — BAS4002ARPPE6327 (old, body unknown; new msg_checking draft r-6402756441308139034 created)
 //   r-1733567911978935294 — BCM56980B0KFSBG msg_checking (David confirmed "Cant find" 7/3/2026 — do NOT send to buyer)
 //   r-3837120187750311243 — DTMH04-3PA msg_checking (stephen@haleinst.com) — wrong; OEM EXCESS + no TP = no_bid, never msg_checking
+//   r2139607451800387398 — K471K15X7RF5UH5 msg_checking (tom.hull@cyclops-group.com) — David confirmed No stk 7/3/2026; delete before sending
+//   r-3828300807569788190 — TLD5190QU request_tp_500 (Sunny@honortech-int.com) — OEM + no TP = no_bid per new rule; never send
+//   r-2454284305981434702 — CN9130-2000-NGI-AUS-G request_tp_500 (janet.wang@unix-tech.com) — OEM + no TP = no_bid per new rule; never send
 function deleteOldWrongDrafts_Jul3() {
   var token = ScriptApp.getOAuthToken();
   var toDelete = [
@@ -617,6 +620,9 @@ function deleteOldWrongDrafts_Jul3() {
     'r1716529454449499559',
     'r-1733567911978935294',
     'r-3837120187750311243',
+    'r2139607451800387398',
+    'r-3828300807569788190',
+    'r-2454284305981434702',
   ];
   toDelete.forEach(function(draftId) {
     try {
@@ -704,6 +710,33 @@ function processAllDavidNoStk_Jul3() {
 
   SpreadsheetApp.flush();
   Logger.log('processAllDavidNoStk_Jul3 complete — OEM rows deleted: ' + oemRows.length + ', Forte rows stamped: ' + stamped);
+}
+
+// ONE-TIME — Run removeOem_K471K15X7RF5UH5_Jul3() to process David's "No stk" reply.
+// David reported #3981 K471K15X7RF5UH5 No stk on 7/3/2026. Trigger 7 (old script) took no action.
+// Actions: stamp OEM row 90459 NO STK + delete it; stamp Forte row 3981 NO STK - 7/3/2026.
+// Reply draft to David (r-6630817906763203033) already created in Gmail — just run and send.
+function removeOem_K471K15X7RF5UH5_Jul3() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+
+  // Stamp OEM row 90459 then delete
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  oemSheet.getRange(90459, 5).setValue('NO STK 7/3/2026');
+  SpreadsheetApp.flush();
+  oemSheet.deleteRow(90459);
+  Logger.log('Stamped and deleted OEM row 90459 (K471K15X7RF5UH5)');
+
+  // Stamp Forte row 3981 NO STK
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var cell = forteSheet.getRange(3981, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - 7/3/2026');
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 3981 K471K15X7RF5UH5 → NO STK - 7/3/2026');
 }
 
 // ── One-time: remove oem-rfq-incoming-processed from David threads stuck by Trigger 3 bug ──
