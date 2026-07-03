@@ -607,12 +607,14 @@ function fixBillExtForteErrors() {
 //   r3853834301542523820 — AM486DX5133V-16BHC (old, body unknown; new stan_quoted draft r-5364126226482229979 created)
 //   r-4586403387947820516 — NRF52833-QIAA-R (old, body unknown; new request_tp_500 draft r-4410992122938450026 created)
 //   r1716529454449499559 — BAS4002ARPPE6327 (old, body unknown; new msg_checking draft r-6402756441308139034 created)
+//   r-1733567911978935294 — BCM56980B0KFSBG msg_checking (David confirmed "Cant find" 7/3/2026 — do NOT send to buyer)
 function deleteOldWrongDrafts_Jul3() {
   var token = ScriptApp.getOAuthToken();
   var toDelete = [
     'r3853834301542523820',
     'r-4586403387947820516',
     'r1716529454449499559',
+    'r-1733567911978935294',
   ];
   toDelete.forEach(function(draftId) {
     try {
@@ -639,6 +641,66 @@ function addForte_BAS4002ARPPE6327() {
   sheet.appendRow(['7/3/2026', 'BAS4002ARPPE6327', 12204, '', '', 'CN',
     '', '', '', '', 'Open']);
   Logger.log('Added BAS4002ARPPE6327 to Forte row ' + nextRow + ' (12204 qty, no TP, CN)');
+}
+
+// ONE-TIME — Run processAllDavidNoStk_Jul3() to process 12 David no-stk/cant-find
+// emails received 2026-07-03. Performs:
+//   1. Stamps "NO STK 7/3/2026" in OEM EXCESS col E for 16 rows, then deletes them.
+//   2. Stamps "NO STK - 7/3/2026" in Forte col K for 8 MPNs (matched by name).
+//   3. Deletes Forte row 3982 (diode — David says "no part number listed").
+// IMPORTANT: Run this BEFORE fixBillExtForteErrors() — row 3982 shifts if SC18IS606PWJ
+// (row 3980) is deleted first.
+// OEM rows covered:
+//   QCA7005-AL33-R-1: 115084, 115085 | LT3580IMS8ETRPBF: 95669 (BILL EXT), 95670
+//   PI4MSD5V9548AZDEX: 112936 (BILL EXT), 112937 (BILL EXT) | SC18IS606PWJ: 120217 (BILL EXT)
+//   DDTC113ZCA-7-F: 76764 | BCM56980B0KFSBG: 67843 (BILL EXT), 67844 (BILL EXT), 67845
+//   STM32G474RBT6: 127151 (NOT 126975 — different part) | HMC547ALP3E: 86598
+//   ADG1606BRUZ-REEL7: 62633 | MX66L1G45GXDI-08G: 107573 (BILL EXT) | MCDP6000C1: 102439
+function processAllDavidNoStk_Jul3() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+
+  // OEM EXCESS: stamp col E then delete (sorted descending to keep row numbers valid during deletion)
+  var oemRows = [127151, 120217, 115085, 115084, 112937, 112936, 107573, 102439,
+                 95670, 95669, 86598, 76764, 67845, 67844, 67843, 62633];
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  oemRows.forEach(function(r) { oemSheet.getRange(r, 5).setValue('NO STK 7/3/2026'); });
+  SpreadsheetApp.flush();
+  oemRows.forEach(function(r) {
+    oemSheet.deleteRow(r);
+    Logger.log('OEM EXCESS: deleted row ' + r);
+  });
+
+  // Forte: stamp NO STK by MPN name (searches full sheet, skips already-stamped rows)
+  var mpnsToStamp = [
+    'QCA7005-AL33-R-1', 'LT3580IMS8ETRPBF', 'DDTC113ZCA-7-F',
+    'BCM56980B0KFSBG', 'STM32G474RBT6', 'HMC547ALP3E',
+    'ADG1606BRUZ-REEL7', 'MCDP6000C1'
+  ];
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = forteSheet.getDataRange().getValues();
+  var stamped = 0;
+  for (var i = 1; i < data.length; i++) {
+    var mpn = String(data[i][1]).trim();
+    var status = String(data[i][10] || '').trim();
+    if (mpnsToStamp.indexOf(mpn) !== -1 && status.toUpperCase().indexOf('NO STK') < 0) {
+      var cell = forteSheet.getRange(i + 1, 11);
+      cell.clearDataValidations();
+      cell.setValue('NO STK - 7/3/2026');
+      cell.setBackground('#000000');
+      cell.setFontColor('#FFFFFF');
+      cell.setFontWeight('bold');
+      Logger.log('Forte row ' + (i + 1) + ': ' + mpn + ' → NO STK - 7/3/2026');
+      stamped++;
+    }
+  }
+
+  // Forte row 3982: delete bad entry (David: "no part number listed" — no valid MPN)
+  forteSheet.deleteRow(3982);
+  Logger.log('Deleted bad Forte entry row 3982 (diode — no valid MPN)');
+
+  SpreadsheetApp.flush();
+  Logger.log('processAllDavidNoStk_Jul3 complete — OEM rows deleted: ' + oemRows.length + ', Forte rows stamped: ' + stamped);
 }
 
 // ── One-time: remove oem-rfq-incoming-processed from David threads stuck by Trigger 3 bug ──
