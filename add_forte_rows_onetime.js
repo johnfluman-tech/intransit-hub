@@ -827,6 +827,38 @@ function addForte_PVA1OAH21_Jul3() {
   Logger.log('Added Forte: PVA1OAH21.2NV2;PVA1OAH2SNA qty=2200 TP=0.60 CA');
 }
 
+// ONE-TIME — Run removeOem_AD8630ARUZREEL_Jul3()
+// David reported AD8630ARUZ-REEL #3983 no stk on 7/3/2026.
+// OEM EXCESS has TWO rows (62416 + 62417) — deletePart returned FUZZY_REVIEW (>1 exact match),
+// so automation never labeled the thread. Both rows stamped + deleted here.
+// Forte row 3983 stamped black NO STK.
+// Reply draft created manually (see project memory for draft ID).
+function removeOem_AD8630ARUZREEL_Jul3() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var today = '7/3/2026';
+
+  // Delete in descending order so row numbers stay valid
+  [62417, 62416].forEach(function(row) {
+    oemSheet.getRange(row, 5).setValue('NO STK ' + today);
+    SpreadsheetApp.flush();
+    oemSheet.deleteRow(row);
+    Logger.log('Stamped + deleted OEM AD8630ARUZ-REEL row ' + row);
+  });
+
+  // Stamp Forte row 3983
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var cell = forteSheet.getRange(3983, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - ' + today);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 3983 AD8630ARUZ-REEL → NO STK - ' + today);
+}
+
 // ── One-time: remove oem-rfq-incoming-processed from David threads stuck by Trigger 3 bug ──
 // Run once after pasting the fixed script. Trigger 7 will then pick them up on next 5-min cycle.
 function unlabelStuckDavidThreads() {
