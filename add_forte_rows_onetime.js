@@ -569,6 +569,78 @@ function removeForte_AFCT5765ATPZ() {
   Logger.log('Deleted wrong Forte row 3964 (AFCT5765ATPZ)');
 }
 
+// ONE-TIME — Run fixBillExtForteErrors() to:
+//   1. Delete wrong Forte entries for PI4MSD5V9548AZDEX (row ~3983) and SC18IS606PWJ
+//      (row ~3980) — both are BILL EXT parts, should never have been added to Forte.
+//   2. Delete wrong msg_checking draft r-9072564021236759707 for PI4MSD5V9548AZDEX.
+//      Correct bill_handle draft r-6308889964994501476 already created.
+function fixBillExtForteErrors() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = sheet.getDataRange().getValues();
+  var targets = ['PI4MSD5V9548AZDEX', 'SC18IS606PWJ'];
+  var rowsToDelete = [];
+  for (var i = data.length - 1; i >= 1; i--) {
+    var mpn = String(data[i][1]).trim().toUpperCase();
+    if (targets.indexOf(mpn) !== -1) {
+      rowsToDelete.push(i + 1);
+      Logger.log('Marking for deletion Forte row ' + (i + 1) + ': ' + mpn);
+    }
+  }
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  rowsToDelete.forEach(function(r) {
+    sheet.deleteRow(r);
+    Logger.log('Deleted Forte row ' + r);
+  });
+  // Delete wrong PI4MSD5V9548AZDEX msg_checking draft
+  var token = ScriptApp.getOAuthToken();
+  UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-9072564021236759707', {
+    method: 'delete',
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  Logger.log('Deleted wrong PI4MSD5V9548AZDEX msg_checking draft r-9072564021236759707');
+  Logger.log('fixBillExtForteErrors complete');
+}
+
+// ONE-TIME — Run deleteOldWrongDrafts_Jul3() to delete automation-created drafts
+// that were superseded by manually-correct drafts created 2026-07-03.
+//   r3853834301542523820 — AM486DX5133V-16BHC (old, body unknown; new stan_quoted draft r-5364126226482229979 created)
+//   r-4586403387947820516 — NRF52833-QIAA-R (old, body unknown; new request_tp_500 draft r-4410992122938450026 created)
+//   r1716529454449499559 — BAS4002ARPPE6327 (old, body unknown; new msg_checking draft r-6402756441308139034 created)
+function deleteOldWrongDrafts_Jul3() {
+  var token = ScriptApp.getOAuthToken();
+  var toDelete = [
+    'r3853834301542523820',
+    'r-4586403387947820516',
+    'r1716529454449499559',
+  ];
+  toDelete.forEach(function(draftId) {
+    try {
+      UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId, {
+        method: 'delete',
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      Logger.log('Deleted old draft: ' + draftId);
+    } catch(e) {
+      Logger.log('Could not delete ' + draftId + ': ' + e.message + ' (may already be deleted)');
+    }
+  });
+  Logger.log('deleteOldWrongDrafts_Jul3 complete');
+}
+
+// ONE-TIME — Run addForte_BAS4002ARPPE6327() to add missed Forte entry.
+// Daniel (daniel@szbshx.com, CN) asked about DC on 12204 pcs on 7/3/2026.
+// msg_checking draft r-6402756441308139034 created; Forte was empty.
+// No buyer TP given — adding entry with blank TP (qty drives it).
+function addForte_BAS4002ARPPE6327() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/3/2026', 'BAS4002ARPPE6327', 12204, '', '', 'CN',
+    '', '', '', '', 'Open']);
+  Logger.log('Added BAS4002ARPPE6327 to Forte row ' + nextRow + ' (12204 qty, no TP, CN)');
+}
+
 // ── One-time: remove oem-rfq-incoming-processed from David threads stuck by Trigger 3 bug ──
 // Run once after pasting the fixed script. Trigger 7 will then pick them up on next 5-min cycle.
 function unlabelStuckDavidThreads() {
