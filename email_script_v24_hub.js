@@ -1,8 +1,6 @@
-// ============================================================
-// COMPLETE SCRIPT v25 + AI EMAIL AGENT — Replace ALL existing code with this
-// OEM EXCESS Automation — John Fluman / Intransit Technologies
-// v25: AI agent (Trigger 7) added — Claude reviews every inbox thread automatically
-// ============================================================
+// OEM EXCESS Automation — Apps Script v25
+// John Fluman / Intransit Technologies
+// worker.js = brain; this file = thin I/O adapter (Gmail + Sheets only)
 
 var SPREADSHEET_ID    = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
 var MAIN_SHEET_NAME   = 'sheet1';
@@ -25,13 +23,9 @@ var MSG_NEED_TP_2000 = 'We need a target price to proceed. Please note there is 
 var MSG_CHECKING     = 'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.';
 var MSG_BILL         = 'Bill will help with this request';
 
-// ============================================================
-// INTRANSIT HUB — Logging & Draft Sync
-// ============================================================
 var HUB_URL    = 'https://intransit-hub.intransit-sales.workers.dev';
 var HUB_SECRET = 'InTransit!Hub#2026';
 
-// ─── Dynamic blocked domains from D1 (5-min cache) ──────────
 function getBlockedDomains() {
   var cache = CacheService.getScriptCache();
   var cached = cache.get('blocked_domains');
@@ -50,8 +44,7 @@ function getBlockedDomains() {
   return BLOCKED_DOMAINS; // fallback to hardcoded
 }
 
-// ─── Sidebar action execution ────────────────────────────────
-// Dispatcher — routes action to the correct executor
+// Dispatcher — routes sidebar action to the correct executor
 function executeAction(action, threadId, subject, fromH) {
   var type = action.type || 'create_draft';
   if (type === 'create_draft')      return executeCreateDraft(action, threadId, subject, fromH);
@@ -215,7 +208,6 @@ function hubPatchEntry(id, payload) {
   } catch(e) { Logger.log('hubPatchEntry error: ' + e); }
 }
 
-// Archive any inbox emails from blocked domains immediately
 function archiveBlockedDomains() {
   var BLOCKED_DOMAINS = getBlockedDomains();
   BLOCKED_DOMAINS.forEach(function(domain) {
@@ -253,9 +245,7 @@ function applyRemoteConfig(cfg) {
   if (cfg.DEB_EMAIL)        DEB_EMAIL        = cfg.DEB_EMAIL;
 }
 
-// ============================================================
-// GMAIL REST API — PROPER THREADED DRAFT CREATION
-// ============================================================
+// ── Gmail REST API — threaded draft creation ──────────────────
 
 function getRFC2822MessageId(gmailMsgId) {
   var url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + gmailMsgId + '?format=metadata&metadataHeaders=Message-ID';
@@ -293,9 +283,7 @@ function createThreadedDraft(toEmail, subject, htmlBody, replyToGmailMsgId, thre
   return result.id;
 }
 
-// ============================================================
-// SIGNATURE + HTML BUILDER
-// ============================================================
+// ── Signature + HTML builder ──────────────────────────────────
 
 function getSignatureHTML() {
   return '<br><br><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">Regards,</span></b></div>'
@@ -307,7 +295,6 @@ function getSignatureHTML() {
     + '<br><div><span style="color:rgb(166,166,166);font-family:Calibri,sans-serif;font-size:8pt">The information contained in this communication and its attachment(s) is intended only for the use of the individual to whom it is addressed and may contain information that is privileged, confidential, or exempt from disclosure. If the reader of this message is not the intended recipient, you are hereby notified that any dissemination, distribution, or copying of this communication is strictly prohibited. If you have received this communication in error, please notify <a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a> and delete the communication without retaining any copies. Thank you.</span></div>';
 }
 
-// Builds simple HTML body without a quoted original (used when origMsg is not available).
 function buildSimpleHTML(bodyText) {
   return '<div dir="ltr">' + bodyText + getSignatureHTML() + '</div>';
 }
@@ -323,9 +310,7 @@ function buildDraftHTML(replyText, originalMessage) {
   return '<div dir="ltr">' + replyText + sig + quoted + '</div>';
 }
 
-// ============================================================
-// UTILITY
-// ============================================================
+// ── Utility ───────────────────────────────────────────────────
 
 function normalize(pn) {
   return String(pn).trim().replace(/[-.:\/()\\s*+\\#_,]/g, '').toLowerCase();
@@ -355,9 +340,7 @@ function sendReviewEmail(partNumber, emailSubject, matches) {
   GmailApp.sendEmail(NOTIFY_EMAIL, 'OEM EXCESS: Review needed for MPN ' + partNumber, body);
 }
 
-// ============================================================
-// EXTRACT HELPERS
-// ============================================================
+// ── Extraction helpers ────────────────────────────────────────
 
 function extractMPN(subject) {
   if (!subject) return null;
@@ -433,9 +416,6 @@ function extractMPNFromRFQBody(body) {
   return null;
 }
 
-// Extracts MPN from structured HTML RFQ table formats (e.g. Lintech, Abacus web portals).
-// Used as a third-level fallback when subject and plain-text extraction both fail.
-// Returns the MPN string even if all-digit — the caller trusts it came from a labelled column.
 function extractMPNFromHTMLRFQ(htmlBody) {
   if (!htmlBody) return null;
   // Lintech / rz-* class format: <td class="rz-detail-field-fullpartnumber ...">152145</td>
@@ -728,9 +708,7 @@ function extractNetcompsBuyerEmail(body) {
   return email || null;
 }
 
-// ============================================================
-// SEARCHES
-// ============================================================
+// ── Sheet searches ────────────────────────────────────────────
 
 function searchOEMExcess(mpn) {
   if (!mpn) return [];
@@ -798,8 +776,6 @@ function checkForteForMPN(mpn, days) {
   return matches;
 }
 
-// Builds a readable history string from ALL prior Forte entries for a given MPN.
-// Called before appending a new row so the new row's col J contains full context.
 function buildForteHistory(mpn) {
   if (!mpn) return '';
   try {
@@ -863,9 +839,6 @@ function updateForteSheet(mpn, customDate) {
   Logger.log('Forte NO STK ' + mpn + ': updated=' + updated);
 }
 
-// ============================================================
-// ADD TO STAN'S SHEET
-// ============================================================
 function addToStanSheet(mpn, country, qty, tp) {
   var existing = searchStanSheet(mpn);
   if (existing.length > 0) {
@@ -878,9 +851,7 @@ function addToStanSheet(mpn, country, qty, tp) {
   Logger.log('Stan sheet row added: '+mpn+' | '+country+' | QTY:'+qty+' | TP:'+tp);
 }
 
-// ============================================================
-// OEM EXCESS DELETE
-// ============================================================
+// ── OEM EXCESS delete ─────────────────────────────────────────
 
 function findMatches(data, partNumber) {
   var exact = [], fuzzy = [], sn = normalize(partNumber);
@@ -907,9 +878,7 @@ function deletePart(partNumber, emailSubject) {
   sendReviewEmail(partNumber,emailSubject,[]);return 'NOT_FOUND';
 }
 
-// ============================================================
-// TRIGGER 1 — David no-stock emails
-// ============================================================
+// ── Trigger 1 — David no-stock emails ────────────────────────
 function checkDavidNoStockEmails() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkDavidNoStockEmails: disabled via hub config'); return; }
@@ -935,8 +904,7 @@ function checkDavidNoStockEmails() {
   });
 }
 
-// TRIGGER 2 — Sent "Removed - MPN:" → delete from OEM EXCESS
-// ============================================================
+// ── Trigger 2 — Sent "Removed - MPN:" → delete from OEM EXCESS
 function checkSentRemovals() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkSentRemovals: disabled via hub config'); return; }
@@ -960,9 +928,7 @@ function checkSentRemovals() {
   });
 }
 
-// ============================================================
-// TRIGGER 3 — Inbox TP replies → threaded draft (worker-routed)
-// ============================================================
+// ── Trigger 3 — Inbox TP replies → threaded draft ────────────
 function checkInboxForTPReplies() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkInboxForTPReplies: disabled'); return; }
@@ -1097,14 +1063,8 @@ function checkInboxForTPReplies() {
   });
 }
 
-// ============================================================
-// TRIGGER 4 — New inbox RFQs → threaded draft
-// ============================================================
-// ─── Worker email-agent call ─────────────────────────────────
-// Calls /api/email-agent and returns the decision JSON, or null on failure.
-// The worker enforces exact template wording — no improvisation possible.
-// Calls /api/email-agent and returns the decision JSON, or null on failure.
-// The worker enforces exact template wording — no improvisation possible.
+// Calls /api/email-agent; returns decision JSON or null on failure.
+// Worker enforces exact template wording — no improvisation possible.
 function callEmailAgent(threadId, subject, sender, threadContent, oemResults, forteResults, currentLabels, inStockResults, stanResults, priorQuotes) {
   try {
     var payload = JSON.stringify({
@@ -1135,7 +1095,6 @@ function callEmailAgent(threadId, subject, sender, threadContent, oemResults, fo
   }
 }
 
-// Builds a plain-text thread summary for the worker's thread_content field.
 function buildThreadContent(messages, subject, replyTo) {
   var parts = ['Subject: ' + subject, 'Reply-To: ' + replyTo, ''];
   messages.forEach(function(m, i) {
@@ -1153,8 +1112,7 @@ function buildThreadContent(messages, subject, replyTo) {
   return full.length > 8000 ? full.substring(0, 8000) + '\n[truncated]' : full;
 }
 
-// Executes a worker decision: creates draft, logs to hub, adds Forte entry.
-// Returns the Gmail draft ID (string) if a draft was created, else null.
+// Executes a worker decision; returns Gmail draft ID or null.
 function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo) {
   if (!decision) return null;
   var action = decision.action;
@@ -1232,11 +1190,7 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
     }
   }
 
-  // Guard: only write forte_entry when action is msg_checking.
-  // Worker rule 4 prohibits forte_entry for bill_handle/request_tp/no_bid/own_stock/stan_quoted,
-  // but if the model makes a wrong decision (e.g., msg_checking when all rows are BILL EXT)
-  // the audit corrects the DRAFT but can't undo a Forte row already written.
-  // This guard prevents the Forte write in that scenario.
+  // Guard: only write forte_entry for msg_checking — audit can fix the draft but not undo a Forte row.
   var fe = decision.forte_entry;
   if (action === 'msg_checking' && fe && fe.mpn && fe.qty && fe.target_price) {
     var alreadyThere = checkForteForMPN(fe.mpn, 60);
@@ -1252,9 +1206,7 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
   return draftId;
 }
 
-// Calls /api/audit-draft — Sonnet reviews the Haiku decision adversarially.
-// If wrong: trashes the bad draft, runs corrected decision, logs lesson.
-// Only audits actions that produce drafts worth checking.
+// Sonnet audits the Haiku decision; if wrong, trashes draft and re-executes corrected version.
 function auditAndCorrect(decision, draftId, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent) {
   var auditableActions = ['msg_checking','request_tp_500','request_tp_2000','bill_handle','own_stock','stan_quoted','add_to_stan'];
   if (auditableActions.indexOf(decision.action) < 0) return;
@@ -1300,7 +1252,6 @@ function auditAndCorrect(decision, draftId, thread, messages, mpn, subject, repl
   }
 }
 
-// Fetches yesterday's cost data from /api/cost-report and emails it to John.
 function sendDailyCostReport() {
   try {
     var resp = UrlFetchApp.fetch(HUB_URL + '/api/cost-report?days=1', {
@@ -1449,9 +1400,7 @@ function checkInboxForNewRFQs() {
   });
 }
 
-// ============================================================
-// TRIGGER 5 — Sent "checking on it now" → add to Forte
-// ============================================================
+// ── Trigger 5 — Sent "checking on it now" → add to Forte ─────
 function checkSentCheckingReplies() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkSentCheckingReplies: disabled via hub config'); return; }
@@ -1542,9 +1491,7 @@ function checkSentCheckingReplies() {
   });
 }
 
-// ============================================================
-// TRIGGER 6 — Payment Advice → forward to Deb
-// ============================================================
+// ── Trigger 6 — Payment Advice → forward to Deb ──────────────
 function checkInboxForPaymentAdvice() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkInboxForPaymentAdvice: disabled via hub config'); return; }
@@ -1583,23 +1530,7 @@ function checkInboxForPaymentAdvice() {
   });
 }
 
-// ============================================================
-// APPEND DAVID LIST
-// ============================================================
-function appendDavidList() {
-  var NOTE = 'OEM EXCESS! $500 MIN TP REQUIRED';
-  var davidData = SpreadsheetApp.openById('1NbzAKOLkSfQCp5ex9QPgTF_lwE6V0jAB5aKNSdJ_NFE').getSheets()[0].getDataRange().getValues();
-  var oemSheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(MAIN_SHEET_NAME);
-  var startRow = (String(davidData[0][0]).toLowerCase().indexOf('part')>=0||String(davidData[0][0]).toLowerCase().indexOf('mpn')>=0)?1:0;
-  var rows = [];
-  for (var i=startRow;i<davidData.length;i++){var mpn=String(davidData[i][0]||'').trim();if(mpn)rows.push([mpn,String(davidData[i][1]||'').trim(),'',String(davidData[i][2]||'').trim(),NOTE]);}
-  if (rows.length) oemSheet.getRange(oemSheet.getLastRow()+1,1,rows.length,5).setValues(rows);
-  Logger.log('Appended '+rows.length+' rows.');
-}
-
-// ============================================================
-// WEB APP
-// ============================================================
+// ── Web App ───────────────────────────────────────────────────
 function searchForteSheet(mpn) {
   if (!mpn) return [];
   var data = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0].getDataRange().getValues();
@@ -1631,9 +1562,7 @@ function doGet(e) {
   })).setMimeType(ContentService.MimeType.JSON);
 }
 
-// ============================================================
-// FIX QUEUE — execute draft fixes queued remotely via the hub
-// ============================================================
+// ── Fix queue — execute draft fixes queued remotely ───────────
 function processFixQueue() {
   try {
     var resp = UrlFetchApp.fetch(HUB_URL + '/api/fix-queue?status=pending', {
@@ -1691,9 +1620,7 @@ function processFixQueue() {
   }
 }
 
-// ============================================================
-// COMMAND QUEUE — inventory actions queued remotely via the hub
-// ============================================================
+// ── Command queue — inventory actions queued remotely ─────────
 function processCommandQueue() {
   try {
     var resp = UrlFetchApp.fetch(HUB_URL + '/api/command-queue?status=pending', {
@@ -1786,9 +1713,6 @@ function processCommandQueue() {
   }
 }
 
-// ============================================================
-// TRIGGERS
-// ============================================================
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function(t){ScriptApp.deleteTrigger(t);});
   ScriptApp.newTrigger('checkDavidNoStockEmails').timeBased().everyMinutes(5).create();
@@ -1805,34 +1729,8 @@ function setupTriggers() {
   Logger.log('All 11 triggers installed.');
 }
 
-// ============================================================
-// GMAIL ADD-ON — Draft Review Sidebar
-//
-// HOW TO INSTALL (one-time setup):
-//   1. In Apps Script editor: click ⚙️ Project Settings
-//      → check "Show appsscript.json manifest file in editor"
-//   2. Open appsscript.json and ADD the "addOns" block (see MANIFEST below).
-//      Merge it — do not replace the whole file.
-//   3. Click Deploy → Test deployments → Install (for yourself)
-//   4. Open any Gmail draft → click the add-on icon in the toolbar
-//
-// MANIFEST to add inside appsscript.json (merge with existing content):
-// "addOns": {
-//   "common": {
-//     "name": "Intransit Assistant",
-//     "logoUrl": "https://www.gstatic.com/images/icons/material/system/2x/mail_black_24dp.png",
-//     "homepageTrigger": { "runFunction": "buildHomepageCard", "enabled": true }
-//   },
-//   "gmail": {
-//     "composeTrigger": {
-//       "selectActions": [{ "text": "Intransit Assistant", "runFunction": "buildComposeCard" }],
-//       "draftAccess": "METADATA"
-//     }
-//   }
-// }
-// ============================================================
-
-// ── DRAFT HTML HELPERS (used by add-on card builders) ──────
+// ── Gmail Add-on — Draft Review Sidebar ──────────────────────
+// ── Draft HTML helpers ────────────────────────────────────────
 
 function extractDraftHtmlBody(payload) {
   if (!payload) return null;
@@ -1875,9 +1773,7 @@ function rebuildRawMessage(draft, newHtmlBody) {
   return { raw: Utilities.base64EncodeWebSafe(lines.join('\r\n')), to: toH, subject: subjectH };
 }
 
-// ── CARD BUILDERS ──────────────────────────────────────────
-
-// Homepage card — lists all current drafts with advice + Send/Wrong buttons
+// Homepage card — lists all current drafts with Send/Wrong/Fix buttons
 function buildHomepageCard() {
   try {
     var token = ScriptApp.getOAuthToken();
@@ -2051,8 +1947,7 @@ function buildHomepageCard() {
   }
 }
 
-// ── CONTEXTUAL CARD — fires automatically when any email is opened ──────────
-// Shows only what's relevant to the currently viewed thread.
+// Contextual card — fires when any email is opened; shows thread-relevant info.
 function buildContextualCard(e) {
   try {
     var gmailThreadId = e.gmail && e.gmail.threadId;
@@ -2409,9 +2304,8 @@ function buildAddonError(msg) {
     .build();
 }
 
-// ── ACTION HANDLERS ────────────────────────────────────────
+// ── Add-on action handlers ────────────────────────────────────
 
-// Send the draft, stripping the ADVICE block first if present
 function addonSendDraft(e) {
   try {
     var params   = e.commonEventObject.parameters;
@@ -2475,7 +2369,6 @@ function addonSendDraft(e) {
   }
 }
 
-// Fix a wrong draft: call hub /api/fix-draft, rebuild the Gmail draft with corrected body
 function addonFixDraft(e) {
   try {
     var params     = e.commonEventObject.parameters;
@@ -2555,7 +2448,6 @@ function addonFixDraft(e) {
   }
 }
 
-// Create a brand-new draft from a sidebar instruction when automation missed the email
 function addonCreateDraft(e) {
   try {
     var params     = e.commonEventObject.parameters;
@@ -2619,7 +2511,6 @@ function addonCreateDraft(e) {
   }
 }
 
-// Submit feedback about a wrong draft, extract a lesson, then delete the draft
 function addonSubmitFeedback(e) {
   try {
     var params    = e.commonEventObject.parameters;
@@ -2692,7 +2583,6 @@ function addonSubmitFeedback(e) {
   }
 }
 
-// Fetch last N sent emails mentioning an MPN — returns formatted string for Claude context
 function getRecentSentQuotesFull(mpn, maxThreads) {
   if (!mpn) return 'No MPN provided.';
   try {
@@ -2717,7 +2607,6 @@ function getRecentSentQuotesFull(mpn, maxThreads) {
   }
 }
 
-// Chat with Claude about the current email — gathers full context then sends to /api/chat
 function addonChat(e) {
   try {
     var params     = e.commonEventObject.parameters;
@@ -2909,7 +2798,6 @@ function addonChat(e) {
   }
 }
 
-// ── Remove MPN from InStock ──────────────────────────
 function addonRemoveStock(e) {
   try {
     var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
@@ -2936,7 +2824,6 @@ function addonRemoveStock(e) {
   }
 }
 
-// ── Send to NetCOMPONENTS ─────────────────────────────
 function addonSendNetCom(e) {
   try {
     UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
@@ -2955,7 +2842,6 @@ function addonSendNetCom(e) {
   }
 }
 
-// ── Remove MPN from OEM EXCESS ───────────────────────
 function addonRemoveOEM(e) {
   try {
     var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
@@ -2971,7 +2857,6 @@ function addonRemoveOEM(e) {
   } catch(err) { return notify('❌ Error: ' + err.toString()); }
 }
 
-// ── Sheet lookup helper ───────────────────────────────
 function addonSheetLookup(mpn) {
   var resp = UrlFetchApp.fetch(HUB_URL + '/api/sheet-lookup?mpn=' + encodeURIComponent(mpn), {
     headers: { Authorization: 'Bearer ' + HUB_SECRET },
@@ -2980,7 +2865,6 @@ function addonSheetLookup(mpn) {
   return JSON.parse(resp.getContentText());
 }
 
-// ── Verify OEM EXCESS removed ─────────────────────────
 function addonVerifyOEMRemoved(e) {
   try {
     var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
@@ -3005,7 +2889,6 @@ function addonVerifyOEMRemoved(e) {
   } catch(err) { return notify('❌ Error: ' + err.toString()); }
 }
 
-// ── Verify IN STOCK removed ───────────────────────────
 function addonVerifyInStockRemoved(e) {
   try {
     var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
@@ -3030,7 +2913,6 @@ function addonVerifyInStockRemoved(e) {
   } catch(err) { return notify('❌ Error: ' + err.toString()); }
 }
 
-// ── Quote History ─────────────────────────────────────
 function addonQuoteHistory(e) {
   try {
     var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
@@ -3069,7 +2951,6 @@ function addonQuoteHistory(e) {
   } catch(err) { return notify('❌ Error: ' + err.toString()); }
 }
 
-// ── Jiggle My Mind — diagnose missed email ────────────
 function addonDiagnoseEmail(e) {
   try {
     var params    = e.commonEventObject.parameters;
@@ -3206,7 +3087,6 @@ function addonDiagnoseEmail(e) {
   } catch(err) { return notify('❌ Diagnose error: ' + err.toString()); }
 }
 
-// ── Use a reply option — create the draft, then show training confirmation ─
 function addonUseReplyOption(e) {
   try {
     var params   = e.commonEventObject.parameters;
@@ -3225,7 +3105,6 @@ function addonUseReplyOption(e) {
     var toEmail = fromH || lastMsg.getReplyTo() || lastMsg.getFrom();
     toEmail = extractBuyerEmail(toEmail);
 
-    var sig = buildJohnSignatureHtml();
     var html = buildSimpleHTML(draft.replace(/\n/g, '<br>'));
     createThreadedDraft(toEmail, 'Re: ' + subject, html, threadId, lastMsg.getId());
 
@@ -3261,7 +3140,6 @@ function addonUseReplyOption(e) {
   } catch(err) { return notify('Error creating draft: ' + err.toString()); }
 }
 
-// ── Log Diagnosis / Correction + save to worker memory on the fly ─────────
 function addonLogDiagnosis(e) {
   try {
     var params = e.commonEventObject.parameters;
@@ -3316,13 +3194,11 @@ function addonLogDiagnosis(e) {
   } catch(err) { return notify('❌ Error: ' + err.toString()); }
 }
 
-// ── Dismiss card helper ───────────────────────────────
 function addonDismissCard(e) {
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().popCard()).build();
 }
 
-// ── Smart Reply — AI generates best reply using full thread + inventory ────
 function addonSmartReply(e) {
   try {
     var params   = e.commonEventObject.parameters;
@@ -3413,7 +3289,6 @@ function addonSmartReply(e) {
   } catch(err) { return notify('❌ Smart Reply error: ' + err.toString()); }
 }
 
-// ── Smart Reply — create the draft from the (possibly edited) text ─────────
 function addonSmartReplyCreateDraft(e) {
   try {
     var params     = e.commonEventObject.parameters;
@@ -3441,7 +3316,6 @@ function addonSmartReplyCreateDraft(e) {
   } catch(err) { return notify('Error creating draft: ' + err.toString()); }
 }
 
-// ── Draft Diagnosis — figure out what's wrong with an existing draft ──────
 function addonDiagnoseDraft(e) {
   try {
     var params    = e.commonEventObject.parameters;
@@ -3541,7 +3415,6 @@ function addonDiagnoseDraft(e) {
   } catch(err) { return notify('❌ Diagnose draft error: ' + err.toString()); }
 }
 
-// ── Agree with auto-diagnosis and fix the draft ───────
 function addonAgreeAndFixDraft(e) {
   try {
     var params     = e.commonEventObject.parameters;
@@ -3593,7 +3466,6 @@ function addonAgreeAndFixDraft(e) {
   } catch(err) { return notify('Error: ' + err.toString()); }
 }
 
-// ── Manual fix from diagnosis card (John typed own correction) ────────────
 function addonManualFixDraftFromDiag(e) {
   var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
   var correction = (formInputs.draftDiagCorrection && formInputs.draftDiagCorrection.stringInputs && formInputs.draftDiagCorrection.stringInputs.value && formInputs.draftDiagCorrection.stringInputs.value[0] || '').trim();
@@ -3604,7 +3476,6 @@ function addonManualFixDraftFromDiag(e) {
   return addonAgreeAndFixDraft(e);
 }
 
-// ── Report Issue → self-heal ─────────────────────────
 function addonReportIssue(e) {
   try {
     var params      = e.commonEventObject.parameters;
@@ -3671,7 +3542,7 @@ function addonReportIssue(e) {
     }
     section.addWidget(CardService.newTextButton()
       .setText('← Back')
-      .setOnClickAction(CardService.newAction().setFunctionName('addonHomepage')));
+      .setOnClickAction(CardService.newAction().setFunctionName('addonDismissCard')));
     builder.addSection(section);
 
     return CardService.newActionResponseBuilder()
@@ -3683,7 +3554,6 @@ function addonReportIssue(e) {
   }
 }
 
-// Execute a chat-agreed action
 function addonExecuteAction(e) {
   try {
     var params   = e.commonEventObject.parameters;
@@ -3705,7 +3575,6 @@ function addonExecuteAction(e) {
   }
 }
 
-// Create draft and immediately send (only for create_draft action type)
 function addonExecuteAndSend(e) {
   try {
     var params   = e.commonEventObject.parameters;
@@ -3727,16 +3596,13 @@ function addonExecuteAndSend(e) {
   }
 }
 
-// Shorthand notification response
 function notify(text) {
   return CardService.newActionResponseBuilder()
     .setNotification(CardService.newNotification().setText(text))
     .build();
 }
 
-// ============================================================
-// TEST FUNCTIONS
-// ============================================================
+// ── Test / utility functions ──────────────────────────────────
 function testSearch(mpn) {
   Logger.log('--- OEM EXCESS ---'); searchOEMExcess(mpn);
   Logger.log('--- IN STOCK ---'); searchInStock(mpn);
@@ -3760,9 +3626,7 @@ function unlabelUnprocessedRFQs() {
   });
 }
 
-// ============================================================
-// TRIGGER 8 — Bill says "remove from netcomp" → delete from OEM EXCESS + draft to Bill
-// ============================================================
+// ── Trigger 8 — Bill netcomp removals → delete from OEM EXCESS
 function checkBillNetcompRemovals() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkBillNetcompRemovals: disabled'); return; }
@@ -3808,11 +3672,7 @@ function checkBillNetcompRemovals() {
   });
 }
 
-// ============================================================
-// TRIGGER 7 — AI EMAIL AGENT
-// Scans inbox every 5 min, calls Claude to decide action,
-// creates HTML draft with full signature, adds to Forte.
-// ============================================================
+// ── Trigger 7 — AI email agent ───────────────────────────────
 
 var AGENT_LABEL = 'oem-agent-processed';
 
@@ -3900,22 +3760,6 @@ function processThreadWithAgent(thread, agentLabel) {
   hubLog('run', 'runEmailAgent [' + decision.action + ']: ' + subject + ' — ' + (decision.reasoning || ''));
   var agentDraftId = executeWorkerDecision(decision, thread, messages, mpn || '', subject, replyTo);
   auditAndCorrect(decision, agentDraftId, thread, messages, mpn || '', subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
-}
-
-function buildAgentThreadText(messages, maxChars) {
-  var parts = [];
-  messages.forEach(function(m, i) {
-    var body   = m.getPlainBody() || '';
-    var lines  = body.split('\n');
-    var cleaned = [], quoteDepth = 0;
-    for (var j = 0; j < lines.length; j++) {
-      if (lines[j].match(/^[>\|]/)) { quoteDepth++; if (quoteDepth <= 4) cleaned.push(lines[j]); }
-      else { quoteDepth = 0; cleaned.push(lines[j]); }
-    }
-    parts.push('--- Message ' + (i + 1) + ' | From: ' + m.getFrom() + ' | ' + m.getDate() + ' ---\n' + cleaned.join('\n').trim());
-  });
-  var full = parts.join('\n\n');
-  return full.length > maxChars ? full.substring(0, maxChars) + '\n[truncated]' : full;
 }
 
 function extractMPNFromSubject(subject) {

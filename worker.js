@@ -127,7 +127,6 @@ export default {
   }
 };
 
-// ─── /api/status ────────────────────────────────────
 async function handleStatus(env) {
   const apps = ['email_automation', 'tee_time_bot', 'icsource_checker', 'oem_excess'];
   const results = {};
@@ -145,7 +144,6 @@ async function handleStatus(env) {
   return json(results);
 }
 
-// ─── /api/logs GET ──────────────────────────────────
 async function handleGetLogs(url, env) {
   const app   = url.searchParams.get('app')   || '';
   const type  = url.searchParams.get('type')  || '';
@@ -161,7 +159,6 @@ async function handleGetLogs(url, env) {
   return json({ rows: rows || [] });
 }
 
-// ─── /api/logs POST ─────────────────────────────────
 async function handlePostLog(request, env) {
   const { app_name, event_type, summary, details } = await request.json();
   if (!app_name || !event_type) return json({ error: 'app_name and event_type are required' }, 400);
@@ -171,7 +168,6 @@ async function handlePostLog(request, env) {
   return json({ ok: true });
 }
 
-// ─── /api/drafts GET ────────────────────────────────
 async function handleGetDrafts(url, env) {
   const status = url.searchParams.get('status') || 'pending';
   const limit  = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
@@ -181,7 +177,6 @@ async function handleGetDrafts(url, env) {
   return json({ rows: rows || [] });
 }
 
-// ─── /api/drafts POST ───────────────────────────────
 async function handlePostDraft(request, env) {
   const { thread_id, mpn, sender, subject, draft_content } = await request.json();
   if (!draft_content) return json({ error: 'draft_content is required' }, 400);
@@ -191,7 +186,6 @@ async function handlePostDraft(request, env) {
   return json({ ok: true, id: meta.last_row_id });
 }
 
-// ─── /api/drafts/:id PATCH ──────────────────────────
 async function handlePatchDraft(request, env, id) {
   const body = await request.json();
   const { action, draft_content } = body;
@@ -213,7 +207,6 @@ async function handlePatchDraft(request, env, id) {
   return json({ ok: true });
 }
 
-// ─── /api/memory GET (list) ─────────────────────────
 async function handleGetMemory(url, env) {
   const type  = url.searchParams.get('type') || '';
   const search = url.searchParams.get('q')   || '';
@@ -228,14 +221,12 @@ async function handleGetMemory(url, env) {
   return json({ rows: rows || [] });
 }
 
-// ─── /api/memory/:slug GET ──────────────────────────
 async function handleGetMemorySingle(env, slug) {
   const { results: rows } = await env.DB.prepare('SELECT * FROM ai_memory WHERE slug = ?').bind(slug).all();
   if (!rows || !rows.length) return json({ error: 'Not found' }, 404);
   return json(rows[0]);
 }
 
-// ─── /api/memory POST (upsert) ──────────────────────
 async function handlePostMemory(request, env) {
   const { slug, description, type, body } = await request.json();
   if (!slug || !body) return json({ error: 'slug and body are required' }, 400);
@@ -248,13 +239,11 @@ async function handlePostMemory(request, env) {
   return json({ ok: true });
 }
 
-// ─── /api/memory/:slug DELETE ───────────────────────
 async function handleDeleteMemory(env, slug) {
   await env.DB.prepare('DELETE FROM ai_memory WHERE slug = ?').bind(slug).run();
   return json({ ok: true });
 }
 
-// ─── /api/configs GET all ───────────────────────────
 async function handleGetConfigs(env) {
   const { results: rows } = await env.DB.prepare(
     'SELECT app_name, config, updated_at FROM app_configs ORDER BY app_name'
@@ -262,7 +251,6 @@ async function handleGetConfigs(env) {
   return json({ rows: rows || [] });
 }
 
-// ─── /api/configs/:app GET ───────────────────────────
 async function handleGetConfig(env, app) {
   const { results: rows } = await env.DB.prepare(
     'SELECT * FROM app_configs WHERE app_name = ?'
@@ -271,7 +259,6 @@ async function handleGetConfig(env, app) {
   return json(rows[0]);
 }
 
-// ─── /api/configs/:app POST ──────────────────────────
 async function handlePostConfig(request, env, app) {
   const body = await request.json();
   const config = typeof body.config === 'string' ? body.config : JSON.stringify(body.config, null, 2);
@@ -282,7 +269,6 @@ async function handlePostConfig(request, env, app) {
   return json({ ok: true });
 }
 
-// ─── /api/rules GET ─────────────────────────────────
 async function handleGetRules(url, env) {
   const type = url.searchParams.get('type');
   let rows;
@@ -296,7 +282,6 @@ async function handleGetRules(url, env) {
   return json({ rules: rows || [] });
 }
 
-// ─── /api/rules POST ─────────────────────────────────
 async function handlePostRule(request, env) {
   const { type, key, value, notes } = await request.json();
   if (!type || !key) return json({ error: 'type and key required' }, 400);
@@ -307,7 +292,6 @@ async function handlePostRule(request, env) {
   return json({ ok: true });
 }
 
-// ─── /api/rules DELETE ───────────────────────────────
 async function handleDeleteRule(request, env) {
   const { type, key } = await request.json();
   if (!type || !key) return json({ error: 'type and key required' }, 400);
@@ -315,7 +299,6 @@ async function handleDeleteRule(request, env) {
   return json({ ok: true });
 }
 
-// ─── /api/claude ────────────────────────────────────
 async function handleClaude(request, env) {
   const body = await request.json();
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -331,7 +314,6 @@ async function handleClaude(request, env) {
   return json(await res.json(), res.status);
 }
 
-// ─── /api/inbox GET ─────────────────────────────────
 async function handleGetInbox(env) {
   // Return preview rows for threads not yet reviewed or acted on
   const { results: rows } = await env.DB.prepare(`
@@ -346,7 +328,6 @@ async function handleGetInbox(env) {
   return json({ rows: rows || [] });
 }
 
-// ─── /api/inbox POST ─────────────────────────────────
 async function handlePostInbox(request, env) {
   const { thread_id, mpn, sender, subject, draft_content } = await request.json();
   if (!thread_id) return json({ error: 'thread_id is required' }, 400);
@@ -358,7 +339,6 @@ async function handlePostInbox(request, env) {
   return json({ ok: true, id: meta.last_row_id });
 }
 
-// ─── /api/apps GET ──────────────────────────────────
 async function handleGetApps(env) {
   const [{ results: logRows }, { results: cfgRows }] = await Promise.all([
     env.DB.prepare(
@@ -391,7 +371,6 @@ async function handleGetApps(env) {
   return json(results);
 }
 
-// ─── /api/fix-draft POST ────────────────────────────
 async function handleFixDraft(request, env) {
   const { draft_body, feedback, subject, to_email, thread_id } = await request.json();
   if (!feedback) return json({ error: 'feedback is required' }, 400);
@@ -432,7 +411,6 @@ RULES:
   }
 }
 
-// ─── /api/chat POST ─────────────────────────────────
 async function handleChat(request, env) {
   const {
     thread_id, message, subject, from_email,
@@ -606,8 +584,6 @@ Only include ||ACTION|| when John has explicitly confirmed. Otherwise just advis
   return json({ response: displayText, action });
 }
 
-// ─── /api/learn POST ────────────────────────────────
-// Extracts a reusable rule from John's correction and stores it in ai_memory.
 async function handleLearn(request, env) {
   const { feedback, draft_body, corrected_body, thread_id, subject, sender, mpn, action } = await request.json();
   if (!feedback) return json({ error: 'feedback required' }, 400);
@@ -666,7 +642,6 @@ Return ONLY valid JSON (no markdown):
   return json({ ok: true, slug, rule: lesson.rule });
 }
 
-// ─── /api/email-agent POST ──────────────────────────
 const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' email automation. The Apps Script is just a data-fetcher and action-executor — YOU make every decision. Return ONLY valid JSON, no markdown, no explanation.
 
 ## ACTIONS (pick exactly one)
@@ -885,7 +860,6 @@ async function handleEmailAgent(request, env) {
   return json({ ...decision, id: meta.last_row_id });
 }
 
-// ─── /api/agent-decisions GET ───────────────────────
 async function handleGetAgentDecisions(url, env) {
   const status = url.searchParams.get('status') || '';
   const limit  = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
@@ -898,7 +872,6 @@ async function handleGetAgentDecisions(url, env) {
   return json({ rows: rows || [] });
 }
 
-// ─── /api/agent-decisions/:id PATCH ────────────────
 async function handlePatchAgentDecision(request, env, id) {
   const { status, gmail_draft_id } = await request.json();
   if (!status) return json({ error: 'status required' }, 400);
@@ -911,7 +884,6 @@ async function handlePatchAgentDecision(request, env, id) {
   return json({ ok: true });
 }
 
-// ─── /api/fix-queue GET ─────────────────────────────
 async function handleGetFixQueue(url, env) {
   const status = url.searchParams.get('status') || 'pending';
   const { results: rows } = await env.DB.prepare(
@@ -920,7 +892,6 @@ async function handleGetFixQueue(url, env) {
   return json({ fixes: rows || [] });
 }
 
-// ─── /api/fix-queue POST ────────────────────────────
 async function handlePostFixQueue(request, env) {
   const { type, thread_id, to_email, subject, draft_body } = await request.json();
   if (!type || !thread_id) return json({ error: 'type and thread_id are required' }, 400);
@@ -931,7 +902,6 @@ async function handlePostFixQueue(request, env) {
   return json({ ok: true, id: meta.last_row_id });
 }
 
-// ─── /api/fix-queue/:id PATCH ───────────────────────
 async function handlePatchFixQueue(request, env, id) {
   const { status, error } = await request.json();
   if (!status) return json({ error: 'status required' }, 400);
@@ -941,7 +911,6 @@ async function handlePatchFixQueue(request, env, id) {
   return json({ ok: true });
 }
 
-// ─── /api/command-queue GET ──────────────────────────
 async function handleGetCommandQueue(url, env) {
   const status = url.searchParams.get('status') || 'pending';
   const { results: rows } = await env.DB.prepare(
@@ -950,7 +919,6 @@ async function handleGetCommandQueue(url, env) {
   return json({ commands: rows || [] });
 }
 
-// ─── /api/command-queue POST ─────────────────────────
 async function handlePostCommandQueue(request, env) {
   const { type, data } = await request.json();
   if (!type) return json({ error: 'type is required' }, 400);
@@ -960,7 +928,6 @@ async function handlePostCommandQueue(request, env) {
   return json({ ok: true, id: meta.last_row_id });
 }
 
-// ─── /api/command-queue/:id PATCH ───────────────────
 async function handlePatchCommandQueue(request, env, id) {
   const { status, error } = await request.json();
   if (!status) return json({ error: 'status required' }, 400);
@@ -970,14 +937,12 @@ async function handlePatchCommandQueue(request, env, id) {
   return json({ ok: true });
 }
 
-// ─── Response helper ────────────────────────────────
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status, headers: { ...CORS, 'Content-Type': 'application/json' },
   });
 }
 
-// ─── /api/issues GET ────────────────────────────────
 async function handleGetIssues(url, env) {
   const status = url.searchParams.get('status') || 'pending';
   const { results } = await env.DB.prepare(
@@ -986,7 +951,6 @@ async function handleGetIssues(url, env) {
   return json({ issues: results || [] });
 }
 
-// ─── /api/issues POST ───────────────────────────────
 async function handlePostIssue(request, env) {
   const { thread_id, mpn, description, context } = await request.json();
   if (!description) return json({ error: 'description required' }, 400);
@@ -996,9 +960,7 @@ async function handlePostIssue(request, env) {
   return json({ ok: true, id: meta.last_row_id });
 }
 
-// ─── /api/audit-draft POST ──────────────────────────
-// Sonnet reviews a Haiku decision adversarially. Returns verdict + corrected fields.
-// Also auto-stores a lesson in ai_memory when it catches a systematic mistake.
+// Sonnet audits a Haiku decision adversarially; auto-stores lessons for systematic mistakes.
 const AUDIT_PROMPT = `You are a STRICT AUDITOR reviewing an AI email agent decision for Intransit Technologies (OEM excess electronic component distributor). Your job is to FIND MISTAKES — not confirm correctness. Be adversarial and precise.
 
 PARSED DATA (authoritative — trust over plain text):
@@ -1075,7 +1037,6 @@ async function handleAuditDraft(request, env) {
   return json(audit);
 }
 
-// ─── /api/cost-report GET ───────────────────────────
 async function handleCostReport(url, env) {
   const days = Math.min(parseInt(url.searchParams.get('days') || '1'), 30);
   const { results: rows } = await env.DB.prepare(`
@@ -1092,7 +1053,6 @@ async function handleCostReport(url, env) {
   return json({ rows: rows || [], total_cost_usd: total, days });
 }
 
-// ─── /api/self-heal POST ────────────────────────────
 const HEAL_FORBIDDEN = [
   'env.HUB_SECRET', 'env.CLAUDE_API_KEY', 'env.GITHUB_TOKEN',
   'handleSelfHeal', 'handlePostIssue', 'handleGetIssues',
@@ -1239,9 +1199,7 @@ Return JSON only:
   return json({ ok: true, explanation: fix.explanation, commit: commitSha, deploying: true, message: 'Fix pushed to GitHub — GitHub Actions is deploying now (~60 seconds)' });
 }
 
-// ─── /api/sheet-lookup GET ───────────────────────────
 // Proxies the OEM EXCESS web app so the API key stays server-side.
-// Returns the same JSON the web app returns: { oem_excess, in_stock, stan_sheet, forte_sheet }
 async function handleSheetLookup(url, env) {
   const mpn = url.searchParams.get('mpn');
   if (!mpn) return json({ error: 'mpn required' }, 400);
@@ -1256,9 +1214,7 @@ async function handleSheetLookup(url, env) {
   }
 }
 
-// ─── /api/diagnose POST ──────────────────────────────
-// Accepts an email (subject, sender, content) + optional inventory context.
-// Calls Claude to diagnose what action should have fired and why the automation missed it.
+// Diagnoses why automation missed an email (or what's wrong with a draft).
 async function handleDiagnose(request, env) {
   const body = await request.json();
   const { subject, sender, content, oem_results, in_stock_results, forte_results, draft_body, mode } = body;
@@ -1401,8 +1357,7 @@ Include 2-3 reply_options ordered by likelihood. Use no_bid or decline as an opt
   }
 }
 
-// ─── /api/smart-reply POST ───────────────────────────
-// Reads full thread + inventory, generates the best reply John should send.
+// Reads full thread + inventory, generates best reply for John.
 async function handleSmartReply(request, env) {
   const { subject, sender, thread_context, oem_results, in_stock_results, forte_results } = await request.json();
   if (!thread_context && !subject) return json({ error: 'thread_context required' }, 400);
@@ -1459,8 +1414,7 @@ Return JSON only (no markdown wrapper):
   }
 }
 
-// ─── /api/session-log GET ────────────────────────────
-// Returns last N hub log entries + last 10 GitHub commits as formatted copyable text.
+// Returns last 50 hub log entries + last 10 GitHub commits as plain text.
 async function handleSessionLog(env) {
   const lines = [];
   const now = new Date().toISOString();
@@ -1516,9 +1470,7 @@ async function handleSessionLog(env) {
   return new Response(lines.join('\n'), { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
 }
 
-// ─── netCOMPONENTS listing check ─────────────────────
-// Best-effort: returns { found, qty, partNumber, notes } or null on failure.
-// netCOMPONENTS is a SPA with ASP.NET session-based results — this replicates the browser flow.
+// Best-effort netCOMPONENTS listing check; returns { found, qty, partNumber } or null.
 async function checkNetcomponentsListing(mpn, env) {
   const NC  = 'https://www.netcomponents.com';
   const UA  = 'curl/8.11.0';
