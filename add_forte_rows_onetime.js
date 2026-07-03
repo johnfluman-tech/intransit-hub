@@ -739,6 +739,40 @@ function removeOem_K471K15X7RF5UH5_Jul3() {
   Logger.log('Stamped Forte row 3981 K471K15X7RF5UH5 → NO STK - 7/3/2026');
 }
 
+// ONE-TIME — Run removeOem_INMP411ACEZ_Jul3()
+// David reported INMP411ACEZ #3987 No stk on 7/3/2026.
+// Forte row 3987 = Open. OEM EXCESS may have INMP411ACEZ-R7 row 87945 (fuzzy) — stamp only if exact found.
+// Reply draft r6068198179012203386 already created.
+function removeOem_INMP411ACEZ_Jul3() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  // Search for exact INMP411ACEZ in OEM (col B)
+  var data = oemSheet.getRange(2, 2, oemSheet.getLastRow() - 1, 1).getValues();
+  var oemRowToDelete = null;
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][0] === 'INMP411ACEZ') { oemRowToDelete = i + 2; break; }
+  }
+  if (oemRowToDelete) {
+    oemSheet.getRange(oemRowToDelete, 5).setValue('NO STK 7/3/2026');
+    SpreadsheetApp.flush();
+    oemSheet.deleteRow(oemRowToDelete);
+    Logger.log('Stamped and deleted OEM INMP411ACEZ (row ' + oemRowToDelete + ')');
+  } else {
+    Logger.log('OEM INMP411ACEZ exact row not found (may already be deleted)');
+  }
+  // Stamp Forte row 3987
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var cell = forteSheet.getRange(3987, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - 7/3/2026');
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 3987 INMP411ACEZ → NO STK - 7/3/2026');
+}
+
 // ONE-TIME — Run addForte_PVA1OAH21_Jul3()
 // LAYTEC DESIGN & CONSULTING INC (ikalman@laytec.com) — website RFQ 7/3/2026
 // PVA1OAH21.2NV2;PVA1OAH2SNA, 2200 qty, TP $0.60, Canada

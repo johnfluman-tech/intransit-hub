@@ -893,18 +893,28 @@ function checkDavidNoStockEmails() {
   hubLog('run', 'checkDavidNoStockEmails: ' + threads.length + ' thread(s)');
   if (!threads.length) return;
   var label = GmailApp.getUserLabelByName(INCOMING_LABEL)||GmailApp.createLabel(INCOMING_LABEL);
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
   threads.forEach(function(thread) {
     var msg = thread.getMessages()[thread.getMessageCount()-1];
     var subject = msg.getSubject();
     var mpn = extractMPN(subject);
     if (mpn) {
-      var davidBody = buildSimpleHTML('Removed - MPN: ' + mpn);
-      createThreadedDraft(DAVID_EMAIL,'Re: '+subject,davidBody,msg.getId(),thread.getId(),null);
-      hubLog('draft_created', 'David removal draft: ' + mpn, {mpn: mpn});
-      Logger.log('David draft created: ' + mpn);
+      // Extract Forte row number from subject: "[MPN] #[row]" or "#[row] [MPN]"
+      var forteRowMatch = subject.match(/#(\d+)/);
+      var forteRow = forteRowMatch ? parseInt(forteRowMatch[1]) : null;
+      // Stamp + delete OEM EXCESS row(s) for this MPN
+      deletePart(mpn, subject);
+      // Stamp Forte for this MPN (all Open rows)
+      updateForteSheet(mpn);
+      hubLog('run', 'David no-stk: stamped Forte for ' + mpn + (forteRow ? ' #' + forteRow : ''));
+      // Draft "Ok, removed from listing" to David
+      var replyHtml = buildSimpleHTML('Ok, removed from listing.');
+      createThreadedDraft(DAVID_EMAIL,'Re: '+subject,replyHtml,msg.getId(),thread.getId(),null);
+      hubLog('draft_created', 'David no-stk reply: ' + mpn, {mpn: mpn, forteRow: forteRow});
+      Logger.log('David no-stk handled: ' + mpn + (forteRow ? ' #' + forteRow : ''));
     } else {
       GmailApp.sendEmail(NOTIFY_EMAIL,'OEM EXCESS: Could not identify MPN',
-        'Subject: "'+subject+'"\nDate: '+msg.getDate()+'\nhttps://mail.google.com/mail/u/0/#inbox/'+thread.getId()+'\n\nReply to David: "Removed - MPN: [part number]"');
+        'Subject: "'+subject+'"\nDate: '+msg.getDate()+'\nhttps://mail.google.com/mail/u/0/#inbox/'+thread.getId()+'\n\nReply to David: "Ok, removed from listing."');
     }
     thread.addLabel(label);
   });
