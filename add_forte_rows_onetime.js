@@ -773,6 +773,46 @@ function removeOem_INMP411ACEZ_Jul3() {
   Logger.log('Stamped Forte row 3987 INMP411ACEZ → NO STK - 7/3/2026');
 }
 
+// ONE-TIME — Run removeDavidNoStk_3x_Jul3()
+// Three David no-stk emails processed manually 7/3/2026:
+//   676008001 #3985 Stock Sold  → OEM row 19632, Forte row 3985
+//   IS43TR16640C-125JBLI #3984 No stk → OEM row 89034, Forte row 3984
+//   BAS4002ARPPE6327 #3988 no stk → OEM row 66966, Forte row 3988
+// Drafts: r-7499660713323468487, r5672943263510560525, r-7812586594929483963
+function removeDavidNoStk_3x_Jul3() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/3/2026';
+
+  // OEM rows — stamp col E then delete (process in descending order to preserve row numbers)
+  var oemRows = [
+    {row: 89034, mpn: 'IS43TR16640C-125JBLI'},
+    {row: 66966, mpn: 'BAS4002ARPPE6327'},
+    {row: 19632, mpn: '676008001'},
+  ].sort(function(a,b){ return b.row - a.row; });
+  oemRows.forEach(function(r) {
+    oemSheet.getRange(r.row, 5).setValue('NO STK ' + today);
+    SpreadsheetApp.flush();
+    oemSheet.deleteRow(r.row);
+    Logger.log('Stamped + deleted OEM row ' + r.row + ' (' + r.mpn + ')');
+  });
+
+  // Forte rows — stamp col K black NO STK
+  [{row:3985,mpn:'676008001'},{row:3984,mpn:'IS43TR16640C-125JBLI'},{row:3988,mpn:'BAS4002ARPPE6327'}].forEach(function(r){
+    var cell = forteSheet.getRange(r.row, 11);
+    cell.clearDataValidations();
+    cell.setValue('NO STK - ' + today);
+    cell.setBackground('#000000');
+    cell.setFontColor('#FFFFFF');
+    cell.setFontWeight('bold');
+    Logger.log('Stamped Forte row ' + r.row + ' ' + r.mpn);
+  });
+  SpreadsheetApp.flush();
+  Logger.log('removeDavidNoStk_3x_Jul3 complete');
+}
+
 // ONE-TIME — Run addForte_PVA1OAH21_Jul3()
 // LAYTEC DESIGN & CONSULTING INC (ikalman@laytec.com) — website RFQ 7/3/2026
 // PVA1OAH21.2NV2;PVA1OAH2SNA, 2200 qty, TP $0.60, Canada
