@@ -1318,6 +1318,7 @@ STANDARD REPLY TEMPLATES (use exact wording in reply_options drafts):
 - request_tp_500: "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away."
 - msg_checking: "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
 - bill_handle: "Bill will help with this request"
+- remove_oem (David no-stock, reply to david@fortetechno.com): "Ok, removed from listing"
 - no_bid/decline: (no reply — silence is the no-bid; or a brief "we are not able to help with this at this time")
 
 Based on the email above, reason step-by-step about what should have happened and why it was missed.

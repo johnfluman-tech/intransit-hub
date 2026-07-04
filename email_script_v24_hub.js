@@ -3118,22 +3118,79 @@ function addonUseReplyOption(e) {
     var action   = params.action   || '';
     var optLabel = params.optLabel || action;
 
-    // Create draft reply in thread
+    // Show preview card so John can edit before sending
+    var card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('📝 Preview Draft').setSubtitle(optLabel));
+
+    var previewSection = CardService.newCardSection().setHeader('Edit before sending:');
+    previewSection.addWidget(CardService.newTextInput()
+      .setFieldName('draftContent')
+      .setTitle('Draft body')
+      .setValue(draft)
+      .setMultiline(true));
+    previewSection.addWidget(CardService.newTextInput()
+      .setFieldName('editNote')
+      .setTitle('Why did you change it? (optional — saved as training)')
+      .setMultiline(false));
+    previewSection.addWidget(CardService.newTextButton()
+      .setText('✅ Create This Draft')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1a7340')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonConfirmDraft')
+        .setParameters({
+          threadId: threadId, subject: subject, fromH: fromH,
+          action: action, optLabel: optLabel,
+          diagAction: params.diagAction || '',
+          diagReason: params.diagReason || '',
+          needsScript: params.needsScript || 'false',
+          scriptNote: params.scriptNote || ''
+        })));
+    card.addSection(previewSection);
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
+  } catch(err) { return notify('Error showing preview: ' + err.toString()); }
+}
+
+function addonConfirmDraft(e) {
+  try {
+    var params     = e.commonEventObject.parameters;
+    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+    var threadId   = params.threadId || '';
+    var subject    = params.subject  || '';
+    var fromH      = params.fromH    || '';
+    var action     = params.action   || '';
+    var optLabel   = params.optLabel || action;
+    var draftContent = (formInputs.draftContent && formInputs.draftContent.stringInputs && formInputs.draftContent.stringInputs.value[0]) || '';
+    var editNote     = (formInputs.editNote     && formInputs.editNote.stringInputs     && formInputs.editNote.stringInputs.value[0])     || '';
+
     var thread = GmailApp.getThreadById(threadId);
     if (!thread) return notify('Thread not found.');
     var msgs = thread.getMessages();
     var lastMsg = msgs[msgs.length - 1];
-    var toEmail = fromH || lastMsg.getReplyTo() || lastMsg.getFrom();
-    toEmail = extractBuyerEmail(toEmail);
+    var toEmail = extractBuyerEmail(fromH || lastMsg.getFrom());
 
-    var html = buildSimpleHTML(draft.replace(/\n/g, '<br>'));
-    createThreadedDraft(toEmail, 'Re: ' + subject, html, threadId, lastMsg.getId());
+    // For remove_oem: delete from OEM sheet + stamp Forte before drafting
+    if (action === 'remove_oem') {
+      var rmMpn = extractMPN(subject);
+      if (rmMpn) {
+        deletePart(rmMpn, subject);
+        updateForteSheet(rmMpn);
+        hubLog('run', 'Sidebar remove_oem: ' + rmMpn, {mpn: rmMpn, source: 'sidebar'});
+      }
+    }
+
+    var html = buildSimpleHTML(draftContent.replace(/\n/g, '<br>'));
+    createThreadedDraft(toEmail, 'Re: ' + subject, html, lastMsg.getId(), threadId, null);
 
     // Show training confirmation card
     var card = CardService.newCardBuilder()
       .setHeader(CardService.newCardHeader().setTitle('✅ Draft Created').setSubtitle(optLabel));
     var confirmSection = CardService.newCardSection().setHeader('Log as training?');
-    confirmSection.addWidget(CardService.newTextParagraph().setText('Draft created using: ' + optLabel + '\n\nSave this as training so the worker learns from it?'));
+    var trainingNote = 'Draft created using: ' + optLabel;
+    if (editNote) trainingNote += '\n\nYour note: "' + editNote + '"';
+    confirmSection.addWidget(CardService.newTextParagraph().setText(trainingNote + '\n\nSave this as training so the worker learns from it?'));
     confirmSection.addWidget(CardService.newTextButton()
       .setText('✓ Yes — Save to Worker Memory')
       .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
@@ -3144,7 +3201,7 @@ function addonUseReplyOption(e) {
           subject: subject, fromH: fromH,
           action: action,
           trigger: '',
-          reason: params.diagReason || '',
+          reason: (params.diagReason || '') + (editNote ? ' | John note: ' + editNote : ''),
           agreed: 'true',
           needsScript: params.needsScript || 'false',
           scriptNote: params.scriptNote || ''
