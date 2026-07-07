@@ -1175,3 +1175,43 @@ function cleanOemExcessStructure() {
   Logger.log('cleanOemExcessStructure complete — blank rows deleted: ' + blankRows.length + ', MPN whitespace fixed: ' + messyMpnRows.length);
   Logger.log('NOTE: ESR5-NO-31-24VAC-DC still needs a QTY value entered manually in the sheet.');
 }
+
+// ONE-TIME — Run after sending draft r-[id] to David.
+// Removes SLI-343P8G3F from OEM EXCESS (row 122060) and stamps Forte.
+// David email: "SLI-343P8G3F #4010  No stock" (2026-07-07)
+function removeOem_SLI343P8G3F_David_Jul7() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var today = '7/7/2026';
+  var noStkStamp = 'NO STK ' + today;
+
+  // 1. Delete OEM EXCESS row 122060 (SLI-343P8G3F, qty 617)
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var oemRow = oemSheet.getRange(122060, 1, 1, 5).getValues()[0];
+  Logger.log('OEM row 122060 before delete: ' + JSON.stringify(oemRow));
+  if (String(oemRow[0]).trim().toUpperCase() !== 'SLI-343P8G3F') {
+    Logger.log('ERROR: row 122060 MPN mismatch — expected SLI-343P8G3F, got ' + oemRow[0]);
+    return;
+  }
+  oemSheet.getRange(122060, 5).setValue(noStkStamp);
+  oemSheet.deleteRow(122060);
+  Logger.log('Deleted OEM row 122060 (SLI-343P8G3F)');
+
+  // 2. Stamp Forte — find all open SLI-343P8G3F rows and mark NO STK
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = forteSheet.getDataRange().getValues();
+  var stamped = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][1]).trim().toUpperCase() === 'SLI-343P8G3F' &&
+        String(data[i][10]).trim().toUpperCase() !== 'CLOSED') {
+      var cell = forteSheet.getRange(i + 1, 11); // col K = Status
+      cell.setValue('NO STK - ' + today);
+      cell.setBackground('#000000');
+      cell.setFontColor('#FFFFFF');
+      cell.setFontWeight('bold');
+      Logger.log('Stamped Forte row ' + (i + 1) + ' (SLI-343P8G3F)');
+      stamped++;
+    }
+  }
+  Logger.log('removeOem_SLI343P8G3F_David_Jul7 complete — Forte rows stamped: ' + stamped);
+}
