@@ -1090,3 +1090,88 @@ function removeOemRows_DavidNoStk_Jul7() {
   SpreadsheetApp.flush();
   Logger.log('removeOemRows_DavidNoStk_Jul7 complete — OEM rows deleted: ' + oemRows.length + ', Forte rows stamped: ' + stamped);
 }
+
+// ── Audit OEM EXCESS for ICS upload quality issues ──────────────────────────
+// Run to diagnose which rows are being rejected by ICS (post@icsource.com).
+// Logs: rows with blank/non-numeric QTY, rows with whitespace in MPN,
+// blank trailing rows, and qty values stored as comma-text.
+// Does NOT modify the sheet — read-only diagnostic.
+function auditOemExcessICSQuality() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var data = sheet.getDataRange().getValues();
+  var totalRows = data.length - 1; // exclude header
+  var nullQty = [], commaTextQty = [], blankMpn = [], messyMpn = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var mpn = String(data[i][0]);
+    var mpnTrimmed = mpn.trim();
+    var qty = data[i][3];
+    var sheetRow = i + 1;
+
+    if (!mpnTrimmed) {
+      blankMpn.push(sheetRow);
+      continue;
+    }
+    if (mpn !== mpnTrimmed) {
+      messyMpn.push({ row: sheetRow, mpn: JSON.stringify(mpn) });
+    }
+
+    if (qty === '' || qty === null || qty === undefined) {
+      nullQty.push({ row: sheetRow, mpn: mpnTrimmed, qty: '(empty)' });
+    } else if (typeof qty === 'string' && qty.indexOf(',') >= 0) {
+      var num = parseFloat(qty.replace(/,/g, ''));
+      if (!isNaN(num)) {
+        commaTextQty.push({ row: sheetRow, mpn: mpnTrimmed, qty: qty });
+      } else {
+        nullQty.push({ row: sheetRow, mpn: mpnTrimmed, qty: qty + ' (non-numeric)' });
+      }
+    } else {
+      var n = parseFloat(String(qty).replace(/,/g, ''));
+      if (isNaN(n) || n <= 0) {
+        nullQty.push({ row: sheetRow, mpn: mpnTrimmed, qty: String(qty) });
+      }
+    }
+  }
+
+  Logger.log('=== OEM EXCESS ICS Quality Audit ===');
+  Logger.log('Total data rows: ' + totalRows);
+  Logger.log('Rows that will be REJECTED by ICS (null/non-numeric qty): ' + nullQty.length);
+  nullQty.forEach(function(r) { Logger.log('  Row ' + r.row + ': ' + r.mpn + ' | QTY=' + r.qty); });
+  Logger.log('Rows with comma-text qty (converted to number during upload): ' + commaTextQty.length);
+  if (commaTextQty.length <= 20) commaTextQty.forEach(function(r) { Logger.log('  Row ' + r.row + ': ' + r.mpn + ' | QTY=' + r.qty); });
+  Logger.log('Blank MPN rows (trailing/phantom rows): ' + blankMpn.length);
+  if (blankMpn.length) Logger.log('  Rows: ' + blankMpn.join(', '));
+  Logger.log('Rows with whitespace in MPN: ' + messyMpn.length);
+  messyMpn.forEach(function(r) { Logger.log('  Row ' + r.row + ': ' + r.mpn); });
+  Logger.log('=== End Audit ===');
+}
+
+// ── Delete blank trailing rows and clean MPN whitespace in OEM EXCESS ───────
+// Run once after auditOemExcessICSQuality() to fix structural data quality.
+// - Deletes rows where FullPartNumber (col A) is completely blank
+// - Strips leading/trailing whitespace and tab characters from MPN values
+// Does NOT add or remove qty values — ESR5-NO-31-24VAC-DC still needs a qty entered manually.
+function cleanOemExcessStructure() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var data = sheet.getDataRange().getValues();
+  var blankRows = [], messyMpnRows = [];
+
+  for (var i = data.length - 1; i >= 1; i--) { // bottom-up for safe deletion
+    var mpn = String(data[i][0]);
+    var mpnTrimmed = mpn.trim();
+    if (!mpnTrimmed) {
+      blankRows.push(i + 1);
+      sheet.deleteRow(i + 1);
+      Logger.log('Deleted blank row ' + (i + 1));
+    } else if (mpn !== mpnTrimmed) {
+      messyMpnRows.push(i + 1);
+      sheet.getRange(i + 1, 1).setValue(mpnTrimmed);
+      Logger.log('Cleaned MPN whitespace at row ' + (i + 1) + ': ' + JSON.stringify(mpn) + ' → ' + mpnTrimmed);
+    }
+  }
+  SpreadsheetApp.flush();
+  Logger.log('cleanOemExcessStructure complete — blank rows deleted: ' + blankRows.length + ', MPN whitespace fixed: ' + messyMpnRows.length);
+  Logger.log('NOTE: ESR5-NO-31-24VAC-DC still needs a QTY value entered manually in the sheet.');
+}

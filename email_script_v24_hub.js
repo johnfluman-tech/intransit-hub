@@ -1722,10 +1722,41 @@ function processCommandQueue() {
             'Stan@amorelectronics.com'
           ].join(',');
 
-          var oemBlob = UrlFetchApp.fetch(
-            'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/export?format=xlsx',
-            fetchOpts
-          ).getBlob().setName('OEM_EXCESS.xlsx');
+          // Build a clean filtered OEM EXCESS XLSX via a temp sheet:
+          // - Keeps header row (ICS needs it for column mapping)
+          // - Skips rows with blank MPN or blank/non-numeric QTY
+          // - Converts comma-text quantities ("1,254") to plain numbers
+          // - Removes trailing whitespace from MPN
+          // This prevents ICS rejections for null qty and phantom blank rows.
+          var oemBlob;
+          var oemSS = SpreadsheetApp.openById(SPREADSHEET_ID);
+          var srcData = oemSS.getSheets()[0].getDataRange().getValues();
+          var tempSheet = oemSS.insertSheet('_ICS_UPLOAD_TEMP');
+          try {
+            tempSheet.appendRow(srcData[0]); // header row
+            var skipped = 0;
+            for (var di = 1; di < srcData.length; di++) {
+              var mpn = String(srcData[di][0]).trim();
+              if (!mpn) { skipped++; continue; }
+              var qtyRaw = srcData[di][3];
+              var qtyNum = (typeof qtyRaw === 'number') ? qtyRaw
+                         : parseFloat(String(qtyRaw).replace(/,/g, ''));
+              if (isNaN(qtyNum) || qtyNum <= 0) { skipped++; continue; }
+              var cleanRow = srcData[di].slice();
+              cleanRow[0] = mpn;
+              cleanRow[3] = qtyNum;
+              tempSheet.appendRow(cleanRow);
+            }
+            SpreadsheetApp.flush();
+            var gid = tempSheet.getSheetId();
+            oemBlob = UrlFetchApp.fetch(
+              'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/export?format=xlsx&gid=' + gid,
+              fetchOpts
+            ).getBlob().setName('OEM_EXCESS.xlsx');
+            hubLog('inventory', 'OEM EXCESS clean export: ' + (srcData.length - 1 - skipped) + ' rows sent, ' + skipped + ' blank/null-qty rows skipped', {});
+          } finally {
+            try { oemSS.deleteSheet(tempSheet); } catch(e) {}
+          }
 
           var inBlob = UrlFetchApp.fetch(
             'https://docs.google.com/spreadsheets/d/' + IN_STOCK_ID + '/export?format=xlsx',
