@@ -954,31 +954,139 @@ function addForte_TMC2224_Baalaji_Jul7() {
 }
 
 // ── Remove OEM EXCESS row — 926823-2 #3915, David no-stk 7/7/2026 ──
+// OEM row 59256 (confirmed via web app — NOT 3915 which is the Forte row ref in subject)
 function removeOem_9268232_3915() {
   var sheet = SpreadsheetApp.openById('1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4').getSheets()[0];
-  sheet.getRange(3915, 5).setValue('NO STK 7/7/2026');
-  sheet.deleteRow(3915);
-  Logger.log('Removed OEM row 3915: 926823-2');
+  sheet.getRange(59256, 5).setValue('NO STK 7/7/2026');
+  sheet.deleteRow(59256);
+  Logger.log('Removed OEM row 59256: 926823-2');
+}
+
+// ── Remove OEM EXCESS rows — David "Removing..." replies Jun 30–Jul 3 ──────────
+// These MPNs are still in OEM EXCESS because John replied with "Removing [MPN] from
+// OEM EXCESS" (not "Removed - MPN: [MPN]"), so Trigger 2's pattern never matched.
+// Rows deleted highest-first. Forte stamped by MPN name (skips already-stamped rows).
+// OEM rows:
+//   VRF2933MP: 135471 | SAMSUNG CL05X226MR6NUW8: 120011 | S24SE05006PDFA: 119411
+//   PM2120-330K-RC: 113580-113585 | MT53E1G32D2FW-046IT:B: 107005
+//   FPF2700MPX: 83558 | EPCS16SI8: 80812-80813 | AL8860MP-13: 63633
+function removeOemRows_MissingRemovals_Jun30Jul3() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+
+  // Stamp then delete in descending order
+  var oemRows = [
+    { row: 135471, mpn: 'VRF2933MP',                  date: '6/30/2026' },
+    { row: 120011, mpn: 'SAMSUNG CL05X226MR6NUW8',    date: '7/2/2026'  },
+    { row: 119411, mpn: 'S24SE05006PDFA',              date: '7/1/2026'  },
+    { row: 113585, mpn: 'PM2120-330K-RC',              date: '6/30/2026' },
+    { row: 113584, mpn: 'PM2120-330K-RC',              date: '6/30/2026' },
+    { row: 113583, mpn: 'PM2120-330K-RC',              date: '6/30/2026' },
+    { row: 113582, mpn: 'PM2120-330K-RC',              date: '6/30/2026' },
+    { row: 113581, mpn: 'PM2120-330K-RC',              date: '6/30/2026' },
+    { row: 113580, mpn: 'PM2120-330K-RC',              date: '6/30/2026' },
+    { row: 107005, mpn: 'MT53E1G32D2FW-046IT:B',       date: '7/3/2026'  },
+    { row: 83558,  mpn: 'FPF2700MPX',                  date: '7/1/2026'  },
+    { row: 80813,  mpn: 'EPCS16SI8',                   date: '6/30/2026' },
+    { row: 80812,  mpn: 'EPCS16SI8',                   date: '6/30/2026' },
+    { row: 63633,  mpn: 'AL8860MP-13',                 date: '7/1/2026'  },
+  ];
+  oemRows.forEach(function(r) {
+    oemSheet.getRange(r.row, 5).setValue('NO STK ' + r.date);
+    SpreadsheetApp.flush();
+    oemSheet.deleteRow(r.row);
+    Logger.log('Stamped + deleted OEM row ' + r.row + ' (' + r.mpn + ')');
+  });
+
+  // Stamp Forte by MPN name — skips rows already marked NO STK
+  var forteStamps = [
+    { mpn: 'AL8860MP-13',              date: '7/1/2026'  },
+    { mpn: 'SAMSUNG CL05X226MR6NUW8', date: '7/2/2026'  },
+    { mpn: 'VRF2933MP',               date: '6/30/2026' },
+    { mpn: 'PM2120-330K-RC',          date: '6/30/2026' },
+    { mpn: 'PM2120330KRC',            date: '6/30/2026' },
+    { mpn: 'EPCS16SI8',               date: '6/30/2026' },
+    { mpn: 'FPF2700MPX',              date: '7/1/2026'  },
+    { mpn: 'S24SE05006PDFA',          date: '7/1/2026'  },
+    { mpn: 'MT53E1G32D2FW-046IT:B',   date: '7/3/2026'  },
+    { mpn: 'MT53E1G32D2FW-046 IT:B TR', date: '7/3/2026' },
+  ];
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = forteSheet.getDataRange().getValues();
+  var mpnSet = {};
+  forteStamps.forEach(function(s) { mpnSet[s.mpn.toUpperCase()] = s.date; });
+  var stamped = 0;
+  for (var i = 1; i < data.length; i++) {
+    var mpn = String(data[i][1]).trim();
+    var status = String(data[i][10] || '').trim();
+    var noStkDate = mpnSet[mpn.toUpperCase()];
+    if (!noStkDate) continue;
+    if (status.toUpperCase().indexOf('NO STK') >= 0 || status.toUpperCase() === 'CLOSED') continue;
+    var cell = forteSheet.getRange(i + 1, 11);
+    cell.clearDataValidations();
+    cell.setValue('NO STK - ' + noStkDate);
+    cell.setBackground('#000000');
+    cell.setFontColor('#FFFFFF');
+    cell.setFontWeight('bold');
+    Logger.log('Forte row ' + (i + 1) + ': ' + mpn + ' → NO STK - ' + noStkDate);
+    stamped++;
+  }
+  SpreadsheetApp.flush();
+  Logger.log('removeOemRows_MissingRemovals_Jun30Jul3 complete — OEM rows: ' + oemRows.length + ', Forte rows stamped: ' + stamped);
 }
 
 // ── Remove OEM EXCESS rows — David no-stk replies, 7/7/2026 batch ──
-// Run AFTER sending all 8 "Ok, removed from listing" drafts.
-// Rows deleted highest-first so row numbers don't shift during deletion.
+// Run AFTER sending all 8 "Ok, removed from listing" replies.
+// Row numbers confirmed via web app — the #XXXX in David's subject are Forte refs, NOT OEM rows.
+// TPS23861PWR has TWO OEM rows. OEM rows deleted highest-first. Forte stamped by MPN name.
 function removeOemRows_DavidNoStk_Jul7() {
-  var sheet = SpreadsheetApp.openById('1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4').getSheets()[0];
-  var rows = [
-    { row: 4005, mpn: 'TPS23861PWR' },
-    { row: 4004, mpn: 'MT25QU02GCBB8E12-0AATTR' },
-    { row: 4001, mpn: 'TPW1R306PLL1QM' },
-    { row: 4000, mpn: 'VIPER26HDTR' },
-    { row: 3999, mpn: 'AD633JRZ' },
-    { row: 3998, mpn: 'LTC7150SJY-4#PBF' },
-    { row: 3994, mpn: 'DD-00429VP-200' },
-    { row: 3992, mpn: 'XCZU27DR-2FFVE1156I' },
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var oemRows = [
+    { row: 136784, mpn: 'XCZU27DR-2FFVE1156I' },
+    { row: 135261, mpn: 'VIPER26HDTR' },
+    { row: 132506, mpn: 'TPW1R306PLL1QM' },
+    { row: 131148, mpn: 'TPS23861PWR' },
+    { row: 131147, mpn: 'TPS23861PWR' },
+    { row: 106638, mpn: 'MT25QU02GCBB8E12-0AATTR' },
+    { row: 96636,  mpn: 'LTC7150SJY-4#PBF' },
+    { row: 76726,  mpn: 'DD-00429VP-200' },
+    { row: 62092,  mpn: 'AD633JRZ' },
   ];
-  rows.forEach(function(r) {
-    sheet.getRange(r.row, 5).setValue('NO STK 7/7/2026');
-    sheet.deleteRow(r.row);
+  oemRows.forEach(function(r) {
+    oemSheet.getRange(r.row, 5).setValue('NO STK 7/7/2026');
+    oemSheet.deleteRow(r.row);
     Logger.log('Removed OEM row ' + r.row + ': ' + r.mpn);
   });
+  SpreadsheetApp.flush();
+
+  // Stamp Forte by MPN name (search-based, safe against row-number shifts)
+  var forteStamps = [
+    'XCZU27DR-2FFVE1156I', 'VIPER26HDTR', 'TPW1R306PLL1QM', 'TPS23861PWR',
+    'MT25QU02GCBB8E12-0AATTR', 'LTC7150SJY-4#PBF', 'DD-00429VP-200', 'AD633JRZ'
+  ];
+  var mpnSet = {};
+  forteStamps.forEach(function(m) { mpnSet[m.toUpperCase()] = true; });
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = forteSheet.getDataRange().getValues();
+  var stamped = 0;
+  for (var i = 1; i < data.length; i++) {
+    var mpn = String(data[i][1]).trim();
+    var status = String(data[i][10] || '').trim();
+    if (!mpnSet[mpn.toUpperCase()]) continue;
+    if (status.toUpperCase().indexOf('NO STK') >= 0 || status.toUpperCase() === 'CLOSED') continue;
+    var cell = forteSheet.getRange(i + 1, 11);
+    cell.clearDataValidations();
+    cell.setValue('NO STK - 7/7/2026');
+    cell.setBackground('#000000');
+    cell.setFontColor('#FFFFFF');
+    cell.setFontWeight('bold');
+    Logger.log('Forte row ' + (i + 1) + ': ' + mpn + ' → NO STK - 7/7/2026');
+    stamped++;
+  }
+  SpreadsheetApp.flush();
+  Logger.log('removeOemRows_DavidNoStk_Jul7 complete — OEM rows deleted: ' + oemRows.length + ', Forte rows stamped: ' + stamped);
 }
