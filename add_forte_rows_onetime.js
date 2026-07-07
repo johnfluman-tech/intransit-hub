@@ -953,6 +953,14 @@ function addForte_TMC2224_Baalaji_Jul7() {
   Logger.log('Added Forte row ' + nextRow + ': TMC2224-LA-T, qty 1900, TP $1.50, IN');
 }
 
+// ── Remove OEM EXCESS row — 926823-2 #3915, David no-stk 7/7/2026 ──
+function removeOem_9268232_3915() {
+  var sheet = SpreadsheetApp.openById('1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4').getSheets()[0];
+  sheet.getRange(3915, 5).setValue('NO STK 7/7/2026');
+  sheet.deleteRow(3915);
+  Logger.log('Removed OEM row 3915: 926823-2');
+}
+
 // ── Remove OEM EXCESS rows — David no-stk replies, 7/7/2026 batch ──
 // Run AFTER sending all 8 "Ok, removed from listing" drafts.
 // Rows deleted highest-first so row numbers don't shift during deletion.
