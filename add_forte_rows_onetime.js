@@ -872,3 +872,39 @@ function unlabelStuckDavidThreads() {
   });
   Logger.log('Done — Trigger 7 will process these on next run.');
 }
+
+// ── David no-stk: RP604K331A-TR #3975 (7/7/2026) ────────────────────────────
+// Stamp OEM row 118520 NO STK, delete it, stamp Forte row 3975 black NO STK.
+function removeOem_RP604K331ATR_3975() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var today = '7/7/2026';
+
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  oemSheet.getRange(118520, 5).setValue('NO STK ' + today);
+  SpreadsheetApp.flush();
+  oemSheet.deleteRow(118520);
+  SpreadsheetApp.flush();
+  Logger.log('OEM row 118520 (RP604K331A-TR) stamped and deleted');
+
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var cell = forteSheet.getRange(3975, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - ' + today);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Forte row 3975 stamped NO STK - ' + today);
+}
+
+// ── Add Forte entry: KSM26RS8/8HDI — Teresa/Motek, msg_checking sent 7/7/2026 ──
+function addForte_KSM26RS8_Teresa_Jul7() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/7/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, 'KSM26RS8/8HDI', 30, 70, '', 'US',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': KSM26RS8/8HDI, qty 30, TP $70, US');
+}
