@@ -1253,7 +1253,7 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
 
 // Sonnet audits the Haiku decision; if wrong, trashes draft and re-executes corrected version.
 function auditAndCorrect(decision, draftId, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent) {
-  var auditableActions = ['msg_checking','request_tp_500','request_tp_2000','bill_handle','own_stock','stan_quoted','add_to_stan'];
+  var auditableActions = ['msg_checking','request_tp_500','request_tp_2000','request_qty','bill_handle','own_stock','stan_quoted','add_to_stan'];
   if (auditableActions.indexOf(decision.action) < 0) return;
   try {
     var resp = UrlFetchApp.fetch(HUB_URL + '/api/audit-draft', {
