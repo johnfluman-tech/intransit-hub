@@ -908,3 +908,47 @@ function addForte_KSM26RS8_Teresa_Jul7() {
     '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
   Logger.log('Added Forte row ' + nextRow + ': KSM26RS8/8HDI, qty 30, TP $70, US');
 }
+
+// ── Add Forte entry: 5EHM1S — Gabe/a2global, msg_checking sent 7/7/2026 ──
+function addForte_5EHM1S_Gabe_Jul7() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/7/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, '5EHM1S', 250, 40, '', 'US',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': 5EHM1S, qty 250, TP $40, US');
+}
+
+// ── Add Forte entry: XP1001000-05R — Craig/Whistler, msg_checking sent 7/7/2026 ──
+function addForte_XP1001000_Craig_Jul7() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/7/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, 'XP1001000-05R', 100, 28, '', 'GB',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': XP1001000-05R, qty 100, TP $28, GB');
+}
+
+// ── Add Forte entry: ISL83075EIBZA-T — Alisson/Chip1, msg_checking sent 7/7/2026 ──
+function addForte_ISL83075_Alisson_Jul7() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/7/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, 'ISL83075EIBZA-T', 20000, 0.7, '', 'US',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': ISL83075EIBZA-T, qty 20000, TP $0.70, US');
+}
+
+// ── Add Forte entry: TMC2224-LA-T — Baalaji/Himil, msg_checking sent 7/7/2026 ──
+function addForte_TMC2224_Baalaji_Jul7() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/7/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, 'TMC2224-LA-T', 1900, 1.5, '', 'IN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': TMC2224-LA-T, qty 1900, TP $1.50, IN');
+}
