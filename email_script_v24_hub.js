@@ -283,6 +283,25 @@ function createThreadedDraft(toEmail, subject, htmlBody, replyToGmailMsgId, thre
   return result.id;
 }
 
+function sendThreadedReply(toEmail, subject, htmlBody, replyToGmailMsgId, threadId) {
+  var rfcId = getRFC2822MessageId(replyToGmailMsgId);
+  var lines = ['From: John Fluman <' + JOHN_EMAIL + '>', 'To: ' + toEmail, 'Subject: ' + subject];
+  if (rfcId) { lines.push('In-Reply-To: ' + rfcId); lines.push('References: ' + rfcId); }
+  lines.push('MIME-Version: 1.0', 'Content-Type: text/html; charset=UTF-8', '', htmlBody);
+  var encoded = Utilities.base64EncodeWebSafe(lines.join('\r\n'));
+  var url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken(), 'Content-Type': 'application/json' },
+    payload: JSON.stringify({ raw: encoded, threadId: threadId }),
+    muteHttpExceptions: true
+  });
+  var result = JSON.parse(resp.getContentText());
+  if (result.error) { Logger.log('API send error: ' + JSON.stringify(result.error)); return null; }
+  Logger.log('Auto-sent reply | To: ' + toEmail + ' | ' + subject);
+  return result.id;
+}
+
 // ── Signature + HTML builder ──────────────────────────────────
 
 function getSignatureHTML() {
@@ -888,35 +907,36 @@ function deletePart(partNumber, emailSubject) {
 function checkDavidNoStockEmails() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkDavidNoStockEmails: disabled via hub config'); return; }
-  var query = 'from:'+DAVID_EMAIL+' (subject:"no stk" OR subject:"no stock" OR subject:"removed" OR subject:"stock sold" OR "removed" OR "cant share") -label:'+INCOMING_LABEL+' in:inbox';
-  var threads = GmailApp.search(query,0,20);
+  // Simple query — keyword matching done in code for reliability
+  var query = 'from:' + DAVID_EMAIL + ' -label:' + INCOMING_LABEL + ' in:inbox';
+  var threads = GmailApp.search(query, 0, 20);
   hubLog('run', 'checkDavidNoStockEmails: ' + threads.length + ' thread(s)');
   if (!threads.length) return;
-  var label = GmailApp.getUserLabelByName(INCOMING_LABEL)||GmailApp.createLabel(INCOMING_LABEL);
-  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+  var noStkKeywords = ['no stk', 'no stock', 'cant find', 'cant share', 'cannot find', 'removed', 'stock sold'];
+  var label = GmailApp.getUserLabelByName(INCOMING_LABEL) || GmailApp.createLabel(INCOMING_LABEL);
   threads.forEach(function(thread) {
-    var msg = thread.getMessages()[thread.getMessageCount()-1];
+    var msg = thread.getMessages()[thread.getMessageCount() - 1];
     var subject = msg.getSubject();
+    var subjectLower = subject.toLowerCase();
+    var isNoStk = noStkKeywords.some(function(kw) { return subjectLower.indexOf(kw) >= 0; });
+    if (!isNoStk) return; // not a no-stk email — skip, leave unlabeled
     var mpn = extractMPN(subject);
     if (mpn) {
-      // Extract Forte row number from subject: "[MPN] #[row]" or "#[row] [MPN]"
-      var forteRowMatch = subject.match(/#(\d+)/);
-      var forteRow = forteRowMatch ? parseInt(forteRowMatch[1]) : null;
-      // Stamp + delete OEM EXCESS row(s) for this MPN
       deletePart(mpn, subject);
-      // Stamp Forte for this MPN (all Open rows)
       updateForteSheet(mpn);
-      hubLog('run', 'David no-stk: stamped Forte for ' + mpn + (forteRow ? ' #' + forteRow : ''));
-      // Draft "Ok, removed from listing" to David
+      hubLog('run', 'David no-stk: removed ' + mpn + ' from OEM EXCESS');
       var replyHtml = buildSimpleHTML('Ok, removed from listing.');
-      createThreadedDraft(DAVID_EMAIL,'Re: '+subject,replyHtml,msg.getId(),thread.getId(),null);
-      hubLog('draft_created', 'David no-stk reply: ' + mpn, {mpn: mpn, forteRow: forteRow});
-      Logger.log('David no-stk handled: ' + mpn + (forteRow ? ' #' + forteRow : ''));
+      sendThreadedReply(DAVID_EMAIL, 'Re: ' + subject, replyHtml, msg.getId(), thread.getId());
+      hubLog('run', 'David no-stk: auto-replied for ' + mpn);
+      Logger.log('David no-stk handled: ' + mpn);
     } else {
-      GmailApp.sendEmail(NOTIFY_EMAIL,'OEM EXCESS: Could not identify MPN',
-        'Subject: "'+subject+'"\nDate: '+msg.getDate()+'\nhttps://mail.google.com/mail/u/0/#inbox/'+thread.getId()+'\n\nReply to David: "Ok, removed from listing."');
+      GmailApp.sendEmail(NOTIFY_EMAIL, 'OEM EXCESS: Could not identify MPN in David no-stk email',
+        'Subject: "' + subject + '"\nDate: ' + msg.getDate() +
+        '\nhttps://mail.google.com/mail/u/0/#inbox/' + thread.getId() +
+        '\n\nManually reply: "Ok, removed from listing."');
     }
     thread.addLabel(label);
+    thread.moveToArchive();
   });
 }
 
