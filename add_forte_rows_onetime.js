@@ -952,3 +952,25 @@ function addForte_TMC2224_Baalaji_Jul7() {
     '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
   Logger.log('Added Forte row ' + nextRow + ': TMC2224-LA-T, qty 1900, TP $1.50, IN');
 }
+
+// ── Remove OEM EXCESS rows — David no-stk replies, 7/7/2026 batch ──
+// Run AFTER sending all 8 "Ok, removed from listing" drafts.
+// Rows deleted highest-first so row numbers don't shift during deletion.
+function removeOemRows_DavidNoStk_Jul7() {
+  var sheet = SpreadsheetApp.openById('1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4').getSheets()[0];
+  var rows = [
+    { row: 4005, mpn: 'TPS23861PWR' },
+    { row: 4004, mpn: 'MT25QU02GCBB8E12-0AATTR' },
+    { row: 4001, mpn: 'TPW1R306PLL1QM' },
+    { row: 4000, mpn: 'VIPER26HDTR' },
+    { row: 3999, mpn: 'AD633JRZ' },
+    { row: 3998, mpn: 'LTC7150SJY-4#PBF' },
+    { row: 3994, mpn: 'DD-00429VP-200' },
+    { row: 3992, mpn: 'XCZU27DR-2FFVE1156I' },
+  ];
+  rows.forEach(function(r) {
+    sheet.getRange(r.row, 5).setValue('NO STK 7/7/2026');
+    sheet.deleteRow(r.row);
+    Logger.log('Removed OEM row ' + r.row + ': ' + r.mpn);
+  });
+}
