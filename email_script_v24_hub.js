@@ -1166,7 +1166,8 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
 
   if (action === 'no_action' || action === 'no_bid') {
     hubLog('run', 'Worker: ' + action + ' for ' + mpn);
-    return null;
+    // no_bid with draft_body = buyer gave TP but no stock → fall through to draft decline
+    if (!(action === 'no_bid' && decision.draft_body)) return null;
   }
 
   if (action === 'add_to_stan') {
