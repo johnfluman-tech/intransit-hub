@@ -985,6 +985,7 @@ function checkInboxForTPReplies() {
     var isQ2Only = !q1Ids[thread.getId()];
     var messages = thread.getMessages();
     var lastMsg = messages[messages.length - 1];
+    var isQ3 = thread.getLabels().some(function(l){ return l.getName() === 'oem-qty-requested'; });
     if (lastMsg.getFrom().indexOf(JOHN_EMAIL) >= 0) return;
 
     // Q2-only: require ≥2 buyer messages (buyer replied after John's TP request)
@@ -1004,12 +1005,24 @@ function checkInboxForTPReplies() {
 
     // No numeric TP → leave unlabeled for manual handling (Bug 12 fix)
     var body = lastMsg.getPlainBody();
-    var tp = extractTargetPrice(stripQuotedLines(body));
-    if (!tp) {
-      hubLog('run', 'checkInboxForTPReplies: no TP found — leaving unlabeled: ' + thread.getFirstMessageSubject());
-      return;
+    var tp, tpNum;
+    if (isQ3) {
+      // Q3 (oem-qty-requested): buyer's last reply is their qty — TP is in an earlier message
+      for (var hi = 0; hi < messages.length; hi++) {
+        var hm = messages[hi];
+        if (hm.getFrom().indexOf(JOHN_EMAIL) >= 0 || hm.getFrom().indexOf('intransittech') >= 0) continue;
+        var tpCand = extractTargetPrice(stripQuotedLines(hm.getPlainBody()));
+        if (tpCand) { tp = tpCand; break; }
+      }
+      if (!tp) { hubLog('run', 'checkInboxForTPReplies q3: no TP in history for ' + thread.getFirstMessageSubject()); return; }
+    } else {
+      tp = extractTargetPrice(stripQuotedLines(body));
+      if (!tp) {
+        hubLog('run', 'checkInboxForTPReplies: no TP found — leaving unlabeled: ' + thread.getFirstMessageSubject());
+        return;
+      }
     }
-    var tpNum = parseFloat(String(tp).replace(/[^0-9.]/g, '')) || 0;
+    tpNum = parseFloat(String(tp).replace(/[^0-9.]/g, '')) || 0;
 
     var subject = thread.getFirstMessageSubject();
     var mpn = extractMPN(subject);
@@ -1047,6 +1060,16 @@ function checkInboxForTPReplies() {
       }
       if (!qty && isNetcompEmail(m.getFrom(), m.getSubject())) { var ncQ=extractNetcompsQtyReq(m.getBody()); if(ncQ) qty=ncQ; }
     });
+
+    // Q3 fallback: buyer's qty reply may be a bare number with no "pcs"/"ea" suffix (e.g. "600000")
+    if (!qty && isQ3) {
+      var qryRaw = stripQuotedLines(lastMsg.getPlainBody()).trim();
+      var qryNum = qryRaw.replace(/[,\s]/g, '');
+      if (/^\d+$/.test(qryNum)) {
+        var qn = parseInt(qryNum, 10);
+        if (qn >= 1) qty = String(qn);
+      }
+    }
 
     // MOV check — decline if line value below minimum. Default $500; $2000 for OEM rows that say so.
     // Skip for BILL EXT-only parts (worker handles those as bill_handle regardless of line value).
@@ -1102,7 +1125,15 @@ function checkInboxForTPReplies() {
 
     var draftIdTp = executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo);
     auditAndCorrect(decision, draftIdTp, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
-    thread.addLabel(label);
+    if (decision.action === 'request_qty') {
+      var qtyReqLabel = GmailApp.getUserLabelByName('oem-qty-requested') || GmailApp.createLabel('oem-qty-requested');
+      thread.addLabel(qtyReqLabel);
+    } else {
+      thread.addLabel(label); // oem-tp-processed
+    }
+    if (isQ3) {
+      try { var ql = GmailApp.getUserLabelByName('oem-qty-requested'); if (ql) thread.removeLabel(ql); } catch(e) {}
+    }
     if (decision.action === 'no_bid') thread.moveToArchive();
   });
 }

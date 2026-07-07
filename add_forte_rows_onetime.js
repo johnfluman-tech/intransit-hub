@@ -1215,3 +1215,43 @@ function removeOem_SLI343P8G3F_David_Jul7() {
   }
   Logger.log('removeOem_SLI343P8G3F_David_Jul7 complete — Forte rows stamped: ' + stamped);
 }
+
+// ONE-TIME — Run after sending draft r1787994097531601685 to David.
+// Removes 7289-7643-30 from OEM EXCESS (row 54289) and stamps Forte.
+// David email: "7289-7643-30 #3913  No stk" (2026-07-07)
+function removeOem_728976433_David_Jul7() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var today = '7/7/2026';
+  var noStkStamp = 'NO STK ' + today;
+
+  // 1. Delete OEM EXCESS row 54289 (7289-7643-30, qty 1335)
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var oemRow = oemSheet.getRange(54289, 1, 1, 5).getValues()[0];
+  Logger.log('OEM row 54289 before delete: ' + JSON.stringify(oemRow));
+  if (String(oemRow[0]).trim().toUpperCase() !== '7289-7643-30') {
+    Logger.log('ERROR: row 54289 MPN mismatch — expected 7289-7643-30, got ' + oemRow[0]);
+    return;
+  }
+  oemSheet.getRange(54289, 5).setValue(noStkStamp);
+  oemSheet.deleteRow(54289);
+  Logger.log('Deleted OEM row 54289 (7289-7643-30)');
+
+  // 2. Stamp Forte row #3913 and any other open rows for this MPN
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = forteSheet.getDataRange().getValues();
+  var stamped = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][1]).trim().toUpperCase() === '7289-7643-30' &&
+        String(data[i][10]).trim().toUpperCase() !== 'CLOSED') {
+      var cell = forteSheet.getRange(i + 1, 11);
+      cell.setValue('NO STK - ' + today);
+      cell.setBackground('#000000');
+      cell.setFontColor('#FFFFFF');
+      cell.setFontWeight('bold');
+      Logger.log('Stamped Forte row ' + (i + 1) + ' (7289-7643-30)');
+      stamped++;
+    }
+  }
+  Logger.log('removeOem_728976433_David_Jul7 complete — Forte rows stamped: ' + stamped);
+}
