@@ -1048,31 +1048,38 @@ function checkInboxForTPReplies() {
       if (!qty && isNetcompEmail(m.getFrom(), m.getSubject())) { var ncQ=extractNetcompsQtyReq(m.getBody()); if(ncQ) qty=ncQ; }
     });
 
-    // $500 MOV check — decline if line value too low.
+    // MOV check — decline if line value below minimum. Default $500; $2000 for OEM rows that say so.
     // Skip for BILL EXT-only parts (worker handles those as bill_handle regardless of line value).
     if (qty && tpNum > 0) {
       var lineValue = parseFloat(qty) * tpNum;
-      if (lineValue > 0 && lineValue < 500) {
+      if (lineValue > 0) {
         var quickOem = searchOEMExcess(mpn);
         var isBillExtOnly = quickOem.length > 0 && quickOem.every(function(r){
           return r.notes && r.notes.toString().indexOf('BILL EXT') >= 0;
         });
         if (!isBillExtOnly) {
-          var tpDisp = tpNum < 1 ? tpNum.toFixed(4) : tpNum.toFixed(2);
-          var replyToMov = extractBuyerEmail(lastMsg.getFrom());
-          var firstMsg0 = messages[0];
-          if (isNetcompEmail(firstMsg0.getFrom(), subject)) replyToMov = extractNetcompsBuyerEmail(body) || replyToMov;
-          else if (isICSouceEmail(firstMsg0.getFrom(), subject)) replyToMov = extractICSourcBuyerEmail(lastMsg.getBody()) || replyToMov;
-          var declineText = 'Thank you for your inquiry. Unfortunately, ' + qty + ' pcs at $' + tpDisp + '/EA comes to $' + lineValue.toFixed(2) + ', which does not meet our $500 minimum line requirement. We appreciate the opportunity and hope to work with you on a larger quantity in the future.';
-          var declineHtml = buildSimpleHTML(declineText);
-          var declineDraftId = createThreadedDraft(replyToMov, 'Re: '+subject, declineHtml, lastMsg.getId(), thread.getId(), null);
-          if (declineDraftId) {
-            hubPostDraft(thread.getId(), mpn, replyToMov, 'Re: '+subject, declineText, declineDraftId, 'Below $500 MOV: '+qty+'×$'+tpDisp+'=$'+lineValue.toFixed(2));
-            hubLog('draft_created', 'TP below MOV: '+mpn, {mpn:mpn, tp:tp, qty:qty});
+          var minLine = 500;
+          quickOem.forEach(function(r) {
+            if (r.notes && r.notes.toString().indexOf('$2000 MIN') >= 0) minLine = 2000;
+          });
+          if (lineValue < minLine) {
+            var tpDisp = tpNum < 1 ? tpNum.toFixed(4) : tpNum.toFixed(2);
+            var replyToMov = extractBuyerEmail(lastMsg.getFrom());
+            var firstMsg0 = messages[0];
+            if (isNetcompEmail(firstMsg0.getFrom(), subject)) replyToMov = extractNetcompsBuyerEmail(body) || replyToMov;
+            else if (isICSouceEmail(firstMsg0.getFrom(), subject)) replyToMov = extractICSourcBuyerEmail(lastMsg.getBody()) || replyToMov;
+            var minDisp = '$' + minLine.toLocaleString();
+            var declineText = 'Thank you for your inquiry. Unfortunately, ' + qty + ' pcs at $' + tpDisp + '/EA comes to $' + lineValue.toFixed(2) + ', which does not meet our ' + minDisp + ' minimum line requirement. We appreciate the opportunity and hope to work with you on a larger quantity in the future.';
+            var declineHtml = buildSimpleHTML(declineText);
+            var declineDraftId = createThreadedDraft(replyToMov, 'Re: '+subject, declineHtml, lastMsg.getId(), thread.getId(), null);
+            if (declineDraftId) {
+              hubPostDraft(thread.getId(), mpn, replyToMov, 'Re: '+subject, declineText, declineDraftId, 'Below ' + minDisp + ' MOV: '+qty+'×$'+tpDisp+'=$'+lineValue.toFixed(2));
+              hubLog('draft_created', 'TP below MOV: '+mpn, {mpn:mpn, tp:tp, qty:qty});
+            }
+            thread.addLabel(label); return;
           }
-          thread.addLabel(label); return;
         }
-        // BILL EXT-only: fall through to worker (it will return bill_handle)
+        // BILL EXT-only or above minimum: fall through to worker
       }
     }
 
@@ -1096,6 +1103,7 @@ function checkInboxForTPReplies() {
     var draftIdTp = executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo);
     auditAndCorrect(decision, draftIdTp, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
     thread.addLabel(label);
+    if (decision.action === 'no_bid') thread.moveToArchive();
   });
 }
 
@@ -3845,9 +3853,16 @@ function processThreadWithAgent(thread, agentLabel) {
     return;
   }
 
+  // Claim both labels before calling worker — prevents Trigger 3 from double-processing the same thread
   thread.addLabel(agentLabel);
   var _rfqIncomingLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
   thread.addLabel(_rfqIncomingLabel);
+
+  // Hard dedup: re-fetch labels after a brief pause to catch any Trigger 3 claim that raced us
+  Utilities.sleep(800);
+  var recheckLabels = thread.getLabels().map(function(l){ return l.getName(); });
+  var alreadyClaimed = recheckLabels.filter(function(n){ return n === 'oem-rfq-incoming-processed'; }).length > 1;
+  if (alreadyClaimed) { return; }
 
   var decision = callEmailAgent(thread.getId(), subject, replyTo, threadContent, oemResults, forteResults, currentLabels, inStockResults, stanResults, priorQuotes);
   if (!decision) {
@@ -3858,6 +3873,7 @@ function processThreadWithAgent(thread, agentLabel) {
   hubLog('run', 'runEmailAgent [' + decision.action + ']: ' + subject + ' — ' + (decision.reasoning || ''));
   var agentDraftId = executeWorkerDecision(decision, thread, messages, mpn || '', subject, replyTo);
   auditAndCorrect(decision, agentDraftId, thread, messages, mpn || '', subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
+  if (decision.action === 'no_bid') thread.moveToArchive();
 }
 
 function extractMPNFromSubject(subject) {
