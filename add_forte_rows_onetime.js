@@ -1255,3 +1255,52 @@ function removeOem_728976433_David_Jul7() {
   }
   Logger.log('removeOem_728976433_David_Jul7 complete — Forte rows stamped: ' + stamped);
 }
+
+// ONE-TIME — Run after sending drafts for Jul 8 David no-stk batch.
+// IRF7241TRPBF #4001 (row 88414), W25Q256JWEIM #4014 (rows 135762+135763), FTLF1519P1BCL #3853 (row 83848)
+function removeOemRows_DavidNoStk_Jul8() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var today = '7/8/2026';
+  var noStkStamp = 'NO STK ' + today;
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+
+  // Delete in descending row order to avoid row-shift errors
+  var oemRows = [
+    { row: 135763, mpn: 'W25Q256JWEIM' },
+    { row: 135762, mpn: 'W25Q256JWEIM' },
+    { row: 88414,  mpn: 'IRF7241TRPBF' },
+    { row: 83848,  mpn: 'FTLF1519P1BCL' }
+  ];
+
+  oemRows.forEach(function(item) {
+    var rowData = oemSheet.getRange(item.row, 1, 1, 5).getValues()[0];
+    Logger.log('OEM row ' + item.row + ' before delete: ' + JSON.stringify(rowData));
+    if (String(rowData[0]).trim().toUpperCase() !== item.mpn.toUpperCase()) {
+      Logger.log('ERROR: row ' + item.row + ' MPN mismatch — expected ' + item.mpn + ', got ' + rowData[0]);
+      return;
+    }
+    oemSheet.getRange(item.row, 5).setValue(noStkStamp);
+    oemSheet.deleteRow(item.row);
+    Logger.log('Deleted OEM row ' + item.row + ' (' + item.mpn + ')');
+  });
+
+  // Stamp Forte by MPN name for all 3 parts
+  var mpnsToStamp = ['IRF7241TRPBF', 'W25Q256JWEIM', 'FTLF1519P1BCL'];
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = forteSheet.getDataRange().getValues();
+  var stamped = 0;
+  for (var i = 1; i < data.length; i++) {
+    var rowMpn = String(data[i][1]).trim().toUpperCase();
+    if (mpnsToStamp.indexOf(rowMpn) >= 0 && String(data[i][10]).trim().toUpperCase() !== 'CLOSED') {
+      var cell = forteSheet.getRange(i + 1, 11);
+      cell.setValue('NO STK - ' + today);
+      cell.setBackground('#000000');
+      cell.setFontColor('#FFFFFF');
+      cell.setFontWeight('bold');
+      Logger.log('Stamped Forte row ' + (i + 1) + ' (' + data[i][1] + ')');
+      stamped++;
+    }
+  }
+  Logger.log('removeOemRows_DavidNoStk_Jul8 complete — Forte rows stamped: ' + stamped);
+}

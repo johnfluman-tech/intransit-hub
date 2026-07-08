@@ -912,7 +912,7 @@ function checkDavidNoStockEmails() {
   var threads = GmailApp.search(query, 0, 20);
   hubLog('run', 'checkDavidNoStockEmails: ' + threads.length + ' thread(s)');
   if (!threads.length) return;
-  var noStkKeywords = ['no stk', 'no stock', 'cant find', 'cant share', 'cannot find', 'removed', 'stock sold'];
+  var noStkKeywords = ['no stk', 'no stock', 'stk sold', 'stock sold', 'cant find', 'cant share', 'cannot find', 'removed', 'no inventory'];
   var label = GmailApp.getUserLabelByName(INCOMING_LABEL) || GmailApp.createLabel(INCOMING_LABEL);
   threads.forEach(function(thread) {
     var msg = thread.getMessages()[thread.getMessageCount() - 1];
