@@ -1535,3 +1535,43 @@ function addForte_558527_1() {
   sheet.appendRow([today, mpn, 80, '$7', '', 'SG', '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
   Logger.log('Added to Forte: 558527-1 | QTY: 80 | TP: $7 | SG');
 }
+
+// ONE-TIME — Run addForte_STM32F407VGT6_Jul9() to add Forte entry for STM32F407VGT6.
+// Buyer: Li Ling (lilingseniorsales@gmail.com, CN) | QTY: 915 | TP: $1.50
+// MSG_CHECKING draft r6393362527466539506 created 7/9/2026.
+// Prior Forte entries: row 186 (3/21/2023, CLOSED), row 2468 (6/10/2025) — both > 60 days ago.
+function addForte_STM32F407VGT6_Jul9() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/9/2026', 'STM32F407VGT6', 915, 1.50, '', 'CN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added STM32F407VGT6 to Forte row ' + nextRow + ' (qty=915, TP=$1.50, CN)');
+}
+
+// ONE-TIME — Run addForte_MT35XU02GCBA1G12_Jul9() to add Forte entry for MT35XU02GCBA1G12-0SIT.
+// Buyer: emma@liyijing.com.cn (CN) | QTY: 96 | TP: $40
+// MSG_CHECKING draft r4640866340950046105 created 7/9/2026.
+// No prior Forte entries for this MPN.
+function addForte_MT35XU02GCBA1G12_Jul9() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/9/2026', 'MT35XU02GCBA1G12-0SIT', 96, 40, '', 'CN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added MT35XU02GCBA1G12-0SIT to Forte row ' + nextRow + ' (qty=96, TP=$40, CN)');
+}
+
+// ONE-TIME — Run addForte_XC7A200T_Jul9() to add missed msg_checking Forte entry.
+// Buyer: fan guibing (guibing@sz-xjsj.com.cn, SZ Luohu Dist. Xianjie Elec., CN)
+// Worker sent wrong request_tp_2000 (couldn't parse TgtPrice=11 from netCOMPONENTS table).
+// Corrective msg_checking draft r6888179817342035228 already created (reply to thread 19f41f1f120b991f).
+// 60-day check: last Forte entry Dec 2024 — outside 60 days, safe to add.
+function addForte_XC7A200T_Jul9() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/9/2026', 'XC7A200T-2FBG676I', 100, 11, '', 'CN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added XC7A200T-2FBG676I to Forte row ' + nextRow + ' (qty=100, TP=$11, CN)');
+}

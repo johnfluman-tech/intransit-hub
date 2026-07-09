@@ -699,6 +699,42 @@ function executeDecision(decision, thread) {
   }
 }
 
+// Parses a netCOMPONENTS HTML table to extract QtyReq and TgtPrice.
+// Returns { qtyReq, tgtPrice } or null if not found / not a netCOMPONENTS email.
+function extractNetcompRFQ(messages) {
+  var msg = messages[0];
+  var html = msg.getBody() || '';
+  var htmlLower = html.toLowerCase();
+  var fromLower = msg.getFrom().toLowerCase();
+  if (fromLower.indexOf('netcomponents') < 0 && htmlLower.indexOf('netcomponents') < 0) return null;
+  if (htmlLower.indexOf('qty') < 0 && htmlLower.indexOf('quantity') < 0) return null;
+
+  var rows = html.split(/<tr[^>]*>/i);
+  var qtyCol = -1, tpCol = -1, foundHeader = false;
+  for (var r = 0; r < rows.length; r++) {
+    var rowHtml = rows[r];
+    var cells = rowHtml.match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi) || [];
+    if (!cells.length) continue;
+    var vals = cells.map(function(c) {
+      return c.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').replace(/&#\d+;/g, '').trim();
+    });
+    if (!foundHeader && rowHtml.indexOf('<th') >= 0) {
+      vals.forEach(function(v, i) {
+        if (/^qty/i.test(v)) qtyCol = i;
+        if (/target\s*price/i.test(v)) tpCol = i;
+      });
+      if (qtyCol >= 0 && tpCol >= 0) foundHeader = true;
+      continue;
+    }
+    if (foundHeader && vals.length > Math.max(qtyCol, tpCol)) {
+      var qty = parseInt((vals[qtyCol] || '').replace(/,/g, ''), 10);
+      var tp = parseFloat((vals[tpCol] || '').replace(/[$,\s]/g, ''));
+      if (!isNaN(qty) && qty > 0 && !isNaN(tp) && tp > 0) return { qtyReq: qty, tgtPrice: tp };
+    }
+  }
+  return null;
+}
+
 function processThread(thread) {
   var messages = thread.getMessages();
   var lastMsg = messages[messages.length - 1];
@@ -711,6 +747,12 @@ function processThread(thread) {
   });
   var content = parts.join('\n');
   if (content.length > 8000) content = content.substring(0, 8000) + '\n[truncated]';
+
+  var parsedRFQ = extractNetcompRFQ(messages);
+  if (parsedRFQ) {
+    content = '[PARSED_RFQ: QtyReq=' + parsedRFQ.qtyReq + ', TgtPrice=' + parsedRFQ.tgtPrice + ']\n' + content;
+  }
+
   var payload = {
     thread_id:       thread.getId(),
     last_message_id: lastMsg.getId(),
@@ -3094,6 +3136,7 @@ function checkBillNetcompRemovals() {
       createThreadedDraft(BILL_EMAIL, 'Re: ' + subject, replyBody, lastMsg.getId(), thread.getId(), null);
       hubLog('run', 'Bill netcomp removal [' + result + ']: ' + mpn, { mpn: mpn });
       Logger.log('Bill removal [' + result + ']: ' + mpn);
+      thread.moveToArchive();
     } else {
       Logger.log('Bill removal: could not extract MPN from body or subject: ' + subject);
       GmailApp.sendEmail(NOTIFY_EMAIL, 'OEM EXCESS: Bill removal — could not extract MPN',
