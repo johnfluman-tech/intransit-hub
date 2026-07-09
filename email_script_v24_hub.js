@@ -1393,6 +1393,15 @@ function checkInboxForNewRFQs() {
     if (johnReplied){ return; }
     var lastMsg = messages[messages.length-1];
     if (lastMsg.getFrom().indexOf('intransittech.com')>=0){ return; }
+    // Skip emails addressed only to other Intransit employees (e.g. bernardo@, alberto@).
+    // Forwarding rules can deliver those emails into John's inbox. Check TO+CC for any
+    // valid RFQ target; if none found and an @intransittech.com address IS present, skip.
+    var allRecipients = (messages[0].getTo() + ',' + (messages[0].getCc() || '')).toLowerCase();
+    var validRfqTargets = ['rfq@intransittech.com','john.fluman@intransittech.com','sales@intransittech.com','websiterfq@intransittech.com'];
+    if (allRecipients.indexOf('intransittech.com') >= 0 &&
+        !validRfqTargets.some(function(t){ return allRecipients.indexOf(t) >= 0; })) {
+      return; // addressed to other employee only — label already applied, no draft
+    }
     var subject = thread.getFirstMessageSubject();
     var mpn = extractMPN(subject);
     var fullBody = lastMsg.getPlainBody();

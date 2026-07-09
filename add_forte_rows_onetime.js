@@ -1417,3 +1417,23 @@ function deleteWrongDraft_ATH35088736() {
   });
   Logger.log('Deleted wrong request_tp_500 draft r1503123174137764597 for ATH Electronics 35088736');
 }
+
+// ONE-TIME — Run deleteWrongDrafts_HMC1031_Bernardo() to remove both wrong drafts created when
+// automation incorrectly processed an email addressed to bernardo.moreno@intransittech.com.
+// Bug: forwarding delivered it into John's inbox; TO-field guard fix now prevents this.
+// Draft r5534143167725617478 = wrong request_tp_500 to michaelg@aedelectronics.com (HMC1031MS8ETR)
+// Draft r1503123174137764597 = wrong request_tp_500 to anthony.maida@athelectronics.com (35088736)
+function deleteWrongDrafts_HMC1031_Bernardo() {
+  var token = ScriptApp.getOAuthToken();
+  ['r5534143167725617478', 'r1503123174137764597'].forEach(function(draftId) {
+    try {
+      UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId, {
+        method: 'delete',
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+      Logger.log('Deleted draft ' + draftId);
+    } catch(e) {
+      Logger.log('Draft ' + draftId + ' already gone or error: ' + e);
+    }
+  });
+}
