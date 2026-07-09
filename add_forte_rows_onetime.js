@@ -1356,3 +1356,51 @@ function removeOemRows_DavidNoStk_Jul9() {
   }
   Logger.log('removeOemRows_DavidNoStk_Jul9 complete — Forte rows stamped: ' + stamped);
 }
+
+// ONE-TIME — Run after sending Jul 9 (batch 2) David no-stk drafts.
+// PIC32MZ2048EFH100-I/PT #4017 no stk  (row 113267)  → draft r-6505310211248415749
+// NFL18ST506H1A3D #4026 Cant share      (row 108875)  → draft r9066069716555901252
+// HSC100800RJ #4023 No stock            (row 86770)   → draft r57137538588965595
+function removeOemRows_DavidNoStk_Jul9b() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var today = '7/9/2026';
+  var noStkStamp = 'NO STK ' + today;
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+
+  // Descending order to avoid row-shift errors
+  var oemRows = [
+    { row: 113267, mpn: 'PIC32MZ2048EFH100-I/PT' },
+    { row: 108875, mpn: 'NFL18ST506H1A3D' },
+    { row: 86770,  mpn: 'HSC100800RJ' }
+  ];
+
+  oemRows.forEach(function(item) {
+    var rowData = oemSheet.getRange(item.row, 1, 1, 5).getValues()[0];
+    Logger.log('OEM row ' + item.row + ': ' + JSON.stringify(rowData));
+    oemSheet.getRange(item.row, 5).setValue(noStkStamp);
+    oemSheet.deleteRow(item.row);
+    Logger.log('Deleted OEM row ' + item.row + ' (' + item.mpn + ')');
+  });
+
+  // Stamp Forte by MPN name for all 3 parts
+  var mpnsToStamp = ['PIC32MZ2048EFH100-I/PT', 'NFL18ST506H1A3D', 'HSC100800RJ'];
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = forteSheet.getDataRange().getValues();
+  var stamped = 0;
+  for (var i = 1; i < data.length; i++) {
+    var rowMpn = String(data[i][1]).trim().toUpperCase();
+    if (mpnsToStamp.indexOf(rowMpn) >= 0 && String(data[i][10]).trim().toUpperCase() !== 'CLOSED') {
+      var cell = forteSheet.getRange(i + 1, 11);
+      cell.clearDataValidations();
+      cell.setValue('NO STK - ' + today);
+      cell.setBackground('#000000');
+      cell.setFontColor('#FFFFFF');
+      cell.setFontWeight('bold');
+      Logger.log('Stamped Forte row ' + (i + 1) + ' (' + data[i][1] + ')');
+      stamped++;
+    }
+  }
+  SpreadsheetApp.flush();
+  Logger.log('removeOemRows_DavidNoStk_Jul9b complete — Forte rows stamped: ' + stamped);
+}
