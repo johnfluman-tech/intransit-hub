@@ -2063,6 +2063,20 @@ function buildHomepageCard() {
         .setParameters({})));
     builder.addSection(invSectionHome);
 
+    var blockSectionHome = CardService.newCardSection().setHeader('🚫 Block Domain');
+    blockSectionHome.addWidget(CardService.newTextInput()
+      .setFieldName('blockDomain')
+      .setTitle('Domain to block')
+      .setHint('e.g. spamco.com'));
+    blockSectionHome.addWidget(CardService.newTextButton()
+      .setText('🚫 Block This Domain')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#b71c1c')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonBlockDomain')
+        .setParameters({})));
+    builder.addSection(blockSectionHome);
+
     return builder.build();
   } catch(err) {
     return CardService.newCardBuilder()
@@ -2319,6 +2333,26 @@ function buildContextualCard(e) {
         .setFunctionName('addonSmartReply')
         .setParameters({ threadId: gmailThreadId, subject: subject, fromH: fromH })));
     builder.addSection(smartSection);
+
+    // ── Block Domain ────────────────────────────────────────────────────────
+    var blockSection = CardService.newCardSection().setHeader('🚫 Block Domain');
+    // Auto-fill sender domain — but never for passthrough relays like netcomponents.com / icsource.com
+    var senderDomain = (fromH.match(/@([\w.-]+)/) || ['',''])[1].toLowerCase();
+    var passthroughDomains = ['netcomponents.com','icsource.com','messagesend.com','autosend.com'];
+    var prefill = passthroughDomains.indexOf(senderDomain) >= 0 ? '' : senderDomain;
+    blockSection.addWidget(CardService.newTextInput()
+      .setFieldName('blockDomain')
+      .setTitle('Domain to block')
+      .setValue(prefill)
+      .setHint('e.g. spamco.com'));
+    blockSection.addWidget(CardService.newTextButton()
+      .setText('🚫 Block This Domain')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#b71c1c')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonBlockDomain')
+        .setParameters({})));
+    builder.addSection(blockSection);
 
     return [builder.build()];
   } catch(err) {
@@ -2946,6 +2980,27 @@ function addonRemoveStock(e) {
   } catch(err) {
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText('❌ Error: ' + err.toString()))
+      .build();
+  }
+}
+
+function addonBlockDomain(e) {
+  try {
+    var domain = ((e.formInput && e.formInput.blockDomain) || '').toLowerCase().trim()
+                  .replace(/^@/, '').replace(/\/.*$/, ''); // strip leading @ or paths
+    if (!domain || domain.indexOf('.') < 0) {
+      return CardService.newActionResponseBuilder()
+        .setNotification(CardService.newNotification().setText('⚠️ Enter a valid domain (e.g. spamco.com).'))
+        .build();
+    }
+    var result = executeUpdateRule({ rule_type: 'blocked_domain', key: domain, value: 'true', notes: 'Blocked from sidebar' });
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification()
+        .setText(result.ok ? '🚫 Blocked: ' + domain : '❌ ' + result.message))
+      .build();
+  } catch(err) {
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('❌ ' + err.toString()))
       .build();
   }
 }
