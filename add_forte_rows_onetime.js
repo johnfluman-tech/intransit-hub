@@ -1405,6 +1405,29 @@ function removeOemRows_DavidNoStk_Jul9b() {
   Logger.log('removeOemRows_DavidNoStk_Jul9b complete — Forte rows stamped: ' + stamped);
 }
 
+// ONE-TIME — Run removeOemScan_W25Q256JWEIM() to delete OEM EXCESS rows for W25Q256JWEIM/JWEIMS.
+// The one-time Jul8 function skips these because the sheet has "W25Q256JWEIMS" (trailing S)
+// while the expected MPN is "W25Q256JWEIM" — verification check fails.
+// This scan version matches both spellings and deletes all matching rows safely.
+function removeOemScan_W25Q256JWEIM() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var today = '7/9/2026';
+  var data = sheet.getDataRange().getValues();
+  var rowsToDelete = [];
+  for (var i = data.length - 1; i >= 1; i--) {
+    var mpn = String(data[i][0]).trim().toUpperCase();
+    if (mpn === 'W25Q256JWEIM' || mpn === 'W25Q256JWEIMS') {
+      sheet.getRange(i + 1, 5).setValue('NO STK ' + today);
+      rowsToDelete.push(i + 1);
+      Logger.log('Marked row ' + (i + 1) + ': ' + data[i][0]);
+    }
+  }
+  SpreadsheetApp.flush();
+  rowsToDelete.forEach(function(r) { sheet.deleteRow(r); Logger.log('Deleted OEM row ' + r); });
+  Logger.log('removeOemScan_W25Q256JWEIM complete — ' + rowsToDelete.length + ' row(s) deleted');
+}
+
 // ONE-TIME — Run deleteWrongDraft_ATH35088736() to remove the wrong request_tp_500 draft
 // created for Anthony Maida / ATH Electronics RFQ on 35088736 (Aptiv, our own IN STOCK).
 // Bug: all-digit MPN bypassed IN STOCK lookup → wrong request_tp_500 instead of own_stock.

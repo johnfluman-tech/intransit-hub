@@ -899,6 +899,8 @@ function deletePart(partNumber, emailSubject) {
   if (exact.length===1){mainSheet.getRange(exact[0].row,5).setValue(noStkStamp);logDeletion(deletedSheet,exact[0].data,emailSubject);mainSheet.deleteRow(exact[0].row);return 'DELETED';}
   if (exact.length>1){sendReviewEmail(partNumber,emailSubject,exact);return 'MULTIPLE';}
   if (!exact.length&&fuzzy.length===1&&fuzzy[0].type==='stripped'){mainSheet.getRange(fuzzy[0].row,5).setValue(noStkStamp);logDeletion(deletedSheet,fuzzy[0].data,emailSubject);mainSheet.deleteRow(fuzzy[0].row);return 'FUZZY';}
+  // Single prefix fuzzy match with ≤3-char suffix diff (e.g. W25Q256JWEIM → W25Q256JWEIMS) — safe to auto-delete
+  if (!exact.length&&fuzzy.length===1&&fuzzy[0].type==='prefix'){var _pdiff=Math.abs(String(fuzzy[0].data[0]).trim().length-partNumber.trim().length);if(_pdiff<=3){mainSheet.getRange(fuzzy[0].row,5).setValue(noStkStamp);logDeletion(deletedSheet,fuzzy[0].data,emailSubject);mainSheet.deleteRow(fuzzy[0].row);return 'FUZZY';}}
   if (fuzzy.length){sendReviewEmail(partNumber,emailSubject,fuzzy);return 'FUZZY_REVIEW';}
   sendReviewEmail(partNumber,emailSubject,[]);return 'NOT_FOUND';
 }
