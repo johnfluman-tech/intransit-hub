@@ -1445,6 +1445,33 @@ function removeOemScan_W25Q256JWEIM() {
   Logger.log('removeOemScan_W25Q256JWEIM complete — ' + rowsToDelete.length + ' row(s) deleted');
 }
 
+// ONE-TIME — Run fixWrongNoBid_29537331() to:
+//   1. Delete wrong no_bid draft r393182235757971220 (Next Wiring Harness Tech / Suresh Ravi)
+//   2. Add Forte entry: 29537331, qty=2586, TP=0.52, IN (India)
+// Bug: Haiku misread "$500 MIN TP REQUIRED" in description as a per-unit floor → chose no_bid.
+// Correct msg_checking draft r2185140518700090261 already created.
+// Fix applied in auditAndCorrect: no_bid with inventory present now gets Sonnet second-check.
+function fixWrongNoBid_29537331() {
+  // Delete wrong no_bid draft
+  var token = ScriptApp.getOAuthToken();
+  try {
+    UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/r393182235757971220', {
+      method: 'delete',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    Logger.log('Deleted wrong no_bid draft r393182235757971220 for 29537331');
+  } catch(e) {
+    Logger.log('Draft r393182235757971220 already gone or error: ' + e);
+  }
+  // Add Forte entry
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/9/2026', '29537331', 2586, 0.52, '', 'IN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added 29537331 to Forte row ' + nextRow + ' (qty=2586, TP=$0.52, IN)');
+}
+
 // ONE-TIME — Run deleteWrongDraft_ATH35088736() to remove the wrong request_tp_500 draft
 // created for Anthony Maida / ATH Electronics RFQ on 35088736 (Aptiv, our own IN STOCK).
 // Bug: all-digit MPN bypassed IN STOCK lookup → wrong request_tp_500 instead of own_stock.

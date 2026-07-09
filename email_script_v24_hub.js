@@ -1291,7 +1291,9 @@ function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo
 // Sonnet audits the Haiku decision; if wrong, trashes draft and re-executes corrected version.
 function auditAndCorrect(decision, draftId, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent) {
   var auditableActions = ['msg_checking','request_tp_500','request_tp_2000','request_qty','bill_handle','own_stock','stan_quoted','add_to_stan'];
-  if (auditableActions.indexOf(decision.action) < 0) return;
+  var hasInventory = (oemResults && oemResults.length > 0) || (inStockResults && inStockResults.length > 0);
+  // Also audit no_bid when inventory was present — Haiku can misread "$500 MIN TP REQUIRED" as a per-unit floor
+  if (auditableActions.indexOf(decision.action) < 0 && !(decision.action === 'no_bid' && hasInventory)) return;
   try {
     var resp = UrlFetchApp.fetch(HUB_URL + '/api/audit-draft', {
       method: 'POST', contentType: 'application/json',
@@ -1329,6 +1331,35 @@ function auditAndCorrect(decision, draftId, thread, messages, mpn, subject, repl
       reasoning:     'AUTO-CORRECTED by auditor: ' + audit.reason
     };
     executeWorkerDecision(corrected, thread, messages, mpn, subject, replyTo);
+
+    // Notify John of the auto-correction so he can add comments and paste back for review
+    try {
+      var invLines = [];
+      if (oemResults && oemResults.length > 0) invLines.push('OEM EXCESS: ' + oemResults.map(function(r){ return r.mpn + ' qty=' + r.qty + (r.notes ? ' [' + r.notes + ']' : ''); }).join(', '));
+      if (inStockResults && inStockResults.length > 0) invLines.push('IN STOCK: ' + inStockResults.map(function(r){ return r.mpn; }).join(', '));
+      var tp = corrected.target_price != null ? '$' + corrected.target_price : 'none given';
+      var bugEmailBody = [
+        'Thread: ' + subject,
+        'MPN: ' + mpn,
+        '',
+        'Original action: ' + decision.action,
+        'Corrected to: ' + corrected.action,
+        'Reason: ' + audit.reason,
+        '',
+        'Buyer TP: ' + tp + ' | QTY: ' + (corrected.qty || 'unknown'),
+        invLines.join('\n'),
+        '',
+        '--- Add comments below this line, then paste full email here for script repair ---'
+      ].filter(function(l){ return l !== undefined; }).join('\n');
+      GmailApp.sendEmail(
+        'john.fluman@intransittech.com',
+        'Bug Auto-Corrected: [' + decision.action + '->' + corrected.action + '] ' + subject,
+        bugEmailBody
+      );
+      Logger.log('Bug report emailed to John for ' + mpn);
+    } catch(notifyErr) {
+      Logger.log('Bug notify email failed: ' + notifyErr);
+    }
   } catch(e) {
     Logger.log('auditAndCorrect error: ' + e);
   }
