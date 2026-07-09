@@ -1399,10 +1399,11 @@ function checkInboxForNewRFQs() {
     if (!fullBody || fullBody.trim().length < 30) {
       fullBody = lastMsg.getBody().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     }
-    // IC Source "IC Source RFQ on [MPN] from [Company]" uses all-digit MPNs — bypass letter+digit requirement
+    // IC Source and netCOMPONENTS can have all-digit MPNs — bypass letter+digit requirement for both
     var isIcSourceThread = isICSouceEmail(messages[0].getFrom(), subject);
+    var isNetcompThread = isNetcompEmail(messages[0].getFrom(), subject);
     var mpnFromHtmlTable = false;
-    if (!mpn || (!isIcSourceThread && (!/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)))) {
+    if (!mpn || (!isIcSourceThread && !isNetcompThread && (!/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)))) {
       var bodyMpn = extractMPNFromRFQBody(fullBody);
       if (bodyMpn) {
         mpn = bodyMpn.replace(/#\w+$/, '');
@@ -1413,8 +1414,8 @@ function checkInboxForNewRFQs() {
         if (htmlMpn) { mpn = htmlMpn; mpnFromHtmlTable = true; }
       }
     }
-    // Validate: must have a real MPN. All-digit is OK only from IC Source or a trusted HTML table.
-    if (!mpn || (!isIcSourceThread && !mpnFromHtmlTable && (!/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)))) {
+    // Validate: must have a real MPN. All-digit is OK for IC Source, netCOMPONENTS, or a trusted HTML table.
+    if (!mpn || (!isIcSourceThread && !isNetcompThread && !mpnFromHtmlTable && (!/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)))) {
       thread.addLabel(label); return;
     }
     var htmlBody = lastMsg.getBody();

@@ -1404,3 +1404,16 @@ function removeOemRows_DavidNoStk_Jul9b() {
   SpreadsheetApp.flush();
   Logger.log('removeOemRows_DavidNoStk_Jul9b complete — Forte rows stamped: ' + stamped);
 }
+
+// ONE-TIME — Run deleteWrongDraft_ATH35088736() to remove the wrong request_tp_500 draft
+// created for Anthony Maida / ATH Electronics RFQ on 35088736 (Aptiv, our own IN STOCK).
+// Bug: all-digit MPN bypassed IN STOCK lookup → wrong request_tp_500 instead of own_stock.
+// Correct own_stock draft r5040325320735075191 already created ("108 pcs at $10.00 each").
+function deleteWrongDraft_ATH35088736() {
+  var token = ScriptApp.getOAuthToken();
+  UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/r1503123174137764597', {
+    method: 'delete',
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  Logger.log('Deleted wrong request_tp_500 draft r1503123174137764597 for ATH Electronics 35088736');
+}
