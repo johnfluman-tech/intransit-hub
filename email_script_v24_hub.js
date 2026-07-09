@@ -1,4 +1,4 @@
-// OEM EXCESS Automation — Apps Script v25
+﻿// OEM EXCESS Automation — Apps Script v25
 // John Fluman / Intransit Technologies
 // worker.js = brain; this file = thin I/O adapter (Gmail + Sheets only)
 
@@ -359,379 +359,6 @@ function sendReviewEmail(partNumber, emailSubject, matches) {
   GmailApp.sendEmail(NOTIFY_EMAIL, 'OEM EXCESS: Review needed for MPN ' + partNumber, body);
 }
 
-// ── Extraction helpers ────────────────────────────────────────
-
-function extractMPN(subject) {
-  if (!subject) return null;
-  var clean = subject.replace(/^(Re:|Fwd:|FW:|RE:|FWD:|\[EXTERNAL\]|Subject:)\s*/gi, '').trim();
-  var netcompMatch = clean.match(/\|\s*([^|)]+)\)\s*$/);
-  if (netcompMatch) return netcompMatch[1].trim();
-  var icsMatch = clean.match(/::\s*(\S+)/);
-  if (icsMatch) return icsMatch[1].trim();
-  clean = clean.replace(/^RFQ#?\s*/i, '').trim();
-  var wordColonMpnMatch = clean.match(/(?:^|\s)\w+:([A-Z][A-Z0-9\-\.\/]{3,})/i);
-  if (wordColonMpnMatch && /[A-Za-z]/.test(wordColonMpnMatch[1]) && /[0-9]/.test(wordColonMpnMatch[1])) {
-    return wordColonMpnMatch[1].trim();
-  }
-  var stopwords = ['no','stk','stock','removed','remove','out','of','npi','the','a','an','is','has','for','from','please','and','or','not','new','update','cant','share','rfq','quote','quotation','request','inquiry','inquire','netcomponents','member','price','target','pcs','qty','quantity','external','ics','source','on','standard','subject','requirements'];
-  var tokens = clean.split(/\s+/);
-  for (var i = 0; i < tokens.length; i++) {
-    var token = tokens[i].replace(/[,;:?()[\]]/g, '');
-    token = token.replace(/:[A-Z0-9]{1,5}$/, '');
-    if (stopwords.indexOf(token.toLowerCase()) >= 0) continue;
-    if (/^#\d+$/.test(token)) continue;
-    if (/^[A-Za-z]{1,4}\d{5,}$/.test(token)) continue;
-    if (token.length < 3) continue;
-    return token;
-  }
-  var icsOnMatch = clean.match(/\bRFQ\s+on\s+(\S+)\s+from\b/i);
-  if (icsOnMatch) return icsOnMatch[1].trim();
-  return null;
-}
-
-function extractMPNFromBody(body) {
-  if (!body) return null;
-  var match = body.match(/Removed\s*-\s*MPN:\s*([^\s\n\r]+)/i);
-  return match ? match[1].trim() : null;
-}
-
-function extractMPNFromRFQBody(body) {
-  if (!body) return null;
-  // IC Source "Request for Quote from your Website" format:
-  // table header: Quantity    Part Number    Mfg    Date Code    List Price    Req Unit Price    Total Price
-  // data row:     2200        PVA1OAH21.2NV2;PVA1OAH2SNA    ITT Corpo    ...
-  // MPN may contain semicolons (alternate PN) and dots — split on first semicolon and return first part.
-  var icsWebMatch = body.match(/Part\s+Number\s+Mfg[\s\S]*?\n\s*(\d[\d,]*)\s+([A-Za-z0-9][A-Za-z0-9\.\-\/]{3,})/i);
-  if (icsWebMatch && icsWebMatch[2]) return icsWebMatch[2].trim().split(';')[0].trim();
-  // Abacus "REQUEST FOR QUOTE FROM" format: table with columns LN# | QUOTE NO | QTY | DESCRIPTION | MFR
-  // The DESCRIPTION column contains the MPN — skip columns by looking for the data row after the header
-  var abacusMatch = body.match(/LN#[\s\t]+QUOTE\s*NO[\s\t]+[\s\S]*?DESCRIPTION[\s\S]*?\n([\s\S]*?)(?:\n\n|\n[A-Z])/i);
-  if (abacusMatch) {
-    var dataLine = abacusMatch[1].trim().split('\n')[0];
-    var cols = dataLine.split(/\t|\s{2,}/);
-    // Description is typically col 3 (0-indexed) after LN#, QUOTE NO, QTY
-    if (cols.length >= 4) {
-      var descCol = cols[3].trim().replace(/[,;:?()[\]]/g, '');
-      if (descCol.length >= 4 && /[A-Za-z]/.test(descCol) && /[0-9]/.test(descCol)) return descCol;
-    }
-  }
-  var labelPatterns = [
-    /(?:part\s*#|part\s+number|p\/n|mpn)\s*:?\s*([A-Z0-9][A-Z0-9\-\/\.]{3,})/i
-  ];
-  for (var i = 0; i < labelPatterns.length; i++) {
-    var m = body.match(labelPatterns[i]);
-    if (m && m[1]) return m[1].trim();
-  }
-  var commonWords = ['please','quote','quotation','stock','thank','regards','best','hello',
-    'john','need','your','following','item','molex','intel','texas','instruments','mfr',
-    'dear','attached','regards','sincerely','each','pieces','quantity'];
-  var lines = body.split('\n');
-  for (var l = 0; l < lines.length; l++) {
-    var line = lines[l].trim();
-    if (line.charAt(0) === '>') continue;
-    var tokens = line.split(/\s+/);
-    for (var t = 0; t < tokens.length; t++) {
-      var token = tokens[t].replace(/[,;:?()[\]\.\*：，]/g, '').trim();
-      if (token.length < 5) continue;
-      if (commonWords.indexOf(token.toLowerCase()) >= 0) continue;
-      if (/^\d+(?:pcs?|pieces?|units?|ea|each)$/i.test(token)) continue;
-      if (/[A-Za-z]/.test(token) && /[0-9]/.test(token)) return token;
-    }
-  }
-  return null;
-}
-
-function extractMPNFromHTMLRFQ(htmlBody) {
-  if (!htmlBody) return null;
-  // Lintech / rz-* class format: <td class="rz-detail-field-fullpartnumber ...">152145</td>
-  var rzMatch = htmlBody.match(/class="[^"]*rz-detail-field-fullpartnumber[^"]*"[^>]*>\s*([^<\s][^<]{0,50}?)\s*<\/td>/i);
-  if (rzMatch && rzMatch[1].trim().length >= 3) return rzMatch[1].trim();
-  // Generic: find table with a "Part Number" / "Part #" / "P/N" / "MPN" column header,
-  // then return the value from the same column index in the first data row.
-  var tableBlocks = htmlBody.match(/<table[^>]*>([\s\S]*?)<\/table>/gi) || [];
-  for (var t = 0; t < tableBlocks.length; t++) {
-    var rows = tableBlocks[t].match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
-    if (rows.length < 2) continue;
-    var headerCells = (rows[0].match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [])
-      .map(function(c){ return c.replace(/<[^>]+>/g,'').trim(); });
-    var partColIdx = -1;
-    for (var h = 0; h < headerCells.length; h++) {
-      if (/^\s*(part\s*(number|#|no\.?)|p\/n|mpn)\s*$/i.test(headerCells[h])) { partColIdx = h; break; }
-    }
-    if (partColIdx < 0) continue;
-    // Find first data row (not all-header)
-    for (var r = 1; r < rows.length; r++) {
-      var dataCells = (rows[r].match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [])
-        .map(function(c){ return c.replace(/<[^>]+>/g,'').trim(); });
-      var val = dataCells[partColIdx];
-      if (val && val.length >= 3 && !/part\s*(number|#)/i.test(val)) return val;
-    }
-  }
-  return null;
-}
-
-function extractNetcompsQtyReq(htmlBody) {
-  if (!htmlBody) return null;
-  // Find the partlist table — capture the header row and first data row
-  var tableMatch = htmlBody.match(/class="partlist"([\s\S]*?)<\/table>/i);
-  if (!tableMatch) return null;
-  var tableContent = tableMatch[1];
-  var rows = tableContent.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi);
-  if (!rows || rows.length < 2) return null;
-  // Find the column index of QtyReq from the header row
-  var headerCells = rows[0].match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi) || [];
-  var qtyReqIdx = -1;
-  for (var h = 0; h < headerCells.length; h++) {
-    var headerText = headerCells[h].replace(/<[^>]+>/g, '').trim().toLowerCase();
-    if (headerText === 'qtyreq' || headerText === 'qty req' || headerText === 'quantity required') {
-      qtyReqIdx = h; break;
-    }
-  }
-  // Fall back to column 3 (0-indexed) if header not found — standard netcomponents layout
-  if (qtyReqIdx < 0) qtyReqIdx = 3;
-  var dataCells = rows[1].match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
-  if (!dataCells || dataCells.length <= qtyReqIdx) return null;
-  var qtyCell = dataCells[qtyReqIdx].replace(/<[^>]+>/g, '').trim();
-  if (!qtyCell) return null;
-  var qty = parseInt(qtyCell.replace(/[^0-9]/g, ''), 10);
-  return qty > 0 ? String(qty) : null;
-}
-
-function extractNetcompsTgtPrice(plainBody, htmlBody) {
-  // 1. HTML table: look for class="partlist" or any table with the right column structure
-  if (htmlBody) {
-    var tableMatch = htmlBody.match(/class="partlist"[\s\S]*?<\/tr>([\s\S]*?)<\/table>/i);
-    if (tableMatch) {
-      var cells = tableMatch[1].match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
-      if (cells && cells.length >= 5) {
-        var tpCell = cells[4].replace(/<[^>]+>/g, '').trim();
-        if (tpCell) {
-          var price = parseFloat(tpCell.replace(/[^0-9.]/g, ''));
-          var qtyReqVal = parseFloat((cells[3] || '').replace(/<[^>]+>/g, '').replace(/[^0-9]/g, ''));
-          if (price > 0 && price < 100000 && price !== qtyReqVal) return '$' + price;
-        }
-        return null;
-      }
-    }
-  }
-  // 2. Plain text table: find the header row, read TgtPrice column by position
-  if (plainBody) {
-    var lines = plainBody.split('\n');
-    for (var li = 0; li < lines.length - 1; li++) {
-      if (/PartNumber[\s\t]+Description[\s\t]+QtyListed[\s\t]+QtyReq[\s\t]+TgtPrice/i.test(lines[li])) {
-        var dataLine = lines[li + 1].trim();
-        var cols = dataLine.split(/\t|\s{2,}/);
-        if (cols.length >= 5) {
-          var tpRaw = cols[cols.length - 1].trim();
-          var tpPrice = parseFloat(tpRaw.replace(/[^0-9.]/g, ''));
-          if (tpPrice > 0 && tpPrice < 100000) return '$' + tpPrice;
-        }
-        break;
-      }
-    }
-  }
-  // 3. Explicit TP: label
-  if (plainBody) {
-    var m2 = plainBody.match(/\bTP[:\s]+\$?(\d+(?:\.\d+)?)\s*(?:usd|USD)?/i);
-    if (m2 && parseFloat(m2[1]) > 0) return '$' + parseFloat(m2[1]);
-  }
-  return null;
-}
-
-function extractTargetPrice(text) {
-  if (!text) return null;
-
-  // European decimal-comma formats: "0,18$", "0,17$/each", "0,17 USD", "0,18$ per pcs"
-  // Must check BEFORE general patterns to avoid comma being stripped as thousand-separator
-  var euPatterns = [
-    /(\d+),(\d{1,2})\s*\$\s*\/\s*(?:each|ea)/i,   // 0,17$/each
-    /(\d+),(\d{1,2})\s*\$\s*per\s*pcs?/i,          // 0,18$ per pcs
-    /(\d+),(\d{1,2})\s*\$/,                          // 0,18$
-    /(\d+),(\d{1,2})\s*USD/i,                        // 0,18 USD
-    /(\d+),(\d{1,2})\s*\/\s*(?:each|ea)/i,          // 0,18/each (comma decimal, no $)
-  ];
-  for (var eu = 0; eu < euPatterns.length; eu++) {
-    var em = text.match(euPatterns[eu]);
-    if (em && em[1] !== undefined && em[2] !== undefined) {
-      var euVal = parseFloat(em[1] + '.' + em[2]);
-      if (euVal > 0 && euVal < 100000) return '$' + euVal;
-    }
-  }
-
-  var rangeMatch = text.match(/\$?\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(?:\$|usd|\/each)?/i);
-  if (rangeMatch) {
-    var lo = parseFloat(rangeMatch[1]), hi = parseFloat(rangeMatch[2]);
-    var hasCurrency = rangeMatch[0].indexOf('$') >= 0 || /usd|each/i.test(rangeMatch[0]);
-    var hasDecimal = rangeMatch[1].indexOf('.') >= 0 || rangeMatch[2].indexOf('.') >= 0;
-    if (hi > lo && hi < 100000 && (hasCurrency || hasDecimal)) return '$' + hi;
-  }
-
-  // Slash-separated range: "25/30$ each" or "$25/30 each" — take the lower value
-  var slashRange = text.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*\$\s*(?:each|ea)?/i)
-    || text.match(/\$\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*(?:each|ea)?/i);
-  if (slashRange) {
-    var srLo = parseFloat(slashRange[1]), srHi = parseFloat(slashRange[2]);
-    if (srLo > 0 && srHi > srLo && srHi < 100000) return '$' + srLo;
-  }
-
-  // Unit Price($) tabular format: "Unit Price($)\n0.35" or "Unit Price($) 0.35"
-  var unitPriceMatch = text.match(/Unit\s*Price\s*\(\$\)\s*[\r\n\s]+(\d+(?:\.\d+)?)/i);
-  if (!unitPriceMatch) unitPriceMatch = text.match(/Unit\s*Price\s*\(\$\)\s*\t(\d+(?:\.\d+)?)/i);
-  if (unitPriceMatch && parseFloat(unitPriceMatch[1]) > 0) return '$' + parseFloat(unitPriceMatch[1]);
-
-  var patterns = [
-    /\btp\s*([\d,.]+)/i,
-    /\btarget\s+price\s*[:\s]*\$?\s*([\d,.]+)/i,
-    /\btarget[:\s]+\$?\s*([\d,.]+)/i,
-    /USD\s*([\d,.]+)/i,
-    /([\d,.]+)\s*USD/i,
-    /\b(\d+(?:\.\d+)?)U\b/i,
-    /([\d,.]+)\s*\/?\s*(?:each|ea)[.,?!]?(?:\s|$)/i,
-    /around\s+\$?\s*([\d,.]+)/i,
-    /\bprice:\s*\$?\s*([\d,.]+)/i,
-    /\$\s*([\d,]*\.\d+|[\d,]+)(?!\s*(?:min|minimum|500|2000))/i,
-    /^\s*(\.\d+)\b/,
-    /^\s*(\d+\.\d+)\s*(?:\r?\n|$)/
-  ];
-  for (var i = 0; i < patterns.length; i++) {
-    var m = text.match(patterns[i]);
-    if (m && m[1]) {
-      var raw = m[1];
-      // European decimal comma: X,XX pattern (comma as decimal, not thousand separator)
-      var val;
-      if (/^\d+,\d{1,2}$/.test(raw.trim())) {
-        val = parseFloat(raw.replace(',', '.'));
-      } else {
-        val = parseFloat(raw.replace(/,/g, ''));
-      }
-      if (val > 0) return '$' + val;
-    }
-  }
-  return null;
-}
-
-function parseQtyValue(rawQty, country) {
-  var s = String(rawQty || '').trim().replace(/\s+/g, '');
-  var euCountries = ['Germany', 'Netherlands', 'France', 'Denmark', 'Sweden', 'Norway', 'Finland', 'Belgium', 'Austria'];
-  if (euCountries.indexOf(country) >= 0 && /^\d{1,3}(\.\d{3})+$/.test(s)) {
-    return parseInt(s.replace(/\./g, ''), 10);
-  }
-  return parseFloat(s.replace(/,/g, '')) || 0;
-}
-
-function extractCountryFromEmail(from) {
-  if (!from) return 'USA';
-  var lower = from.toLowerCase();
-  if (lower.indexOf('.cn') >= 0 || lower.indexOf('shenzhen') >= 0 || lower.indexOf('china') >= 0) return 'China';
-  if (lower.indexOf('.hk') >= 0 || lower.indexOf('hong kong') >= 0) return 'Hong Kong';
-  if (lower.indexOf('.il') >= 0 || lower.indexOf('israel') >= 0) return 'Israel';
-  if (lower.indexOf('.de') >= 0 || lower.indexOf('germany') >= 0) return 'Germany';
-  if (lower.indexOf('.fr') >= 0 || lower.indexOf('france') >= 0) return 'France';
-  if (lower.indexOf('.ca') >= 0) return 'Canada';
-  if (lower.indexOf('.tw') >= 0 || lower.indexOf('taiwan') >= 0) return 'Taiwan';
-  if (lower.indexOf('.kr') >= 0 || lower.indexOf('korea') >= 0) return 'Korea';
-  if (lower.indexOf('.dk') >= 0 || lower.indexOf('denmark') >= 0) return 'Denmark';
-  if (lower.indexOf('.nl') >= 0) return 'Netherlands';
-  if (lower.indexOf('.co.uk') >= 0 || lower.indexOf('.uk') >= 0) return 'UK';
-  if (lower.indexOf('.in') >= 0 || lower.indexOf('india') >= 0) return 'India';
-  if (lower.indexOf('.sg') >= 0 || lower.indexOf('singapore') >= 0) return 'Singapore';
-  if (lower.indexOf('.sk') >= 0 || lower.indexOf('slovakia') >= 0) return 'Slovakia';
-  if (lower.indexOf('.cz') >= 0 || lower.indexOf('czech') >= 0) return 'Czech Republic';
-  if (lower.indexOf('.pl') >= 0 || lower.indexOf('poland') >= 0) return 'Poland';
-  if (lower.indexOf('.eu') >= 0) return 'EU';
-  return 'USA';
-}
-
-function extractBuyerEmail(fromRaw) {
-  if (!fromRaw) return '';
-  var m = fromRaw.match(/<([^>]+)>/);
-  return m ? m[1].trim() : fromRaw.trim();
-}
-
-function getPriorQuoteHistory(mpn) {
-  if (!mpn) return '';
-  try {
-    var threads = GmailApp.search('in:sent "' + mpn + '"', 0, 20);
-    var quotes = [];
-    for (var i = 0; i < threads.length && quotes.length < 3; i++) {
-      var messages = threads[i].getMessages();
-      for (var j = messages.length - 1; j >= 0 && quotes.length < 3; j--) {
-        var msg = messages[j];
-        if (msg.getFrom().indexOf(JOHN_EMAIL) < 0) continue;
-        var body = stripQuotedLines(msg.getPlainBody());
-        var priceMatch = body.match(/\$\s*(\d+(?:\.\d+)?)\s*(?:each|\/ea)/i)
-          || body.match(/(\d+(?:\.\d+)?)\s*(?:each|per\s*unit)/i)
-          || body.match(/price[:\s]+\$?\s*(\d+(?:\.\d+)?)/i);
-        if (priceMatch && parseFloat(priceMatch[1]) > 0) {
-          var dateStr = Utilities.formatDate(msg.getDate(), Session.getScriptTimeZone(), 'MMM d, yyyy');
-          quotes.push('- ' + dateStr + ': $' + parseFloat(priceMatch[1]).toFixed(2) + ' each');
-        }
-      }
-    }
-    if (!quotes.length) return '';
-    return '\n\n---\n[JOHN - PRIOR QUOTES - DELETE BEFORE SENDING:\n' + quotes.join('\n') + ']';
-  } catch(e) {
-    Logger.log('getPriorQuoteHistory error: ' + e.toString());
-    return '';
-  }
-}
-
-function stripQuotedLines(text) {
-  if (!text) return '';
-  var lines = text.split('\n');
-  var result = [];
-  for (var i = 0; i < lines.length; i++) {
-    var trimmed = lines[i].trim();
-    if (trimmed.charAt(0) === '>') continue;
-    if (/^From:\s/i.test(trimmed) || /^De\s*:\s/i.test(trimmed) || /^-{3,}\s*Original Message/i.test(trimmed) || /^On .+ wrote:/i.test(trimmed)) break;
-    result.push(lines[i]);
-  }
-  return result.join('\n');
-}
-
-function isNetcompEmail(from, subject) {
-  if (from && from.toLowerCase().indexOf('netcomponents') >= 0) return true;
-  if (subject && subject.indexOf('netCOMPONENTS') >= 0) return true;
-  return false;
-}
-
-function isICSouceEmail(from, subject) {
-  if (from && from.toLowerCase().indexOf('icsource.com') >= 0) return true;
-  if (subject && subject.indexOf('IC Source RFQ') >= 0) return true;
-  return false;
-}
-
-function extractICSourcBuyerEmail(htmlBody) {
-  if (!htmlBody) return null;
-  // Primary: mailto: links, excluding icsource.com and intransittech.com
-  var matches = htmlBody.match(/href=["']mailto:([^"']+)["']/gi);
-  if (matches) {
-    for (var i = 0; i < matches.length; i++) {
-      var m = matches[i].match(/href=["']mailto:([^"']+)["']/i);
-      if (m && m[1]) {
-        var addr = m[1].trim().toLowerCase();
-        if (addr.indexOf('intransittech') < 0 && addr.indexOf('icsource.com') < 0) return m[1].trim();
-      }
-    }
-  }
-  // Fallback: scan plain-text email addresses in the body
-  var emailMatches = htmlBody.match(/\b([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\b/g);
-  if (emailMatches) {
-    for (var j = 0; j < emailMatches.length; j++) {
-      var e = emailMatches[j].trim().toLowerCase();
-      if (e.indexOf('intransittech') < 0 && e.indexOf('icsource.com') < 0) return emailMatches[j].trim();
-    }
-  }
-  return null;
-}
-
-function extractNetcompsBuyerEmail(body) {
-  if (!body) return null;
-  var m = body.match(/RFQ From:.*?\(([^)]+@[^)]+)\)/i);
-  if (!m) return null;
-  var email = m[1].replace(/<[^>]*>/g, '').trim();
-  return email || null;
-}
 
 // ── Sheet searches ────────────────────────────────────────────
 
@@ -908,8 +535,7 @@ function deletePart(partNumber, emailSubject) {
 // ── Trigger 1 — David no-stock emails ────────────────────────
 function checkDavidNoStockEmails() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'checkDavidNoStockEmails: disabled via hub config'); return; }
-  // Simple query — keyword matching done in code for reliability
+  if (_cfg.enabled === false) return;
   var query = 'from:' + DAVID_EMAIL + ' -label:' + INCOMING_LABEL + ' in:inbox';
   var threads = GmailApp.search(query, 0, 20);
   hubLog('run', 'checkDavidNoStockEmails: ' + threads.length + ' thread(s)');
@@ -918,452 +544,16 @@ function checkDavidNoStockEmails() {
   var label = GmailApp.getUserLabelByName(INCOMING_LABEL) || GmailApp.createLabel(INCOMING_LABEL);
   threads.forEach(function(thread) {
     var msg = thread.getMessages()[thread.getMessageCount() - 1];
-    var subject = msg.getSubject();
-    var subjectLower = subject.toLowerCase();
-    // Also check body — David sometimes puts "No stk" in body only with bare MPN+# in subject
+    var subjectLower = msg.getSubject().toLowerCase();
     var bodySnippet = msg.getPlainBody().toLowerCase().substring(0, 300);
-    var isNoStk = noStkKeywords.some(function(kw) {
-      return subjectLower.indexOf(kw) >= 0 || bodySnippet.indexOf(kw) >= 0;
-    });
-    if (!isNoStk) return; // not a no-stk email — skip, leave unlabeled
-    var mpn = extractMPN(subject);
-    if (mpn) {
-      deletePart(mpn, subject);
-      updateForteSheet(mpn);
-      hubLog('run', 'David no-stk: removed ' + mpn + ' from OEM EXCESS');
-      var replyHtml = buildSimpleHTML('Ok, removed from listing.');
-      sendThreadedReply(DAVID_EMAIL, 'Re: ' + subject, replyHtml, msg.getId(), thread.getId());
-      hubLog('run', 'David no-stk: auto-replied for ' + mpn);
-      Logger.log('David no-stk handled: ' + mpn);
-    } else {
-      GmailApp.sendEmail(NOTIFY_EMAIL, 'OEM EXCESS: Could not identify MPN in David no-stk email',
-        'Subject: "' + subject + '"\nDate: ' + msg.getDate() +
-        '\nhttps://mail.google.com/mail/u/0/#inbox/' + thread.getId() +
-        '\n\nManually reply: "Ok, removed from listing."');
-    }
+    var isNoStk = noStkKeywords.some(function(kw) { return subjectLower.indexOf(kw) >= 0 || bodySnippet.indexOf(kw) >= 0; });
+    if (!isNoStk) return;
+    processThread(thread);
     thread.addLabel(label);
     thread.moveToArchive();
   });
 }
 
-// ── Trigger 2 — Sent "Removed - MPN:" → delete from OEM EXCESS
-function checkSentRemovals() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'checkSentRemovals: disabled via hub config'); return; }
-  var query = 'in:sent to:'+DAVID_EMAIL+' "Removed - MPN:" -label:oem-removal-processed';
-  var threads = GmailApp.search(query,0,20);
-  hubLog('run', 'checkSentRemovals: ' + threads.length + ' thread(s)');
-  if (!threads.length) return;
-  var doneLabel = GmailApp.getUserLabelByName('oem-removal-processed')||GmailApp.createLabel('oem-removal-processed');
-  threads.forEach(function(thread) {
-    thread.getMessages().forEach(function(msg) {
-      if (msg.getFrom().indexOf(JOHN_EMAIL)>=0) {
-        var mpn = extractMPNFromBody(msg.getPlainBody());
-        if (mpn) {
-          deletePart(mpn,msg.getSubject());
-          updateForteSheet(mpn);
-          hubLog('run', 'Deleted from OEM EXCESS: ' + mpn, {mpn: mpn});
-        }
-      }
-    });
-    thread.addLabel(doneLabel);
-  });
-}
-
-// ── Trigger 3 — Inbox TP replies → threaded draft ────────────
-function checkInboxForTPReplies() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'checkInboxForTPReplies: disabled'); return; }
-  var BLOCKED_DOMAINS = getBlockedDomains();
-  var domainFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
-  var q1 = 'in:inbox "minimum line requirement" -label:oem-tp-processed ' + domainFilter;
-  var q2 = 'in:inbox label:oem-rfq-incoming-processed -label:oem-tp-processed newer_than:30d ' + domainFilter;
-  var threads1 = GmailApp.search(q1, 0, 20);
-  var threads2 = GmailApp.search(q2, 0, 20);
-  var q1Ids = {}, seen = {}, allThreads = [];
-  threads1.forEach(function(t){ q1Ids[t.getId()]=true; seen[t.getId()]=true; allThreads.push(t); });
-  threads2.forEach(function(t){ if(!seen[t.getId()]){ seen[t.getId()]=true; allThreads.push(t); } });
-  hubLog('run', 'checkInboxForTPReplies: ' + allThreads.length + ' thread(s)');
-  if (!allThreads.length) return;
-  var label = GmailApp.getUserLabelByName('oem-tp-processed') || GmailApp.createLabel('oem-tp-processed');
-
-  allThreads.forEach(function(thread) {
-    var isQ2Only = !q1Ids[thread.getId()];
-    var messages = thread.getMessages();
-    var lastMsg = messages[messages.length - 1];
-    var isQ3 = thread.getLabels().some(function(l){ return l.getName() === 'oem-qty-requested'; });
-    if (lastMsg.getFrom().indexOf(JOHN_EMAIL) >= 0) return;
-
-    // Q2-only: require ≥2 buyer messages (buyer replied after John's TP request)
-    if (isQ2Only) {
-      var buyerCount = 0;
-      messages.forEach(function(m){ if(m.getFrom().indexOf(JOHN_EMAIL)<0&&m.getFrom().indexOf('intransittech')<0) buyerCount++; });
-      if (buyerCount < 2) return;
-    }
-
-    // Skip if John already replied after the last buyer message
-    var lastBuyerDate = null, johnRepliedAfter = false;
-    messages.forEach(function(m){
-      if (m.getFrom().indexOf(JOHN_EMAIL)<0&&m.getFrom().indexOf('intransittech')<0){ lastBuyerDate=m.getDate(); johnRepliedAfter=false; }
-      else if (m.getFrom().indexOf(JOHN_EMAIL)>=0&&lastBuyerDate){ johnRepliedAfter=true; }
-    });
-    if (johnRepliedAfter) return;
-
-    // No numeric TP → leave unlabeled for manual handling (Bug 12 fix)
-    var body = lastMsg.getPlainBody();
-    var tp, tpNum;
-    if (isQ3) {
-      // Q3 (oem-qty-requested): buyer's last reply is their qty — TP is in an earlier message
-      for (var hi = 0; hi < messages.length; hi++) {
-        var hm = messages[hi];
-        if (hm.getFrom().indexOf(JOHN_EMAIL) >= 0 || hm.getFrom().indexOf('intransittech') >= 0) continue;
-        var tpCand = extractTargetPrice(stripQuotedLines(hm.getPlainBody()));
-        if (tpCand) { tp = tpCand; break; }
-      }
-      if (!tp) { hubLog('run', 'checkInboxForTPReplies q3: no TP in history for ' + thread.getFirstMessageSubject()); return; }
-    } else {
-      tp = extractTargetPrice(stripQuotedLines(body));
-      if (!tp) {
-        hubLog('run', 'checkInboxForTPReplies: no TP found — leaving unlabeled: ' + thread.getFirstMessageSubject());
-        return;
-      }
-    }
-    tpNum = parseFloat(String(tp).replace(/[^0-9.]/g, '')) || 0;
-
-    var subject = thread.getFirstMessageSubject();
-    var mpn = extractMPN(subject);
-    if (!mpn || !/[0-9\-]/.test(mpn)) {
-      messages.forEach(function(m){
-        if (!mpn && m.getFrom().indexOf(JOHN_EMAIL)<0&&m.getFrom().indexOf('intransittech')<0) {
-          var bm = extractMPNFromRFQBody(m.getPlainBody());
-          if (bm) mpn = bm.replace(/#\w+$/, '');
-        }
-      });
-    }
-    if (!mpn) { thread.addLabel(label); return; }
-
-    // Extract qty from buyer messages — try ALL qty matches, skip decimals < 1 (those are prices)
-    var qty = '', country = 'USA';
-    messages.forEach(function(m){
-      if (m.getFrom().indexOf(JOHN_EMAIL)>=0||m.getFrom().indexOf('intransittech')>=0) return;
-      country = extractCountryFromEmail(m.getFrom());
-      var qBody = m.getPlainBody();
-      // QtyReq / Qty= patterns first
-      var qTagM = qBody.match(/QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)|q\.ty\s+(\d+)/i);
-      if (qTagM && !qty) { var n=parseQtyValue(qTagM[1]||qTagM[2]||qTagM[3]||'', country); if(n>=1) qty=String(n); }
-      // Inline quantity — iterate all "N pcs/ea/each" matches; take first whole-number result >= 1
-      // Skips decimal price values like "0.084 each" and price-per-unit phrases like "$7 each"
-      if (!qty) {
-        var qRegex = /(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)/ig;
-        var qMatch;
-        while ((qMatch = qRegex.exec(qBody)) !== null) {
-          // Skip if immediately preceded by $ or / — it's a unit price, not a quantity
-          var charBefore = qMatch.index > 0 ? qBody.charAt(qMatch.index - 1) : '';
-          if (charBefore === '$' || charBefore === '/') continue;
-          var n = parseQtyValue(qMatch[1], country);
-          if (n >= 1) { qty = String(n); break; }
-        }
-      }
-      if (!qty && isNetcompEmail(m.getFrom(), m.getSubject())) { var ncQ=extractNetcompsQtyReq(m.getBody()); if(ncQ) qty=ncQ; }
-    });
-
-    // Q3 fallback: buyer's qty reply may be a bare number with no "pcs"/"ea" suffix (e.g. "600000")
-    if (!qty && isQ3) {
-      var qryRaw = stripQuotedLines(lastMsg.getPlainBody()).trim();
-      var qryNum = qryRaw.replace(/[,\s]/g, '');
-      if (/^\d+$/.test(qryNum)) {
-        var qn = parseInt(qryNum, 10);
-        if (qn >= 1) qty = String(qn);
-      }
-    }
-
-    // MOV check — decline if line value below minimum. Default $500; $2000 for OEM rows that say so.
-    // Skip for BILL EXT-only parts (worker handles those as bill_handle regardless of line value).
-    if (qty && tpNum > 0) {
-      var lineValue = parseFloat(qty) * tpNum;
-      if (lineValue > 0) {
-        var quickOem = searchOEMExcess(mpn);
-        var isBillExtOnly = quickOem.length > 0 && quickOem.every(function(r){
-          return r.notes && r.notes.toString().indexOf('BILL EXT') >= 0;
-        });
-        if (!isBillExtOnly) {
-          var minLine = 500;
-          quickOem.forEach(function(r) {
-            if (r.notes && r.notes.toString().indexOf('$2000 MIN') >= 0) minLine = 2000;
-          });
-          if (lineValue < minLine) {
-            var tpDisp = tpNum < 1 ? tpNum.toFixed(4) : tpNum.toFixed(2);
-            var replyToMov = extractBuyerEmail(lastMsg.getFrom());
-            var firstMsg0 = messages[0];
-            if (isNetcompEmail(firstMsg0.getFrom(), subject)) replyToMov = extractNetcompsBuyerEmail(body) || replyToMov;
-            else if (isICSouceEmail(firstMsg0.getFrom(), subject)) replyToMov = extractICSourcBuyerEmail(lastMsg.getBody()) || replyToMov;
-            var minDisp = '$' + minLine.toLocaleString();
-            var declineText = 'Thank you for your inquiry. Unfortunately, ' + qty + ' pcs at $' + tpDisp + '/EA comes to $' + lineValue.toFixed(2) + ', which does not meet our ' + minDisp + ' minimum line requirement. We appreciate the opportunity and hope to work with you on a larger quantity in the future.';
-            var declineHtml = buildSimpleHTML(declineText);
-            var declineDraftId = createThreadedDraft(replyToMov, 'Re: '+subject, declineHtml, lastMsg.getId(), thread.getId(), null);
-            if (declineDraftId) {
-              hubPostDraft(thread.getId(), mpn, replyToMov, 'Re: '+subject, declineText, declineDraftId, 'Below ' + minDisp + ' MOV: '+qty+'×$'+tpDisp+'=$'+lineValue.toFixed(2));
-              hubLog('draft_created', 'TP below MOV: '+mpn, {mpn:mpn, tp:tp, qty:qty});
-            }
-            thread.addLabel(label); return;
-          }
-        }
-        // BILL EXT-only or above minimum: fall through to worker
-      }
-    }
-
-    // Route everything else through the worker
-    var firstMsg = messages[0];
-    var replyTo = extractBuyerEmail(lastMsg.getFrom());
-    if (isNetcompEmail(firstMsg.getFrom(), subject)) replyTo = extractNetcompsBuyerEmail(body) || replyTo;
-    else if (isICSouceEmail(firstMsg.getFrom(), subject)) replyTo = extractICSourcBuyerEmail(lastMsg.getBody()) || replyTo;
-
-    var oemResults    = searchOEMExcess(mpn);
-    var inStockResults = searchInStock(mpn);
-    var stanResults   = searchStanSheet(mpn);
-    var forteResults  = checkForteForMPN(mpn, 60);
-    var priorQuotes   = getPriorQuoteHistory(mpn);
-    var currentLabels = thread.getLabels().map(function(l){ return l.getName(); });
-    var threadContent = buildThreadContent(messages, subject, replyTo);
-
-    var decision = callEmailAgent(thread.getId(), subject, replyTo, threadContent, oemResults, forteResults, currentLabels, inStockResults, stanResults, priorQuotes);
-    if (!decision) { Logger.log('Worker unavailable for TP thread: ' + mpn); return; }
-
-    var draftIdTp = executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo);
-    auditAndCorrect(decision, draftIdTp, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
-    if (decision.action === 'request_qty') {
-      var qtyReqLabel = GmailApp.getUserLabelByName('oem-qty-requested') || GmailApp.createLabel('oem-qty-requested');
-      thread.addLabel(qtyReqLabel);
-    } else {
-      thread.addLabel(label); // oem-tp-processed
-    }
-    if (isQ3) {
-      try { var ql = GmailApp.getUserLabelByName('oem-qty-requested'); if (ql) thread.removeLabel(ql); } catch(e) {}
-    }
-    if (decision.action === 'no_bid') thread.moveToArchive();
-  });
-}
-
-// Calls /api/email-agent; returns decision JSON or null on failure.
-// Worker enforces exact template wording — no improvisation possible.
-function callEmailAgent(threadId, subject, sender, threadContent, oemResults, forteResults, currentLabels, inStockResults, stanResults, priorQuotes) {
-  try {
-    var payload = JSON.stringify({
-      thread_id:        threadId,
-      subject:          subject,
-      sender:           sender,
-      thread_content:   threadContent,
-      oem_results:      oemResults      || [],
-      forte_results:    forteResults    || [],
-      current_labels:   currentLabels   || [],
-      in_stock_results: inStockResults  || [],
-      stan_results:     stanResults     || [],
-      prior_quotes:     priorQuotes     || 'None found'
-    });
-    var resp = UrlFetchApp.fetch(HUB_URL + '/api/email-agent', {
-      method: 'post', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: payload, muteHttpExceptions: true
-    });
-    if (resp.getResponseCode() !== 200) {
-      Logger.log('callEmailAgent HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().substring(0, 200));
-      return null;
-    }
-    return JSON.parse(resp.getContentText());
-  } catch(e) {
-    Logger.log('callEmailAgent error: ' + e);
-    return null;
-  }
-}
-
-function buildThreadContent(messages, subject, replyTo) {
-  var parts = ['Subject: ' + subject, 'Reply-To: ' + replyTo, ''];
-  messages.forEach(function(m, i) {
-    var body = m.getPlainBody() || '';
-    var lines = body.split('\n');
-    var cleaned = [], depth = 0;
-    for (var j = 0; j < lines.length; j++) {
-      if (lines[j].match(/^[>\|]/)) { depth++; if (depth <= 3) cleaned.push(lines[j]); }
-      else { depth = 0; cleaned.push(lines[j]); }
-    }
-    parts.push('--- Msg ' + (i+1) + ' | From: ' + m.getFrom() + ' | ' + m.getDate() + ' ---');
-    parts.push(cleaned.join('\n').trim().substring(0, 2000));
-  });
-  var full = parts.join('\n');
-  return full.length > 8000 ? full.substring(0, 8000) + '\n[truncated]' : full;
-}
-
-// Executes a worker decision; returns Gmail draft ID or null.
-function executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo) {
-  if (!decision) return null;
-  var action = decision.action;
-  var threadId = thread.getId();
-  var lastMsg = messages[messages.length - 1];
-  var draftId = null;
-
-  if (action === 'no_action' || action === 'no_bid') {
-    hubLog('run', 'Worker: ' + action + ' for ' + mpn);
-    // no_bid with draft_body = buyer gave TP but no stock → fall through to draft decline
-    if (!(action === 'no_bid' && decision.draft_body)) return null;
-  }
-
-  if (action === 'add_to_stan') {
-    var country = extractCountryFromEmail(replyTo);
-    addToStanSheet(mpn, country, decision.qty || '', decision.target_price || '');
-    hubLog('run', 'Worker add_to_stan: ' + mpn, {mpn: mpn});
-    Logger.log('Worker add_to_stan: ' + mpn);
-    // fall through to draft creation below — worker sets draft_body with checking message
-  }
-
-  if (action === 'remove_oem') {
-    var removeMpn = decision.mpn || mpn;
-    if (removeMpn) {
-      deletePart(removeMpn, subject);
-      updateForteSheet(removeMpn);  // stamp Forte status NO STK - [date]
-      hubLog('run', 'Worker remove_oem: ' + removeMpn, {mpn: removeMpn});
-      try {
-        var draftTo = decision.buyer_email || replyTo;
-        var rmHtml = buildSimpleHTML('Removing ' + removeMpn + ' from OEM EXCESS.');
-        draftId = createThreadedDraft(draftTo, 'Re: ' + subject, rmHtml, lastMsg.getId(), threadId, null);
-      } catch(e) {}
-    }
-    return draftId;
-  }
-
-  if (decision.draft_body) {
-    var bodyText = decision.draft_body.replace(/\s*(Best regards?,?|Regards?,?|Sincerely,?)\s*$/i, '').trim();
-    var origMsg = null;
-    for (var i = 0; i < messages.length; i++) {
-      if (messages[i].getFrom().indexOf(JOHN_EMAIL) < 0 && messages[i].getFrom().indexOf('intransittech') < 0) {
-        origMsg = messages[i]; break;
-      }
-    }
-    var ccEmail = (action === 'bill_handle') ? BILL_EMAIL : null;
-    // Safety: replyTo must never be an @intransittech.com address — scan backwards for external buyer
-    if (!replyTo || replyTo.indexOf('intransittech.com') >= 0) {
-      for (var si = messages.length - 1; si >= 0; si--) {
-        var sf = messages[si].getFrom();
-        if (sf.indexOf('intransittech.com') < 0 && sf.indexOf('netcomponents.com') < 0 && sf.indexOf('icsource.com') < 0) {
-          replyTo = extractBuyerEmail(sf);
-          break;
-        }
-      }
-    }
-    if (!replyTo || replyTo.indexOf('intransittech.com') >= 0) {
-      hubLog('error', 'SAFETY ABORT: replyTo resolved to intransittech.com for ' + mpn + ' — no draft created');
-      return null;
-    }
-    var htmlBody = origMsg ? buildDraftHTML(bodyText, origMsg) : buildSimpleHTML(bodyText);
-    draftId = createThreadedDraft(replyTo, 'Re: ' + subject, htmlBody, lastMsg.getId(), threadId, ccEmail);
-    var reasoning = decision.reasoning || action;
-    hubPostDraft(threadId, mpn, replyTo, 'Re: ' + subject, bodyText, draftId, reasoning);
-    hubLog('draft_created', 'Worker draft (' + action + '): ' + mpn, {mpn: mpn, type: action, tp: decision.target_price || null});
-    Logger.log('Worker draft (' + action + '): ' + mpn);
-
-    if (draftId && decision.id) {
-      try {
-        UrlFetchApp.fetch(HUB_URL + '/api/agent-decisions/' + decision.id, {
-          method: 'PATCH', contentType: 'application/json',
-          headers: { Authorization: 'Bearer ' + HUB_SECRET },
-          payload: JSON.stringify({ status: 'drafted', gmail_draft_id: draftId }),
-          muteHttpExceptions: true
-        });
-      } catch(e) {}
-    }
-  }
-
-  // Guard: only write forte_entry for msg_checking — audit can fix the draft but not undo a Forte row.
-  var fe = decision.forte_entry;
-  if (action === 'msg_checking' && fe && fe.mpn && fe.qty && fe.target_price) {
-    var alreadyThere = checkForteForMPN(fe.mpn, 60);
-    var hasRecent = alreadyThere.some(function(r){ return r.recent && r.status.toLowerCase() !== 'closed'; });
-    if (!hasRecent) {
-      addToForteSheet(fe.mpn, fe.qty, fe.target_price, fe.country || '', '');
-      hubLog('run', 'Worker added to Forte: ' + fe.mpn + ' qty=' + fe.qty + ' tp=' + fe.target_price);
-    } else {
-      hubLog('run', 'Worker skipped Forte (60-day dup): ' + fe.mpn);
-    }
-  }
-
-  return draftId;
-}
-
-// Sonnet audits the Haiku decision; if wrong, trashes draft and re-executes corrected version.
-function auditAndCorrect(decision, draftId, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent) {
-  var auditableActions = ['msg_checking','request_tp_500','request_tp_2000','request_qty','bill_handle','own_stock','stan_quoted','add_to_stan'];
-  var hasInventory = (oemResults && oemResults.length > 0) || (inStockResults && inStockResults.length > 0);
-  // Also audit no_bid when inventory was present — Haiku can misread "$500 MIN TP REQUIRED" as a per-unit floor
-  if (auditableActions.indexOf(decision.action) < 0 && !(decision.action === 'no_bid' && hasInventory)) return;
-  try {
-    var resp = UrlFetchApp.fetch(HUB_URL + '/api/audit-draft', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({
-        decision: decision, mpn: mpn, subject: subject, sender: replyTo,
-        thread_content: threadContent,
-        oem_results: oemResults, forte_results: forteResults,
-        in_stock_results: inStockResults, stan_results: stanResults
-      }),
-      muteHttpExceptions: true
-    });
-    if (resp.getResponseCode() !== 200) { Logger.log('auditAndCorrect HTTP ' + resp.getResponseCode()); return; }
-    var audit = JSON.parse(resp.getContentText());
-    if (!audit || audit.verdict !== 'wrong') return;
-
-    Logger.log('AUDIT CAUGHT MISTAKE for ' + mpn + ': ' + audit.reason);
-    hubLog('audit_corrected', 'Audit fixed ' + decision.action + ' for ' + mpn + ': ' + audit.reason, {mpn: mpn});
-
-    // Trash the wrong draft
-    if (draftId) {
-      try { GmailApp.getDraft(draftId).deleteDraft(); } catch(e) { Logger.log('trash draft err: ' + e); }
-    }
-
-    // Build corrected decision and re-execute
-    var corrected = {
-      action:        audit.corrected_action       || decision.action,
-      buyer_email:   audit.corrected_buyer_email  || decision.buyer_email,
-      draft_body:    audit.corrected_draft_body   || decision.draft_body,
-      forte_entry:   (audit.corrected_forte_entry === false) ? null : (audit.corrected_forte_entry || decision.forte_entry),
-      mpn:           decision.mpn,
-      qty:           decision.qty,
-      target_price:  decision.target_price,
-      buyer_country: decision.buyer_country,
-      reasoning:     'AUTO-CORRECTED by auditor: ' + audit.reason
-    };
-    executeWorkerDecision(corrected, thread, messages, mpn, subject, replyTo);
-
-    // Notify John of the auto-correction so he can add comments and paste back for review
-    try {
-      var invLines = [];
-      if (oemResults && oemResults.length > 0) invLines.push('OEM EXCESS: ' + oemResults.map(function(r){ return r.mpn + ' qty=' + r.qty + (r.notes ? ' [' + r.notes + ']' : ''); }).join(', '));
-      if (inStockResults && inStockResults.length > 0) invLines.push('IN STOCK: ' + inStockResults.map(function(r){ return r.mpn; }).join(', '));
-      var tp = corrected.target_price != null ? '$' + corrected.target_price : 'none given';
-      var bugEmailBody = [
-        'Thread: ' + subject,
-        'MPN: ' + mpn,
-        '',
-        'Original action: ' + decision.action,
-        'Corrected to: ' + corrected.action,
-        'Reason: ' + audit.reason,
-        '',
-        'Buyer TP: ' + tp + ' | QTY: ' + (corrected.qty || 'unknown'),
-        invLines.join('\n'),
-        '',
-        '--- Add comments below this line, then paste full email here for script repair ---'
-      ].filter(function(l){ return l !== undefined; }).join('\n');
-      GmailApp.sendEmail(
-        'john.fluman@intransittech.com',
-        'Bug Auto-Corrected: [' + decision.action + '->' + corrected.action + '] ' + subject,
-        bugEmailBody
-      );
-      Logger.log('Bug report emailed to John for ' + mpn);
-    } catch(notifyErr) {
-      Logger.log('Bug notify email failed: ' + notifyErr);
-    }
-  } catch(e) {
-    Logger.log('auditAndCorrect error: ' + e);
-  }
-}
 
 function sendDailyCostReport() {
   try {
@@ -1405,219 +595,185 @@ function sendDailyCostReport() {
   }
 }
 
-function checkInboxForNewRFQs() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'checkInboxForNewRFQs: disabled via hub config'); return; }
-  // Archive blocked domains immediately
-  try { archiveBlockedDomains(); } catch(e) { Logger.log('archiveBlockedDomains error: ' + e); }
-  var BLOCKED_DOMAINS = getBlockedDomains();
-  var _blockedFromFilter = BLOCKED_DOMAINS.map(function(d){return '-from:'+d;}).join(' ');
-  var query = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "net components" OR "netcomponents" OR "netcomp" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:partalert@netcomponents.com -from:david@fortetechno.com -from:steve@fortetechno.com -label:oem-rfq-incoming-processed ' + _blockedFromFilter;
-  var threads = GmailApp.search(query,0,10);
-  hubLog('run', 'checkInboxForNewRFQs: ' + threads.length + ' thread(s)');
-  if (!threads.length) return;
-  var label = GmailApp.getUserLabelByName('oem-rfq-incoming-processed')||GmailApp.createLabel('oem-rfq-incoming-processed');
-  threads.forEach(function(thread) {
-    // Claim the label immediately — prevents runEmailAgent from picking up the same thread
-    // concurrently and creating a duplicate draft (race condition with simultaneous 5-min triggers).
-    thread.addLabel(label);
-    var messages = thread.getMessages();
-    var johnReplied = messages.some(function(m){return m.getFrom().indexOf(JOHN_EMAIL)>=0;});
-    if (johnReplied){ return; }
-    var lastMsg = messages[messages.length-1];
-    if (lastMsg.getFrom().indexOf('intransittech.com')>=0){ return; }
-    // Skip emails addressed only to other Intransit employees (e.g. bernardo@, alberto@).
-    // Forwarding rules can deliver those emails into John's inbox. Check TO+CC for any
-    // valid RFQ target; if none found and an @intransittech.com address IS present, skip.
-    var allRecipients = (messages[0].getTo() + ',' + (messages[0].getCc() || '')).toLowerCase();
-    var validRfqTargets = ['rfq@intransittech.com','john.fluman@intransittech.com','sales@intransittech.com','websiterfq@intransittech.com'];
-    if (allRecipients.indexOf('intransittech.com') >= 0 &&
-        !validRfqTargets.some(function(t){ return allRecipients.indexOf(t) >= 0; })) {
-      return; // addressed to other employee only — label already applied, no draft
+// ── Slim worker bridge ───────────────────────────────────────
+
+function extractBuyerEmail(fromRaw) {
+  if (!fromRaw) return '';
+  var m = fromRaw.match(/<([^>]+)>/);
+  return m ? m[1].trim() : fromRaw.trim();
+}
+
+function callWorker(payload) {
+  try {
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/email-agent', {
+      method: 'post', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify(payload), muteHttpExceptions: true
+    });
+    return resp.getResponseCode() === 200 ? JSON.parse(resp.getContentText()) : null;
+  } catch(e) { Logger.log('callWorker error: ' + e); return null; }
+}
+
+function deleteOemRow(row) {
+  if (!row) return;
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(MAIN_SHEET_NAME);
+    var deletedSheet = getOrCreateDeletedSheet(ss);
+    var rowData = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
+    logDeletion(deletedSheet, rowData, 'worker remove_oem');
+    sheet.deleteRow(row);
+    Logger.log('deleteOemRow: row ' + row);
+  } catch(e) { Logger.log('deleteOemRow error: ' + e); }
+}
+
+function executeDecision(decision, thread) {
+  if (!decision || !decision.action) return;
+  var action = decision.action;
+  var messages = thread.getMessages();
+  var lastMsg = messages[messages.length - 1];
+  var threadId = thread.getId();
+  var subject = thread.getFirstMessageSubject();
+  if (action === 'no_action') return;
+  if (action === 'no_bid' && !decision.draft_body) { thread.moveToArchive(); return; }
+  if (action === 'remove_oem') {
+    if (decision.oem_delete_row) deleteOemRow(decision.oem_delete_row);
+    if (decision.mpn) updateForteSheet(decision.mpn);
+  }
+  if (action === 'add_to_stan' && decision.forte_entry) {
+    var fe0 = decision.forte_entry;
+    addToStanSheet(fe0.mpn, fe0.country || 'USA', fe0.qty || '', fe0.target_price || '');
+  }
+  if (decision.forte_entry) {
+    var fe = decision.forte_entry;
+    if (fe.mpn && fe.qty) {
+      var existing = checkForteForMPN(fe.mpn, 60);
+      var hasRecent = existing.some(function(r){ return r.recent && r.status.toLowerCase() !== 'closed'; });
+      if (!hasRecent) addToForteSheet(fe.mpn, fe.qty, fe.target_price || '', fe.country || '', '');
+      else hubLog('run', 'Forte 60-day skip: ' + fe.mpn);
     }
-    var subject = thread.getFirstMessageSubject();
-    var mpn = extractMPN(subject);
-    var fullBody = lastMsg.getPlainBody();
-    if (!fullBody || fullBody.trim().length < 30) {
-      fullBody = lastMsg.getBody().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    }
-    // IC Source and netCOMPONENTS can have all-digit MPNs — bypass letter+digit requirement for both
-    var isIcSourceThread = isICSouceEmail(messages[0].getFrom(), subject);
-    var isNetcompThread = isNetcompEmail(messages[0].getFrom(), subject);
-    var mpnFromHtmlTable = false;
-    if (!mpn || (!isIcSourceThread && !isNetcompThread && (!/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)))) {
-      var bodyMpn = extractMPNFromRFQBody(fullBody);
-      if (bodyMpn) {
-        mpn = bodyMpn.replace(/#\w+$/, '');
-      } else {
-        // Third-level fallback: parse structured HTML RFQ tables (e.g. Lintech).
-        // These can have all-digit MPNs that the plain-text extractor rejects.
-        var htmlMpn = extractMPNFromHTMLRFQ(lastMsg.getBody());
-        if (htmlMpn) { mpn = htmlMpn; mpnFromHtmlTable = true; }
+  }
+  if (decision.draft_body) {
+    var replyTo = decision.buyer_email || extractBuyerEmail(lastMsg.getFrom());
+    if (!replyTo || replyTo.indexOf('intransittech.com') >= 0) {
+      for (var i = messages.length - 1; i >= 0; i--) {
+        var sf = messages[i].getFrom();
+        if (sf.indexOf('intransittech.com') < 0) { replyTo = extractBuyerEmail(sf); break; }
       }
     }
-    // Validate: must have a real MPN. All-digit is OK for IC Source, netCOMPONENTS, or a trusted HTML table.
-    if (!mpn || (!isIcSourceThread && !isNetcompThread && !mpnFromHtmlTable && (!/[A-Za-z]/.test(mpn) || !/[0-9]/.test(mpn)))) {
-      thread.addLabel(label); return;
-    }
-    var htmlBody = lastMsg.getBody();
-
-    var buyerEmail = extractBuyerEmail(lastMsg.getFrom());
-    var firstMsg = messages[0];
-    var netcomp = isNetcompEmail(firstMsg.getFrom(), firstMsg.getSubject());
-    var icsource = isICSouceEmail(firstMsg.getFrom(), firstMsg.getSubject());
-    var replyTo = buyerEmail;
-    if (netcomp) replyTo = extractNetcompsBuyerEmail(fullBody) || buyerEmail;
-    else if (icsource) replyTo = extractICSourcBuyerEmail(htmlBody) || buyerEmail;
-    var country = extractCountryFromEmail(replyTo);
-
-    var tp = netcomp ? extractNetcompsTgtPrice(fullBody, htmlBody) : null;
-    if (!tp) {
-      var bodyBeforeListing = fullBody.split('OEM EXCESS')[0];
-      tp = extractTargetPrice(bodyBeforeListing) || extractTargetPrice(subject.split('|')[0]);
-    }
-    // IC Source website table: "Req Unit Price    .60" — plain decimal without $ sign
-    if (!tp) {
-      var icsWebTpMatch = fullBody.match(/Req(?:uested)?\s+Unit\s+Price[\s\S]*?\n[^\n]*?\s+([\d]+\.[\d]+|\.[\d]+)\s/i);
-      if (icsWebTpMatch) tp = icsWebTpMatch[1];
-    }
-
-    var qty = '';
-    var qtyMatch = fullBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)|q\.ty\s+(\d+)/i);
-    if (qtyMatch) {
-      var rawQty = qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || qtyMatch[4] || '';
-      var qtyNum = parseQtyValue(rawQty, country);
-      if (qtyNum > 0) qty = String(qtyNum);
-    }
-    if (!qty && netcomp) {
-      var netcompsQty = extractNetcompsQtyReq(htmlBody);
-      if (netcompsQty) qty = netcompsQty;
-    }
-    if (!qty) {
-      var kMatch = fullBody.match(/\b(\d+(?:\.\d+)?)\s*[Kk]\b/);
-      if (kMatch) qty = String(Math.round(parseFloat(kMatch[1]) * 1000));
-    }
-
-    var oemResults    = searchOEMExcess(mpn);
-    var inStockResults = searchInStock(mpn);
-    var stanResults   = searchStanSheet(mpn);
-    var forteResults  = checkForteForMPN(mpn, 60);
-    var priorQuotes   = getPriorQuoteHistory(mpn);
-    var currentLabels = thread.getLabels().map(function(l){ return l.getName(); });
-    var threadContent = buildThreadContent(messages, subject, replyTo);
-
-    // Prepend parsed netCOMPONENTS data so worker sees explicit values instead of garbled plain text.
-    // Plain text from getPlainBody() merges table columns (e.g. "XFL4030-472MECCOIL/OEM EXCESS!1.00")
-    // making TgtPrice invisible to Claude. This structured block is the authoritative source.
-    if (netcomp && (tp || qty)) {
-      var parsedBlock = '[PARSED_RFQ: QtyReq=' + (qty || 'unknown') + ', TgtPrice=' + (tp || 'blank') + ']\n';
-      threadContent = parsedBlock + threadContent;
-    }
-
-    // Route all decisions through the worker — it handles own_stock, add_to_stan, stan_quoted,
-    // msg_checking, bill_handle, request_tp, no_bid, etc.
-    var decision = callEmailAgent(thread.getId(), subject, replyTo, threadContent, oemResults, forteResults, currentLabels, inStockResults, stanResults, priorQuotes);
-    if (!decision) {
-      Logger.log('Worker unavailable for ' + mpn + ' — leaving in inbox');
+    if (!replyTo || replyTo.indexOf('intransittech.com') >= 0) {
+      hubLog('error', 'SAFETY ABORT: no external replyTo for ' + (decision.mpn || '?'));
       return;
     }
-
-    var draftId = executeWorkerDecision(decision, thread, messages, mpn, subject, replyTo);
-    auditAndCorrect(decision, draftId, thread, messages, mpn, subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
-    if (decision.action === 'no_bid') thread.moveToArchive();
-  });
-}
-
-// ── Trigger 5 — Sent "checking on it now" → add to Forte ─────
-function checkSentCheckingReplies() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'checkSentCheckingReplies: disabled via hub config'); return; }
-  var query = 'in:sent "checking on it now" newer_than:2d -label:oem-rfq-sent-processed';
-  var threads = GmailApp.search(query,0,20);
-  hubLog('run', 'checkSentCheckingReplies: ' + threads.length + ' thread(s)');
-  if (!threads.length) return;
-  var label = GmailApp.getUserLabelByName('oem-rfq-sent-processed')||GmailApp.createLabel('oem-rfq-sent-processed');
-  threads.forEach(function(thread) {
+    var bodyText = decision.draft_body.replace(/\s*(Best regards?,?|Regards?,?|Sincerely,?)\s*$/i, '').trim();
+    var origMsg = null;
+    for (var j = 0; j < messages.length; j++) {
+      if (messages[j].getFrom().indexOf(JOHN_EMAIL) < 0 && messages[j].getFrom().indexOf('intransittech') < 0) {
+        origMsg = messages[j]; break;
+      }
+    }
+    var ccEmail = (action === 'bill_handle') ? BILL_EMAIL : null;
+    var htmlBody = origMsg ? buildDraftHTML(bodyText, origMsg) : buildSimpleHTML(bodyText);
+    var draftId = createThreadedDraft(replyTo, 'Re: ' + subject, htmlBody, lastMsg.getId(), threadId, ccEmail);
+    hubPostDraft(threadId, decision.mpn || '', replyTo, 'Re: ' + subject, bodyText, draftId, decision.reasoning || action);
+    hubLog('draft_created', 'Worker draft (' + action + '): ' + (decision.mpn || '?'), {mpn: decision.mpn, type: action});
+    if (draftId && decision.id) {
+      try {
+        UrlFetchApp.fetch(HUB_URL + '/api/agent-decisions/' + decision.id, {
+          method: 'PATCH', contentType: 'application/json',
+          headers: { Authorization: 'Bearer ' + HUB_SECRET },
+          payload: JSON.stringify({ status: 'drafted', gmail_draft_id: draftId }),
+          muteHttpExceptions: true
+        });
+      } catch(e) {}
+    }
+  }
+  if (action === 'no_bid') thread.moveToArchive();
+  if (decision._corrected_from) {
     try {
-      var messages = thread.getMessages();
-      var sentMsg = null;
-      for (var i=messages.length-1;i>=0;i--){
-        if (messages[i].getFrom().indexOf(JOHN_EMAIL)>=0&&messages[i].getPlainBody().indexOf('checking on it now')>=0){sentMsg=messages[i];break;}
-      }
-      if (!sentMsg){thread.addLabel(label);return;}
-      var mpn = extractMPN(thread.getFirstMessageSubject());
-      if (!mpn || !searchOEMExcess(mpn).length) {
-        var firstBuyerBody = '';
-        for (var k=0;k<messages.length;k++){
-          if (messages[k].getFrom().indexOf(JOHN_EMAIL)<0&&messages[k].getFrom().indexOf('intransittech')<0){
-            firstBuyerBody = messages[k].getPlainBody(); break;
-          }
-        }
-        var bodyMpn = extractMPNFromRFQBody(firstBuyerBody);
-        if (bodyMpn && searchOEMExcess(bodyMpn).length) mpn = bodyMpn;
-      }
-      if (!mpn||!searchOEMExcess(mpn).length){thread.addLabel(label);return;}
-      var tp = null, country = 'USA', qty = '';
-      var johnHasReplied = false;
-      for (var j=0;j<messages.length;j++){
-        var msg = messages[j];
-        if (msg.getFrom().indexOf(JOHN_EMAIL)>=0||msg.getFrom().indexOf('intransittech')>=0) {
-          johnHasReplied = true; continue;
-        }
-        country = extractCountryFromEmail(msg.getFrom());
-        var fullMsgBody = msg.getPlainBody();
-        var directText = stripQuotedLines(fullMsgBody);
-        if (johnHasReplied) {
-          var buyerTP = null;
-          if (!isNetcompEmail(msg.getFrom(), msg.getSubject())) {
-            buyerTP = extractNetcompsTgtPrice(directText, msg.getBody());
-          }
-          if (!buyerTP) {
-            var bodyClean = directText.split('OEM EXCESS')[0];
-            buyerTP = extractTargetPrice(bodyClean);
-          }
-          if (buyerTP && !tp) tp = buyerTP;
-        } else if (isNetcompEmail(msg.getFrom(), msg.getSubject())) {
-          var netcompTP = extractNetcompsTgtPrice(directText, msg.getBody());
-          if (netcompTP && !tp) tp = netcompTP;
-        }
-          var qtyMatch = fullMsgBody.match(/(\d[\d\s,.]*\d|\d)\s*(?:pcs?|pieces?|units?|ea|each)|QtyReq\s+(\d+)|Qty\s*[=：:]\s*(\d[\d,]*)|q\.ty\s+(\d+)/i);
-          if (qtyMatch && !qty) {
-            var rawQty = qtyMatch[1] || qtyMatch[2] || qtyMatch[3] || qtyMatch[4] || '';
-            var qtyNum = parseQtyValue(rawQty, country);
-            if (qtyNum > 0) qty = String(qtyNum);
-          }
-          if (!qty && isNetcompEmail(msg.getFrom(), msg.getSubject())) {
-            var netcompsQty = extractNetcompsQtyReq(msg.getBody());
-            if (netcompsQty) qty = netcompsQty;
-          }
-          if (!qty) {
-            var kMatchSent = fullMsgBody.match(/\b(\d+(?:\.\d+)?)\s*[Kk]\b/);
-            if (kMatchSent) qty = String(Math.round(parseFloat(kMatchSent[1]) * 1000));
-          }
-      }
-      if (!qty) {Logger.log('No QTY, skipping Forte: '+mpn);thread.addLabel(label);return;}
-      if (tp) {
-        var qtyNum = parseFloat(qty)||0;
-        var priceNum = parseFloat(String(tp).replace(/[^0-9.]/g,''))||0;
-        if (qtyNum > 0 && priceNum > 0 && qtyNum * priceNum < 500) {
-          Logger.log('Below MOV, skipping Forte: '+mpn+' | '+qty+' x '+tp);
-          thread.addLabel(label);return;
-        }
-      }
-      var forteResults = checkForteForMPN(mpn,60);
-      var hasRecent = forteResults.some(function(r){return r.recent&&r.status.toLowerCase()!=='closed';});
-      if (!hasRecent) {
-        addToForteSheet(mpn,qty,tp,country,'');
-        hubLog('run', 'Added to Forte: '+mpn, {mpn:mpn, tp:tp||null, qty:qty, country:country});
-        Logger.log('Added to Forte: '+mpn+' | TP: '+tp);
-      } else {
-        Logger.log('Forte 60-day skip: '+mpn);
-      }
-      thread.addLabel(label);
-    } catch(e) { Logger.log('Error checkSentChecking: '+e.toString()); }
-  });
+      GmailApp.sendEmail(NOTIFY_EMAIL,
+        'Bug Auto-Corrected: [' + decision._corrected_from + '->' + action + '] ' + subject,
+        'MPN: ' + (decision.mpn || '?') + '\nOriginal: ' + decision._corrected_from + '\nCorrected to: ' + action + '\nReason: ' + (decision._correction_reason || '?')
+      );
+    } catch(e) {}
+  }
 }
+
+function processThread(thread) {
+  var messages = thread.getMessages();
+  var lastMsg = messages[messages.length - 1];
+  var subject = thread.getFirstMessageSubject();
+  var parts = ['Subject: ' + subject, ''];
+  messages.forEach(function(m, i) {
+    var body = (m.getPlainBody() || '').split('\n').filter(function(ln){ return ln.charAt(0) !== '>'; }).join('\n').trim();
+    parts.push('--- Msg ' + (i+1) + ' | From: ' + m.getFrom() + ' ---');
+    parts.push(body.substring(0, 2000));
+  });
+  var content = parts.join('\n');
+  if (content.length > 8000) content = content.substring(0, 8000) + '\n[truncated]';
+  var payload = {
+    thread_id:       thread.getId(),
+    last_message_id: lastMsg.getId(),
+    subject:         subject,
+    sender:          extractBuyerEmail(lastMsg.getFrom()),
+    thread_content:  content,
+    current_labels:  thread.getLabels().map(function(l){ return l.getName(); }),
+    prior_quotes:    'None found'
+  };
+  var decision = callWorker(payload);
+  if (decision) executeDecision(decision, thread);
+  return decision;
+}
+
+function runEmailScan() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'runEmailScan: disabled'); return; }
+  try { archiveBlockedDomains(); } catch(e) {}
+  var BLOCKED_DOMAINS = getBlockedDomains();
+  var blockFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
+
+  checkDavidNoStockEmails();
+
+  var rfqLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
+  var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:david@fortetechno.com -from:steve@fortetechno.com -label:oem-rfq-incoming-processed ' + blockFilter;
+  GmailApp.search(rfqQ, 0, 10).forEach(function(t) {
+    t.addLabel(rfqLabel);
+    var msgs = t.getMessages();
+    if (msgs.some(function(m){ return m.getFrom().indexOf(JOHN_EMAIL) >= 0; })) return;
+    if (msgs[msgs.length-1].getFrom().indexOf('intransittech.com') >= 0) return;
+    var allTo = (msgs[0].getTo() + ',' + (msgs[0].getCc() || '')).toLowerCase();
+    var validT = ['rfq@intransittech.com','john.fluman@intransittech.com','sales@intransittech.com','websiterfq@intransittech.com'];
+    if (allTo.indexOf('intransittech.com') >= 0 && !validT.some(function(v){ return allTo.indexOf(v) >= 0; })) return;
+    processThread(t);
+  });
+
+  var tpLabel = GmailApp.getUserLabelByName('oem-tp-processed') || GmailApp.createLabel('oem-tp-processed');
+  var tpQ = 'in:inbox label:oem-rfq-incoming-processed -label:oem-tp-processed newer_than:30d ' + blockFilter;
+  GmailApp.search(tpQ, 0, 20).forEach(function(t) {
+    var msgs = t.getMessages();
+    if (msgs[msgs.length-1].getFrom().indexOf(JOHN_EMAIL) >= 0) return;
+    var buyerCount = 0;
+    msgs.forEach(function(m){ if (m.getFrom().indexOf(JOHN_EMAIL) < 0 && m.getFrom().indexOf('intransittech') < 0) buyerCount++; });
+    if (buyerCount < 2) return;
+    processThread(t);
+    t.addLabel(tpLabel);
+  });
+
+  var agentLabel = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
+  var agentQ = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed newer_than:2d -from:' + DAVID_EMAIL + ' ' + blockFilter;
+  GmailApp.search(agentQ, 0, 15).forEach(function(t) {
+    var from = t.getMessages()[0].getFrom().toLowerCase();
+    if (from.indexOf('intransittech.com') >= 0 || from.indexOf('fortetechno.com') >= 0) { t.addLabel(agentLabel); return; }
+    var liveLabels = t.getLabels().map(function(l){ return l.getName(); });
+    if (liveLabels.indexOf('oem-rfq-incoming-processed') >= 0) { t.addLabel(agentLabel); return; }
+    t.addLabel(agentLabel);
+    t.addLabel(rfqLabel);
+    processThread(t);
+  });
+
+  hubLog('run', 'runEmailScan complete');
+}
+
 
 // ── Trigger 6 — Payment Advice → forward to Deb ──────────────
 function checkInboxForPaymentAdvice() {
@@ -1874,18 +1030,13 @@ function processCommandQueue() {
 
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function(t){ScriptApp.deleteTrigger(t);});
-  ScriptApp.newTrigger('checkDavidNoStockEmails').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('checkSentRemovals').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('checkInboxForTPReplies').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('checkInboxForNewRFQs').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('checkSentCheckingReplies').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger('runEmailScan').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('runEmailAgent').timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processCommandQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('sendDailyCostReport').timeBased().atHour(8).everyDays(1).create();
-  Logger.log('All 11 triggers installed.');
+  Logger.log('6 triggers installed.');
 }
 
 // ── Gmail Add-on — Draft Review Sidebar ──────────────────────
@@ -3879,9 +3030,9 @@ function testSearch(mpn) {
   Logger.log('--- IN STOCK ---'); searchInStock(mpn);
   Logger.log('--- STAN SHEET ---'); searchStanSheet(mpn);
 }
-function testNewRFQs() { checkInboxForNewRFQs(); }
-function testTPReplies() { checkInboxForTPReplies(); }
-function testSentChecking() { checkSentCheckingReplies(); }
+function testNewRFQs() { runEmailScan(); }
+function testTPReplies() { runEmailScan(); }
+function testSentChecking() { Logger.log('Replaced by executeDecision — Forte added inline.'); }
 
 function unlabelUnprocessedRFQs() {
   var label = GmailApp.getUserLabelByName('oem-rfq-incoming-processed');
@@ -3925,7 +3076,7 @@ function checkBillNetcompRemovals() {
     } catch(e) {}
 
     // Fallback 1: extract from subject using standard MPN parser
-    if (!mpn) mpn = extractMPN(subject);
+    if (!mpn) mpn = extractMPNFromSubject(subject);
     // Fallback 2: raw subject for all-digit/dash MPNs (e.g. 900-13448-0020-000).
     // extractMPN() requires letters; Bill subjects are often just the bare part number.
     // Spaces prevent descriptive subjects from matching; length cap rules out long garbage.
@@ -3956,98 +3107,33 @@ function checkBillNetcompRemovals() {
 
 var AGENT_LABEL = 'oem-agent-processed';
 
-function runEmailAgent() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'runEmailAgent: disabled via hub config'); return; }
 
-  var label   = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
-  var query   = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed newer_than:2d -from:' + DAVID_EMAIL;
-  var threads = GmailApp.search(query, 0, 15);
-
-  hubLog('run', 'runEmailAgent: ' + threads.length + ' thread(s) to evaluate');
-  if (!threads.length) return;
-
-  threads.forEach(function(thread) {
-    try {
-      processThreadWithAgent(thread, label);
-    } catch(e) {
-      hubLog('error', 'runEmailAgent error on thread: ' + e.toString());
+// Slim subject-only MPN extractor (sidebar/addon use)
+function extractMPN(subject) {
+  return extractMPNFromSubject(subject) || (function() {
+    if (!subject) return null;
+    var clean = subject.replace(/^(Re:|Fwd:|FW:|RE:|FWD:|\[EXTERNAL\]|Subject:)\s*/gi, '').replace(/^RFQ#?\s*/i, '').trim();
+    var stopwords = ['no','stk','stock','removed','remove','out','of','the','a','an','is','has','for','from','please','and','or','not','new','update','cant','share','rfq','quote','quotation','request','inquiry','inquire','netcomponents','member','price','target','pcs','qty','quantity','external','ics','source','on','standard','subject','requirements'];
+    var tokens = clean.split(/\s+/);
+    for (var i = 0; i < tokens.length; i++) {
+      var token = tokens[i].replace(/[,;:?()[\]]/g, '');
+      if (!token || token.length < 3 || stopwords.indexOf(token.toLowerCase()) >= 0 || /^#\d+$/.test(token)) continue;
+      return token;
     }
-    Utilities.sleep(1500);
-  });
+    return null;
+  })();
 }
 
-function processThreadWithAgent(thread, agentLabel) {
-  var messages = thread.getMessages();
-  var firstMsg = messages[0];
-  var subject  = thread.getFirstMessageSubject();
-  var sender   = firstMsg.getFrom();
-  var BLOCKED_DOMAINS = getBlockedDomains();
-
-  for (var b = 0; b < BLOCKED_DOMAINS.length; b++) {
-    if (sender.toLowerCase().indexOf(BLOCKED_DOMAINS[b]) >= 0) { thread.addLabel(agentLabel); thread.moveToArchive(); return; }
+function stripQuotedLines(text) {
+  if (!text) return '';
+  var lines = text.split('\n'), result = [];
+  for (var i = 0; i < lines.length; i++) {
+    var tr = lines[i].trim();
+    if (tr.charAt(0) === '>') continue;
+    if (/^From:\s/i.test(tr) || /^-{3,}\s*Original Message/i.test(tr) || /^On .+ wrote:/i.test(tr)) break;
+    result.push(lines[i]);
   }
-  if (sender.toLowerCase().indexOf('intransittech.com') >= 0) { thread.addLabel(agentLabel); return; }
-  if (sender.toLowerCase().indexOf('fortetechno.com') >= 0) { thread.addLabel(agentLabel); return; }
-
-  var mpn = extractMPNFromSubject(subject) || extractMPN(subject);
-  var lastMsg = messages[messages.length - 1];
-  var firstBody = firstMsg.getPlainBody() || '';
-  var replyTo = extractBuyerEmail(sender);
-  if (isNetcompEmail(sender, subject)) replyTo = extractNetcompsBuyerEmail(firstBody) || replyTo;
-  else if (isICSouceEmail(sender, subject)) replyTo = extractICSourcBuyerEmail(firstBody) || replyTo;
-  // Also block if the extracted buyer email domain is blocked
-  for (var bb = 0; bb < BLOCKED_DOMAINS.length; bb++) {
-    if (replyTo.toLowerCase().indexOf(BLOCKED_DOMAINS[bb]) >= 0) { thread.addLabel(agentLabel); thread.moveToArchive(); return; }
-  }
-  var oemResults    = mpn ? searchOEMExcess(mpn)    : [];
-  var inStockResults = mpn ? searchInStock(mpn)      : [];
-  var stanResults   = mpn ? searchStanSheet(mpn)    : [];
-  var forteResults  = mpn ? checkForteForMPN(mpn, 60) : [];
-  var priorQuotes   = mpn ? getPriorQuoteHistory(mpn) : 'None found';
-  var currentLabels = thread.getLabels().map(function(l){ return l.getName(); });
-  var threadContent = buildThreadContent(messages, subject, replyTo);
-
-  // Prepend parsed netCOMPONENTS data — same fix as checkInboxForNewRFQs.
-  var netcompPTA = isNetcompEmail(sender, subject);
-  if (netcompPTA) {
-    var firstHtml = firstMsg.getBody();
-    var parsedTP  = extractNetcompsTgtPrice(firstBody, firstHtml);
-    var parsedQty = extractNetcompsQtyReq(firstHtml);
-    if (parsedTP || parsedQty) {
-      var parsedBlock = '[PARSED_RFQ: QtyReq=' + (parsedQty || 'unknown') + ', TgtPrice=' + (parsedTP || 'blank') + ']\n';
-      threadContent = parsedBlock + threadContent;
-    }
-  }
-
-  // If oem-rfq-incoming-processed is on the thread, Trigger 3 already owns it — skip to prevent race/duplicate
-  var liveLabels = thread.getLabels().map(function(l){ return l.getName(); });
-  if (liveLabels.indexOf('oem-rfq-incoming-processed') >= 0) {
-    thread.addLabel(agentLabel);
-    return;
-  }
-
-  // Claim both labels before calling worker — prevents Trigger 3 from double-processing the same thread
-  thread.addLabel(agentLabel);
-  var _rfqIncomingLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
-  thread.addLabel(_rfqIncomingLabel);
-
-  // Hard dedup: re-fetch labels after a brief pause to catch any Trigger 3 claim that raced us
-  Utilities.sleep(800);
-  var recheckLabels = thread.getLabels().map(function(l){ return l.getName(); });
-  var alreadyClaimed = recheckLabels.filter(function(n){ return n === 'oem-rfq-incoming-processed'; }).length > 1;
-  if (alreadyClaimed) { return; }
-
-  var decision = callEmailAgent(thread.getId(), subject, replyTo, threadContent, oemResults, forteResults, currentLabels, inStockResults, stanResults, priorQuotes);
-  if (!decision) {
-    hubLog('error', 'runEmailAgent: worker unavailable for ' + subject);
-    return;
-  }
-
-  hubLog('run', 'runEmailAgent [' + decision.action + ']: ' + subject + ' — ' + (decision.reasoning || ''));
-  var agentDraftId = executeWorkerDecision(decision, thread, messages, mpn || '', subject, replyTo);
-  auditAndCorrect(decision, agentDraftId, thread, messages, mpn || '', subject, replyTo, oemResults, forteResults, inStockResults, stanResults, threadContent);
-  if (decision.action === 'no_bid') thread.moveToArchive();
+  return result.join('\n');
 }
 
 function extractMPNFromSubject(subject) {

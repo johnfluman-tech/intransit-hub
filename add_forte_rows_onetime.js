@@ -1522,3 +1522,16 @@ function removeOem_900NVIDIA_BillRemoval() {
   SpreadsheetApp.flush();
   Logger.log('removeOem_900NVIDIA_BillRemoval complete — 7 rows deleted');
 }
+
+// ONE-TIME — Run addForte_558527_1() to add Forte entry for 558527-1 (Rebound Singapore)
+// Buyer: vivien.teo@reboundeu.com | QTY: 80 | TP: $7 | Country: SG
+// MSG_CHECKING draft r1744644503456409158 created and pending send by John
+function addForte_558527_1() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var mpn = '558527-1';
+  var today = '7/9/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, mpn, 80, '$7', '', 'SG', '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added to Forte: 558527-1 | QTY: 80 | TP: $7 | SG');
+}

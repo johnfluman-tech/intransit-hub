@@ -735,10 +735,64 @@ ADD TO STAN draft format (use this exactly — no price, no details):
   "forte_entry": {"mpn":"...","qty":N,"target_price":N,"country":"XX"} or null
 }`;
 
+// ── Inventory self-lookup helpers ────────────────────────────────────────────
+const OEM_WEB_APP = 'https://script.google.com/macros/s/AKfycbyuuBmiYVW5mKI82D5YQGPh1nNGLJZzlLKoxuOdtmOUwUe75VlhhakqgwKooZu5LHFK/exec?key=baSDJ%23444FE%268';
+
+async function lookupInventory(mpn) {
+  try {
+    const resp = await fetch(`${OEM_WEB_APP}&mpn=${encodeURIComponent(mpn)}`, { redirect: 'follow' });
+    return resp.ok ? await resp.json() : null;
+  } catch(e) { return null; }
+}
+
+async function extractMpnFromThread(subject, content, env) {
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 40,
+        system: 'Extract the electronic component part number (MPN) from this email thread. Return ONLY valid JSON: {"mpn":"PART-NUMBER"} or {"mpn":null}. No markdown, no explanation.',
+        messages: [{ role: 'user', content: `Subject: ${subject || ''}\n\n${(content || '').substring(0, 3000)}` }],
+      })
+    });
+    const data = await res.json();
+    await logApiCost(env, 'claude-haiku-4-5-20251001', 'mpn-extract', data.usage, null, null);
+    const parsed = JSON.parse(data.content[0].text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim());
+    return parsed.mpn || null;
+  } catch(e) { return null; }
+}
+
 async function handleEmailAgent(request, env) {
   const body = await request.json();
-  const { thread_id, last_message_id, subject, sender, thread_content, oem_results, forte_results, current_labels,
-          in_stock_results, stan_results, prior_quotes } = body;
+  const { thread_id, last_message_id, subject, sender, thread_content, current_labels, prior_quotes } = body;
+  // Use let so we can override if Apps Script sends empty/no inventory (new slim mode)
+  let oem_results      = body.oem_results      ?? null;
+  let in_stock_results = body.in_stock_results ?? null;
+  let stan_results     = body.stan_results     ?? null;
+  let forte_results    = body.forte_results    ?? null;
+
+  // Self-lookup: if Apps Script sends raw thread without pre-fetched inventory,
+  // worker extracts MPN via AI (reads full body, not regex on subject) then fetches inventory.
+  if (oem_results === null) {
+    try {
+      const mpn0 = body.mpn || await extractMpnFromThread(subject, thread_content, env);
+      if (mpn0) {
+        const inv = await lookupInventory(mpn0);
+        if (inv) {
+          oem_results      = inv.oem_excess  || [];
+          in_stock_results = inv.in_stock    || [];
+          stan_results     = inv.stan_sheet  || [];
+          forte_results    = inv.forte_sheet || [];
+        }
+      }
+    } catch(e) {}
+    oem_results      = oem_results      || [];
+    in_stock_results = in_stock_results || [];
+    stan_results     = stan_results     || [];
+    forte_results    = forte_results    || [];
+  }
 
   // Fetch lessons learned from John's past corrections — inject into every decision
   let lessonsBlock = '';
@@ -845,6 +899,60 @@ async function handleEmailAgent(request, env) {
   // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic — leave as-is
   if (DRAFT_TEMPLATES[decision.action]) {
     decision.draft_body = DRAFT_TEMPLATES[decision.action];
+  }
+
+  // Auto-set oem_delete_row from lookup data so Apps Script just calls deleteOemRow(row)
+  if (decision.action === 'remove_oem' && oem_results && oem_results.length > 0) {
+    decision.oem_delete_row = oem_results[0].row || null;
+  }
+
+  // ── Inline Sonnet audit (moved from Apps Script auditAndCorrect) ──────────
+  const AUDITABLE_ACTIONS = ['msg_checking','request_tp_500','request_tp_2000','request_qty','bill_handle','own_stock','stan_quoted','add_to_stan'];
+  const hasInv = (oem_results && oem_results.length > 0) || (in_stock_results && in_stock_results.length > 0);
+  if (AUDITABLE_ACTIONS.includes(decision.action) || (decision.action === 'no_bid' && hasInv)) {
+    try {
+      const auditMsg =
+        `DECISION TO AUDIT:\n${JSON.stringify(decision, null, 2)}\n\n` +
+        `EMAIL: Subject="${subject || ''}" | Sender="${sender || ''}"\n\n` +
+        `THREAD CONTENT:\n${(thread_content || '').slice(0, 3000)}\n\n` +
+        `IN STOCK RESULTS:\n${JSON.stringify(in_stock_results || [], null, 2)}\n\n` +
+        `STAN SHEET:\n${JSON.stringify(stan_results || [], null, 2)}\n\n` +
+        `OEM EXCESS RESULTS:\n${JSON.stringify(oem_results || [], null, 2)}\n\n` +
+        `FORTE 60-DAY CHECK:\n${JSON.stringify(forte_results || [], null, 2)}\n\n` +
+        `Is this decision correct? Find any mistakes.`;
+      const auditRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 800, system: AUDIT_PROMPT,
+          messages: [{ role: 'user', content: auditMsg }] }),
+      });
+      const auditData = await auditRes.json();
+      await logApiCost(env, 'claude-sonnet-4-6', 'audit-inline', auditData.usage, decision.mpn || null, decision.action || null);
+      const audit = JSON.parse(auditData.content[0].text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim());
+
+      if (audit.verdict === 'wrong') {
+        const origAction = decision.action;
+        if (audit.corrected_action)      decision.action      = audit.corrected_action;
+        if (audit.corrected_buyer_email) decision.buyer_email = audit.corrected_buyer_email;
+        if (audit.corrected_draft_body)  decision.draft_body  = audit.corrected_draft_body;
+        if (audit.corrected_forte_entry === false) decision.forte_entry = null;
+        else if (audit.corrected_forte_entry)      decision.forte_entry = audit.corrected_forte_entry;
+        if (DRAFT_TEMPLATES[decision.action]) decision.draft_body = DRAFT_TEMPLATES[decision.action];
+        decision.reasoning     = `[CORRECTED: ${audit.reason}]`;
+        decision._corrected_from = origAction; // signals Apps Script to send bug-report email
+
+        if (audit.lesson && audit.is_systematic_bug) {
+          try {
+            const slug = 'lesson_' + Date.now().toString(36) + '_' + (decision.mpn||'x').replace(/[^a-zA-Z0-9]/g,'').slice(0,8);
+            await env.DB.prepare(
+              `INSERT OR IGNORE INTO ai_memory (slug, description, type, body, updated_at) VALUES (?, ?, 'lesson', ?, datetime('now'))`
+            ).bind(slug, audit.lesson.slice(0,200),
+              `RULE: ${audit.lesson}\nTRIGGER: Haiku said ${origAction}, Sonnet corrected to ${decision.action}\nMPN: ${decision.mpn||'n/a'}`
+            ).run();
+          } catch(e) {}
+        }
+      }
+    } catch(auditErr) {}
   }
 
   const { meta } = await env.DB.prepare(
