@@ -918,7 +918,11 @@ function checkDavidNoStockEmails() {
     var msg = thread.getMessages()[thread.getMessageCount() - 1];
     var subject = msg.getSubject();
     var subjectLower = subject.toLowerCase();
-    var isNoStk = noStkKeywords.some(function(kw) { return subjectLower.indexOf(kw) >= 0; });
+    // Also check body — David sometimes puts "No stk" in body only with bare MPN+# in subject
+    var bodySnippet = msg.getPlainBody().toLowerCase().substring(0, 300);
+    var isNoStk = noStkKeywords.some(function(kw) {
+      return subjectLower.indexOf(kw) >= 0 || bodySnippet.indexOf(kw) >= 0;
+    });
     if (!isNoStk) return; // not a no-stk email — skip, leave unlabeled
     var mpn = extractMPN(subject);
     if (mpn) {
