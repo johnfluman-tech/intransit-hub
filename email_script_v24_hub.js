@@ -3905,7 +3905,7 @@ function checkBillNetcompRemovals() {
 
     if (mpn) {
       var result = deletePart(mpn, subject);
-      var replyBody = buildSimpleHTML('Done — ' + mpn + ' removed from OEM EXCESS.');
+      var replyBody = buildSimpleHTML('Got it - removing ' + mpn + ' from OEM EXCESS now.');
       // Reply in-thread to Bill's message
       createThreadedDraft(BILL_EMAIL, 'Re: ' + subject, replyBody, lastMsg.getId(), thread.getId(), null);
       hubLog('run', 'Bill netcomp removal [' + result + ']: ' + mpn, { mpn: mpn });
