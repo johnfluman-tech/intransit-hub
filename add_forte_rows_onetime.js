@@ -1405,6 +1405,23 @@ function removeOemRows_DavidNoStk_Jul9b() {
   Logger.log('removeOemRows_DavidNoStk_Jul9b complete — Forte rows stamped: ' + stamped);
 }
 
+// ONE-TIME — Run deleteWrongDraft_S40FC004() to remove the wrong Bill-removal draft
+// created with "Done ? S40FC004C1B1I00010 removed from OEM EXCESS." (em dash encoding bug).
+// Replacement draft r4170294018491356103 already created with correct wording.
+// Part already removed from OEM EXCESS — just delete the bad draft and send the new one.
+function deleteWrongDraft_S40FC004() {
+  var token = ScriptApp.getOAuthToken();
+  try {
+    UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/r-1086416931308096189', {
+      method: 'delete',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    Logger.log('Deleted wrong Bill-removal draft r-1086416931308096189 for S40FC004C1B1I00010');
+  } catch(e) {
+    Logger.log('Draft already gone or error: ' + e);
+  }
+}
+
 // ONE-TIME — Run removeOemScan_W25Q256JWEIM() to delete OEM EXCESS rows for W25Q256JWEIM/JWEIMS.
 // The one-time Jul8 function skips these because the sheet has "W25Q256JWEIMS" (trailing S)
 // while the expected MPN is "W25Q256JWEIM" — verification check fails.
