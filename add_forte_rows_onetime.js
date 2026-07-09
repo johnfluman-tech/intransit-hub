@@ -1437,3 +1437,21 @@ function deleteWrongDrafts_HMC1031_Bernardo() {
     }
   });
 }
+
+// ONE-TIME — Run removeOem_900NVIDIA_BillRemoval() to delete the 7 OEM EXCESS rows
+// for 900-13448-0020-000 (BILL EXT 117, rows 58386-58392).
+// Bill said "not available" in thread 19f3718b959d0743 but Trigger 8 missed it because
+// extractMPN() requires letters and "900-13448-0020-000" is all digits+dashes.
+// The script fix (raw-subject fallback) prevents this for future occurrences.
+function removeOem_900NVIDIA_BillRemoval() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  // Delete rows in reverse order so row numbers stay valid after each deletion
+  var rows = [58392, 58391, 58390, 58389, 58388, 58387, 58386];
+  rows.forEach(function(r) {
+    sheet.deleteRow(r);
+    Logger.log('Deleted OEM row ' + r + ' (900-13448-0020-000)');
+  });
+  SpreadsheetApp.flush();
+  Logger.log('removeOem_900NVIDIA_BillRemoval complete — 7 rows deleted');
+}

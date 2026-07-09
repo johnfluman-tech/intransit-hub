@@ -3891,8 +3891,17 @@ function checkBillNetcompRemovals() {
       if (tagMatch) mpn = tagMatch[1].trim();
     } catch(e) {}
 
-    // Fallback: extract from subject
+    // Fallback 1: extract from subject using standard MPN parser
     if (!mpn) mpn = extractMPN(subject);
+    // Fallback 2: raw subject for all-digit/dash MPNs (e.g. 900-13448-0020-000).
+    // extractMPN() requires letters; Bill subjects are often just the bare part number.
+    // Spaces prevent descriptive subjects from matching; length cap rules out long garbage.
+    if (!mpn) {
+      var rawSubj = subject.replace(/^(RE|FW|FWD):\s*/gi, '').trim();
+      if (rawSubj.length >= 4 && rawSubj.length <= 40 && /^[A-Z0-9][A-Z0-9\-\.\/]{3,}$/i.test(rawSubj)) {
+        mpn = rawSubj;
+      }
+    }
 
     if (mpn) {
       var result = deletePart(mpn, subject);
