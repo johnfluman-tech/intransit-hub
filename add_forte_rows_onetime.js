@@ -1740,6 +1740,35 @@ function addForte_EPCQ64SI16N_Jul10() {
   Logger.log('Added EPCQ64SI16N to Forte row ' + nextRow + ' (qty=100, TP=$16, CN)');
 }
 
+// ONE-TIME — Run removeOem_STM32L476JGY3TR_4043_Jul10() AFTER sending draft r-2893020824272751311.
+// David email: "STM32L476JGY3TR #4043  No stock" (2026-07-10). OEM row 126395 (7324 qty, ST MICRO).
+// Forte row 4043: qty 1480, TP $3, CN.
+function removeOem_STM32L476JGY3TR_4043_Jul10() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var noStkDate = '7/10/2026';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var rowData = oemSheet.getRange(126395, 1, 1, 5).getValues()[0];
+  Logger.log('OEM row 126395 before delete: ' + JSON.stringify(rowData));
+  if (String(rowData[0]).trim().toUpperCase() !== 'STM32L476JGY3TR') {
+    Logger.log('ERROR: row 126395 MPN mismatch — expected STM32L476JGY3TR, got ' + rowData[0]); return;
+  }
+  oemSheet.getRange(126395, 5).setValue('NO STK ' + noStkDate);
+  oemSheet.deleteRow(126395);
+  Logger.log('Stamped and deleted OEM row 126395 (STM32L476JGY3TR)');
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var fData = forteSheet.getRange(4043, 1, 1, 11).getValues()[0];
+  Logger.log('Forte row 4043 check: MPN=' + fData[1]);
+  if (String(fData[1]).trim().toUpperCase() !== 'STM32L476JGY3TR') {
+    Logger.log('ERROR: Forte row 4043 MPN mismatch — got ' + fData[1]); return;
+  }
+  var cell = forteSheet.getRange(4043, 11);
+  cell.clearDataValidations(); cell.setValue('NO STK - ' + noStkDate);
+  cell.setBackground('#000000'); cell.setFontColor('#FFFFFF'); cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4043 (STM32L476JGY3TR) → NO STK - ' + noStkDate);
+}
+
 // ONE-TIME — Run removeOem_DEI1072ASESG_Jul10() AFTER sending draft r8019405357433069600 (Bill).
 // Bill confirmed "no longer available" for DEI1072A-SES-G (BILL EXT 117).
 // OEM rows: 134999 (85 qty) + 134998 (71 qty) — deleted descending. No Forte entries (BILL EXT).

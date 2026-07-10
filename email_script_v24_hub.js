@@ -536,7 +536,10 @@ function deletePart(partNumber, emailSubject) {
 function checkDavidNoStockEmails() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) return;
-  var query = 'from:' + DAVID_EMAIL + ' -label:' + INCOMING_LABEL + ' in:inbox';
+  // Query relies on in:inbox only — do NOT filter by INCOMING_LABEL here.
+  // John's Gmail filter auto-labels ALL David emails with oem-nostock-seen, so
+  // -label:oem-nostock-seen would exclude every David email and return 0 forever.
+  var query = 'from:' + DAVID_EMAIL + ' in:inbox';
   var threads = GmailApp.search(query, 0, 20);
   hubLog('run', 'checkDavidNoStockEmails: ' + threads.length + ' thread(s)');
   if (!threads.length) return;
@@ -548,7 +551,7 @@ function checkDavidNoStockEmails() {
     var bodySnippet = msg.getPlainBody().toLowerCase().substring(0, 300);
     var isNoStk = noStkKeywords.some(function(kw) { return subjectLower.indexOf(kw) >= 0 || bodySnippet.indexOf(kw) >= 0; });
     if (!isNoStk) return;
-    processThread(thread);
+    try { processThread(thread); } catch(e) { hubLog('error', 'checkDavidNoStockEmails processThread error: ' + e, {}); }
     thread.addLabel(label);
     thread.moveToArchive();
   });
