@@ -634,7 +634,7 @@ function executeDecision(decision, thread) {
   var lastMsg = messages[messages.length - 1];
   var threadId = thread.getId();
   var subject = thread.getFirstMessageSubject();
-  if (action === 'no_action') return;
+  if (action === 'no_action') { thread.markRead(); return; }
   if (action === 'no_bid' && !decision.draft_body) { thread.moveToArchive(); return; }
   if (action === 'remove_oem') {
     if (decision.oem_delete_row) deleteOemRow(decision.oem_delete_row);
@@ -753,6 +753,9 @@ function processThread(thread) {
     content = '[PARSED_RFQ: QtyReq=' + parsedRFQ.qtyReq + ', TgtPrice=' + parsedRFQ.tgtPrice + ']\n' + content;
   }
 
+  var mpnHint = extractMPNFromSubject(subject) || extractMPN(subject);
+  var priorQuotes = mpnHint ? getRecentSentQuotesFull(mpnHint, 5) : 'None found';
+
   var payload = {
     thread_id:       thread.getId(),
     last_message_id: lastMsg.getId(),
@@ -760,7 +763,7 @@ function processThread(thread) {
     sender:          extractBuyerEmail(lastMsg.getFrom()),
     thread_content:  content,
     current_labels:  thread.getLabels().map(function(l){ return l.getName(); }),
-    prior_quotes:    'None found'
+    prior_quotes:    priorQuotes
   };
   var decision = callWorker(payload);
   if (decision) executeDecision(decision, thread);
@@ -797,8 +800,8 @@ function runEmailScan() {
     var buyerCount = 0;
     msgs.forEach(function(m){ if (m.getFrom().indexOf(JOHN_EMAIL) < 0 && m.getFrom().indexOf('intransittech') < 0) buyerCount++; });
     if (buyerCount < 2) return;
-    processThread(t);
     t.addLabel(tpLabel);
+    processThread(t);
   });
 
   var agentLabel = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
