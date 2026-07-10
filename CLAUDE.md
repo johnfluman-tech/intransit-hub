@@ -128,6 +128,7 @@ Always use the full HTML signature with disclaimer on every draft:
 
 **Bill will help:**
 > Bill will help with this request
+> TO: buyer | CC: bill.pratt@intransittech.com — always CC Bill so he sees future buyer replies directly
 
 ---
 
