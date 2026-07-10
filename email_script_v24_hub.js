@@ -727,8 +727,8 @@ function extractNetcompRFQ(messages) {
     });
     if (!foundHeader && rowHtml.indexOf('<th') >= 0) {
       vals.forEach(function(v, i) {
-        if (/^qty/i.test(v)) qtyCol = i;
-        if (/target\s*price/i.test(v)) tpCol = i;
+        if (/^qty/i.test(v)) { if (qtyCol < 0 || /qtyreq/i.test(v)) qtyCol = i; }
+        if (/target\s*price|tgt\s*price|tgtprice/i.test(v)) tpCol = i;
       });
       if (qtyCol >= 0 && tpCol >= 0) foundHeader = true;
       continue;

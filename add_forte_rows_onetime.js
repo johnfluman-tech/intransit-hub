@@ -1727,6 +1727,19 @@ function addForte_M306N4FGTFPUKJ_Jul10() {
   Logger.log('Added M306N4FGTFPUKJ to Forte row ' + nextRow + ' (qty=100, TP=$30, ES)');
 }
 
+// ONE-TIME — Run addForte_EPCQ64SI16N_Jul10() after sending msg_checking draft r8004372012075735770.
+// Buyer: Min Liu (liumin@zhongceco.com), Zhong Ce Electronic Technology, CN.
+// QtyReq=100, TgtPrice=$16, line=$1,600. OEM row 93821 (100 qty Intel, $500 min, no BILL EXT).
+// Prior Forte row 3649 (May 10, $12 TP) is 61 days old — outside 60-day window, add new entry.
+function addForte_EPCQ64SI16N_Jul10() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/10/2026', 'EPCQ64SI16N', 100, 16, '', 'CN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added EPCQ64SI16N to Forte row ' + nextRow + ' (qty=100, TP=$16, CN)');
+}
+
 // ONE-TIME — Run removeOem_DEI1072ASESG_Jul10() AFTER sending draft r8019405357433069600 (Bill).
 // Bill confirmed "no longer available" for DEI1072A-SES-G (BILL EXT 117).
 // OEM rows: 134999 (85 qty) + 134998 (71 qty) — deleted descending. No Forte entries (BILL EXT).
