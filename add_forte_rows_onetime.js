@@ -1575,3 +1575,180 @@ function addForte_XC7A200T_Jul9() {
     '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
   Logger.log('Added XC7A200T-2FBG676I to Forte row ' + nextRow + ' (qty=100, TP=$11, CN)');
 }
+
+// ONE-TIME — Run addForte_BTS500551TMAATMA1_Jul10() after sending msg_checking r3787864537891541025.
+// Buyer: Joe Tucarella (joe@ableelectronics.com, Able Electronics, Bellport NY, US)
+// QtyReq=7000, TgtPrice=$3.50 ($24,500 line). OEM EXCESS row 86411 (7667 qty, not BILL EXT).
+// No prior Forte entries. Draft created manually — trigger stalled after 12:16.
+function addForte_BTS500551TMAATMA1_Jul10() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/10/2026', 'BTS500551TMAATMA1', 7000, 3.50, '', 'US',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added BTS500551TMAATMA1 to Forte row ' + nextRow + ' (qty=7000, TP=$3.50, US)');
+}
+
+// ONE-TIME — Run removeOem_LMX2594RHAT_4019_Jul10() after sending reply draft r-2182396785982369923.
+// David email: "LMX2594RHAT #4019  No stk" (2026-07-10). OEM row 21560 (43 qty, TI).
+// Forte row 4019: qty 500, TP $11, CN (Jul 8 2026 buyer RFQ).
+function removeOem_LMX2594RHAT_4019_Jul10() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var today = '7/10/2026';
+
+  // Verify and delete OEM row 21560
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var rowData = oemSheet.getRange(21560, 1, 1, 5).getValues()[0];
+  Logger.log('OEM row 21560 before delete: ' + JSON.stringify(rowData));
+  if (String(rowData[0]).trim().toUpperCase() !== 'LMX2594RHAT') {
+    Logger.log('ERROR: row 21560 MPN mismatch — expected LMX2594RHAT, got ' + rowData[0]);
+    return;
+  }
+  oemSheet.getRange(21560, 5).setValue('NO STK ' + today);
+  oemSheet.deleteRow(21560);
+  Logger.log('Stamped and deleted OEM row 21560 (LMX2594RHAT)');
+
+  // Stamp Forte row 4019
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var cell = forteSheet.getRange(4019, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - ' + today);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4019 (LMX2594RHAT) → NO STK - ' + today);
+}
+
+// ONE-TIME — Run removeOem_TPS82084SILR_4033_Jul10() AFTER sending draft r968649894916425707.
+// David email: "TPS82084SILR #4033 no stk" (2026-07-10). OEM row 16750 (19536 qty, BILL EXT 117).
+// Forte row 4033: qty 19536, TP $0.40, US.
+function removeOem_TPS82084SILR_4033_Jul10() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var noStkDate = '7/10/2026';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var rowData = oemSheet.getRange(16750, 1, 1, 5).getValues()[0];
+  Logger.log('OEM row 16750 before delete: ' + JSON.stringify(rowData));
+  if (String(rowData[0]).trim().toUpperCase() !== 'TPS82084SILR') {
+    Logger.log('ERROR: row 16750 MPN mismatch — expected TPS82084SILR, got ' + rowData[0]); return;
+  }
+  oemSheet.getRange(16750, 5).setValue('NO STK ' + noStkDate);
+  oemSheet.deleteRow(16750);
+  Logger.log('Stamped and deleted OEM row 16750 (TPS82084SILR)');
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var fData = forteSheet.getRange(4033, 1, 1, 11).getValues()[0];
+  Logger.log('Forte row 4033 check: ' + JSON.stringify(fData));
+  if (String(fData[1]).trim().toUpperCase() !== 'TPS82084SILR') {
+    Logger.log('ERROR: Forte row 4033 MPN mismatch — got ' + fData[1]); return;
+  }
+  var cell = forteSheet.getRange(4033, 11);
+  cell.clearDataValidations(); cell.setValue('NO STK - ' + noStkDate);
+  cell.setBackground('#000000'); cell.setFontColor('#FFFFFF'); cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4033 (TPS82084SILR) → NO STK - ' + noStkDate);
+}
+
+// ONE-TIME — Run stampMissedNoStk_Jul9() to backfill OEM EXCESS removals and Forte NO STK stamps
+// for 6 David no-stk emails from 2026-07-09 where replies were sent but sheets were never updated.
+// Bug cause: executeDecision had no handler for david_nostock action — deletePart() was never called.
+// Fixed in email_script_v24_hub.js. Run this function once to clean up the backlog.
+// Entries (OEM deleted descending row order):
+//   STM32G474RET6 → OEM 126379 / Forte 4025
+//   PIC32MZ2048EFH100-I/PT → OEM 116920 / Forte 4017
+//   NFL18ST506H1A3D → OEM 113704 / Forte 4026
+//   MP9100-75.0-1 → OEM 111286 / Forte 4028
+//   HSC100800RJ → OEM 98131 / Forte 4023
+//   TPSI2140QDWQRQ1 → OEM 16765 / Forte 4024 (BILL EXT 117)
+function stampMissedNoStk_Jul9() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var noStkDate = '7/9/2026';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+
+  // OEM entries sorted descending by row so each deletion doesn't shift subsequent rows
+  var oemEntries = [
+    { row: 126379, expectedMpn: 'STM32G474RET6' },
+    { row: 116920, expectedMpn: 'PIC32MZ2048EFH100-I/PT' },
+    { row: 113704, expectedMpn: 'NFL18ST506H1A3D' },
+    { row: 111286, expectedMpn: 'MP9100-75.0-1' },
+    { row: 98131,  expectedMpn: 'HSC100800RJ' },
+    { row: 16765,  expectedMpn: 'TPSI2140QDWQRQ1' },
+  ];
+  oemEntries.forEach(function(e) {
+    var rowData = oemSheet.getRange(e.row, 1, 1, 5).getValues()[0];
+    Logger.log('OEM row ' + e.row + ': ' + JSON.stringify(rowData));
+    if (String(rowData[0]).trim().toUpperCase() !== e.expectedMpn.toUpperCase()) {
+      Logger.log('SKIP: row ' + e.row + ' MPN mismatch — expected ' + e.expectedMpn + ', got ' + rowData[0]);
+      return;
+    }
+    oemSheet.getRange(e.row, 5).setValue('NO STK ' + noStkDate);
+    oemSheet.deleteRow(e.row);
+    Logger.log('Stamped and deleted OEM row ' + e.row + ' (' + e.expectedMpn + ')');
+  });
+
+  // Forte entries: stamp specific rows by row number with MPN verification
+  var forteEntries = [
+    { row: 4025, expectedMpn: 'STM32G474RET6' },
+    { row: 4017, expectedMpn: 'PIC32MZ2048EFH100-I/PT' },
+    { row: 4026, expectedMpn: 'NFL18ST506H1A3D' },
+    { row: 4028, expectedMpn: 'MP9100-75.0-1' },
+    { row: 4023, expectedMpn: 'HSC100800RJ' },
+    { row: 4024, expectedMpn: 'TPSI2140QDWQRQ1' },
+  ];
+  forteEntries.forEach(function(e) {
+    var fData = forteSheet.getRange(e.row, 1, 1, 11).getValues()[0];
+    Logger.log('Forte row ' + e.row + ' check: MPN=' + fData[1]);
+    if (String(fData[1]).trim().toUpperCase() !== e.expectedMpn.toUpperCase()) {
+      Logger.log('SKIP: Forte row ' + e.row + ' MPN mismatch — expected ' + e.expectedMpn + ', got ' + fData[1]);
+      return;
+    }
+    var cell = forteSheet.getRange(e.row, 11);
+    cell.clearDataValidations(); cell.setValue('NO STK - ' + noStkDate);
+    cell.setBackground('#000000'); cell.setFontColor('#FFFFFF'); cell.setFontWeight('bold');
+    Logger.log('Stamped Forte row ' + e.row + ' (' + e.expectedMpn + ') → NO STK - ' + noStkDate);
+  });
+  SpreadsheetApp.flush();
+  Logger.log('stampMissedNoStk_Jul9 complete');
+}
+
+// ONE-TIME — Run addForte_M306N4FGTFPUKJ_Jul10() after sending msg_checking r4073434427945463352.
+// Buyer: Beatriz Griman (beatriz@chipnonstop.com, Whitestonebridge S.L., Spain, ES)
+// QtyReq=100, TgtPrice=$30 ($3,000 line). OEM EXCESS row 105890 (174 qty, not BILL EXT).
+// No prior Forte entries. Buyer replied TP $30 to John's request_tp reply.
+function addForte_M306N4FGTFPUKJ_Jul10() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/10/2026', 'M306N4FGTFPUKJ', 100, 30, '', 'ES',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added M306N4FGTFPUKJ to Forte row ' + nextRow + ' (qty=100, TP=$30, ES)');
+}
+
+// ONE-TIME — Run removeOem_DEI1072ASESG_Jul10() AFTER sending draft r8019405357433069600 (Bill).
+// Bill confirmed "no longer available" for DEI1072A-SES-G (BILL EXT 117).
+// OEM rows: 134999 (85 qty) + 134998 (71 qty) — deleted descending. No Forte entries (BILL EXT).
+function removeOem_DEI1072ASESG_Jul10() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var noStkDate = '7/10/2026';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var entries = [
+    { row: 134999, expectedMpn: 'DEI1072A-SES-G' },
+    { row: 134998, expectedMpn: 'DEI1072A-SES-G' },
+  ];
+  entries.forEach(function(e) {
+    var rowData = oemSheet.getRange(e.row, 1, 1, 5).getValues()[0];
+    Logger.log('OEM row ' + e.row + ': ' + JSON.stringify(rowData));
+    if (String(rowData[0]).trim().toUpperCase() !== e.expectedMpn.toUpperCase()) {
+      Logger.log('SKIP: row ' + e.row + ' MPN mismatch — expected ' + e.expectedMpn + ', got ' + rowData[0]);
+      return;
+    }
+    oemSheet.getRange(e.row, 5).setValue('NO STK ' + noStkDate);
+    oemSheet.deleteRow(e.row);
+    Logger.log('Stamped and deleted OEM row ' + e.row + ' (DEI1072A-SES-G)');
+  });
+  SpreadsheetApp.flush();
+  Logger.log('removeOem_DEI1072ASESG_Jul10 complete');
+}

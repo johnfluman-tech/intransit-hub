@@ -644,6 +644,13 @@ function executeDecision(decision, thread) {
     var fe0 = decision.forte_entry;
     addToStanSheet(fe0.mpn, fe0.country || 'USA', fe0.qty || '', fe0.target_price || '');
   }
+  if (action === 'david_nostock') {
+    if (decision.mpn) {
+      var dRes = deletePart(decision.mpn, subject);
+      hubLog('run', 'david_nostock: deletePart ' + decision.mpn + ' → ' + dRes, {});
+      if (dRes === 'DELETED' || dRes === 'FUZZY') updateForteSheet(decision.mpn);
+    }
+  }
   if (decision.forte_entry) {
     var fe = decision.forte_entry;
     if (fe.mpn && fe.qty) {
