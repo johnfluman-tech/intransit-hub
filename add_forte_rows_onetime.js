@@ -1794,3 +1794,87 @@ function removeOem_DEI1072ASESG_Jul10() {
   SpreadsheetApp.flush();
   Logger.log('removeOem_DEI1072ASESG_Jul10 complete');
 }
+
+// ONE-TIME — Run removeOem_STM32H750VBT6TR_4041_Jul10() AFTER sending draft r-1568268353597923251.
+// David: "STM32H750VBT6TR #4041 No stock". OEM row 126367 (3780 qty). Forte row 4041 Open.
+function removeOem_STM32H750VBT6TR_4041_Jul10() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var noStkDate = '7/10/2026';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var rowData = oemSheet.getRange(126367, 1, 1, 5).getValues()[0];
+  Logger.log('OEM row 126367: ' + JSON.stringify(rowData));
+  if (String(rowData[0]).trim().toUpperCase() !== 'STM32H750VBT6TR') {
+    Logger.log('ERROR: MPN mismatch at row 126367 — got ' + rowData[0]); return;
+  }
+  oemSheet.getRange(126367, 5).setValue('NO STK ' + noStkDate);
+  oemSheet.deleteRow(126367);
+  Logger.log('Stamped and deleted OEM row 126367 (STM32H750VBT6TR)');
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var fData = forteSheet.getRange(4041, 1, 1, 11).getValues()[0];
+  Logger.log('Forte row 4041 MPN: ' + fData[1]);
+  if (String(fData[1]).trim().toUpperCase() !== 'STM32H750VBT6TR') {
+    Logger.log('ERROR: Forte row 4041 MPN mismatch — got ' + fData[1]); return;
+  }
+  var cell = forteSheet.getRange(4041, 11);
+  cell.clearDataValidations(); cell.setValue('NO STK - ' + noStkDate);
+  cell.setBackground('#000000'); cell.setFontColor('#FFFFFF'); cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4041 (STM32H750VBT6TR) → NO STK - ' + noStkDate);
+}
+
+// ONE-TIME — Run removeOem_ISL9R3060G2_4038_Jul10() AFTER sending draft r-7941055968615600676.
+// David: "ISL9R3060G2 #4038 No stock". OEM row 99783 (16236 qty). Forte row 4038 Open.
+function removeOem_ISL9R3060G2_4038_Jul10() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var noStkDate = '7/10/2026';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var rowData = oemSheet.getRange(99783, 1, 1, 5).getValues()[0];
+  Logger.log('OEM row 99783: ' + JSON.stringify(rowData));
+  if (String(rowData[0]).trim().toUpperCase() !== 'ISL9R3060G2') {
+    Logger.log('ERROR: MPN mismatch at row 99783 — got ' + rowData[0]); return;
+  }
+  oemSheet.getRange(99783, 5).setValue('NO STK ' + noStkDate);
+  oemSheet.deleteRow(99783);
+  Logger.log('Stamped and deleted OEM row 99783 (ISL9R3060G2)');
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var fData = forteSheet.getRange(4038, 1, 1, 11).getValues()[0];
+  Logger.log('Forte row 4038 MPN: ' + fData[1]);
+  if (String(fData[1]).trim().toUpperCase() !== 'ISL9R3060G2') {
+    Logger.log('ERROR: Forte row 4038 MPN mismatch — got ' + fData[1]); return;
+  }
+  var cell = forteSheet.getRange(4038, 11);
+  cell.clearDataValidations(); cell.setValue('NO STK - ' + noStkDate);
+  cell.setBackground('#000000'); cell.setFontColor('#FFFFFF'); cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4038 (ISL9R3060G2) → NO STK - ' + noStkDate);
+}
+
+// ONE-TIME — Run removeOem_ADA4940_4037_Jul10() AFTER sending draft r5566033739422784193.
+// David: "ADA4940-1ACPZ-R7 #4037 No stock". OEM row 81137 (1185 qty). Forte row 4037 Open.
+function removeOem_ADA4940_4037_Jul10() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var noStkDate = '7/10/2026';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var rowData = oemSheet.getRange(81137, 1, 1, 5).getValues()[0];
+  Logger.log('OEM row 81137: ' + JSON.stringify(rowData));
+  if (String(rowData[0]).trim().toUpperCase() !== 'ADA4940-1ACPZ-R7') {
+    Logger.log('ERROR: MPN mismatch at row 81137 — got ' + rowData[0]); return;
+  }
+  oemSheet.getRange(81137, 5).setValue('NO STK ' + noStkDate);
+  oemSheet.deleteRow(81137);
+  Logger.log('Stamped and deleted OEM row 81137 (ADA4940-1ACPZ-R7)');
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var fData = forteSheet.getRange(4037, 1, 1, 11).getValues()[0];
+  Logger.log('Forte row 4037 MPN: ' + fData[1]);
+  if (String(fData[1]).trim().toUpperCase() !== 'ADA4940-1ACPZ-R7') {
+    Logger.log('ERROR: Forte row 4037 MPN mismatch — got ' + fData[1]); return;
+  }
+  var cell = forteSheet.getRange(4037, 11);
+  cell.clearDataValidations(); cell.setValue('NO STK - ' + noStkDate);
+  cell.setBackground('#000000'); cell.setFontColor('#FFFFFF'); cell.setFontWeight('bold');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4037 (ADA4940-1ACPZ-R7) → NO STK - ' + noStkDate);
+}
