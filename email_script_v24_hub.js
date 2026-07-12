@@ -787,7 +787,7 @@ function runEmailScan() {
   var BLOCKED_DOMAINS = getBlockedDomains();
   var blockFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
 
-  checkDavidNoStockEmails();
+  try { checkDavidNoStockEmails(); } catch(e) { hubLog('error', 'checkDavidNoStockEmails crashed: ' + e, {}); }
 
   var rfqLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
   var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:david@fortetechno.com -from:steve@fortetechno.com -label:oem-rfq-incoming-processed ' + blockFilter;
@@ -799,7 +799,7 @@ function runEmailScan() {
     var allTo = (msgs[0].getTo() + ',' + (msgs[0].getCc() || '')).toLowerCase();
     var validT = ['rfq@intransittech.com','john.fluman@intransittech.com','sales@intransittech.com','websiterfq@intransittech.com'];
     if (allTo.indexOf('intransittech.com') >= 0 && !validT.some(function(v){ return allTo.indexOf(v) >= 0; })) return;
-    processThread(t);
+    try { processThread(t); } catch(e) { hubLog('error', 'runEmailScan rfqQ processThread error: ' + e, {}); }
   });
 
   var tpLabel = GmailApp.getUserLabelByName('oem-tp-processed') || GmailApp.createLabel('oem-tp-processed');
@@ -811,7 +811,7 @@ function runEmailScan() {
     msgs.forEach(function(m){ if (m.getFrom().indexOf(JOHN_EMAIL) < 0 && m.getFrom().indexOf('intransittech') < 0) buyerCount++; });
     if (buyerCount < 2) return;
     t.addLabel(tpLabel);
-    processThread(t);
+    try { processThread(t); } catch(e) { hubLog('error', 'runEmailScan tpQ processThread error: ' + e, {}); }
   });
 
   var agentLabel = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
@@ -823,7 +823,7 @@ function runEmailScan() {
     if (liveLabels.indexOf('oem-rfq-incoming-processed') >= 0) { t.addLabel(agentLabel); return; }
     t.addLabel(agentLabel);
     t.addLabel(rfqLabel);
-    processThread(t);
+    try { processThread(t); } catch(e) { hubLog('error', 'runEmailScan agentQ processThread error: ' + e, {}); }
   });
 
   hubLog('run', 'runEmailScan complete');

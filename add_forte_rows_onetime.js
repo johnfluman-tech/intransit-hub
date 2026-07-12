@@ -1878,3 +1878,22 @@ function removeOem_ADA4940_4037_Jul10() {
   SpreadsheetApp.flush();
   Logger.log('Stamped Forte row 4037 (ADA4940-1ACPZ-R7) → NO STK - ' + noStkDate);
 }
+
+// ONE-TIME — Run addForte_STM32G474RET6_Huiwei_Jul12() AFTER sending draft r-38241329826949335.
+// RFQ: Jun Wang (wang@huiweielectronic.cn), Suzhou Huiwei Electronics, CN.
+// 20834 qty, TP $1.75. OEM row 126355 (ST MICRO). Not BILL EXT.
+// Forte row 4025 is a separate HK buyer ($3.60) — this is a different buyer, add new row.
+function addForte_STM32G474RET6_Huiwei_Jul12() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var date = '7/12/2026';
+  var mpn = 'STM32G474RET6';
+  var qty = 20834;
+  var tp = 1.75;
+  var country = 'CN';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([date, mpn, qty, tp, '', country,
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  SpreadsheetApp.flush();
+  Logger.log('Added STM32G474RET6 (Huiwei CN, 20834 qty, $1.75) to Forte row ' + nextRow);
+}
