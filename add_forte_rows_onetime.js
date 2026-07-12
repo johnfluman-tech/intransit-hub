@@ -1897,3 +1897,30 @@ function addForte_STM32G474RET6_Huiwei_Jul12() {
   SpreadsheetApp.flush();
   Logger.log('Added STM32G474RET6 (Huiwei CN, 20834 qty, $1.75) to Forte row ' + nextRow);
 }
+
+// ONE-TIME — Run addForte_STM32H573VIT6_JunWang_Jul12() AFTER sending draft r6140960264817724470.
+// RFQ: Jun Wang (wang@huiweielectronic.cn), Suzhou Huiwei Electronics, CN.
+// 379222 qty, TP $1.00. OEM row 126359 (379222 qty). No existing Forte entry.
+function addForte_STM32H573VIT6_JunWang_Jul12() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/12/2026', 'STM32H573VIT6', 379222, 1.00, '', 'CN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  SpreadsheetApp.flush();
+  Logger.log('Added STM32H573VIT6 (Jun Wang CN, 379222 qty, $1.00) to Forte row ' + nextRow);
+}
+
+// ONE-TIME — Run addForte_AP7361C33E13_Vinrox_Jul12() AFTER sending draft r2276491220951466190.
+// RFQ: Vinrox Technologies Private Limited (info@vinrox.com), India.
+// 10000 qty requested, TP $0.10. OEM row 82123 (7359 qty, Diodes Inc.).
+// Buyer originally asked Jun 25, replied $0.10 on Jul 11. Total value = $1000.
+function addForte_AP7361C33E13_Vinrox_Jul12() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/12/2026', 'AP7361C-33E-13', 10000, 0.10, '', 'IN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  SpreadsheetApp.flush();
+  Logger.log('Added AP7361C-33E-13 (Vinrox IN, 10000 qty, $0.10) to Forte row ' + nextRow);
+}
