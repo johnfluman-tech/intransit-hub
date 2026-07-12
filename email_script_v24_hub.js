@@ -999,6 +999,21 @@ function processCommandQueue() {
           updateForteSheet(mpn);
           hubLog('inventory', 'Hub command: removed ' + mpn + ' from OEM EXCESS (result: ' + result + ')', { mpn: mpn, result: result });
 
+        } else if (cmd.type === 'delete_draft') {
+          var draftId = (data.draft_id || '').trim();
+          if (!draftId) throw new Error('No draft_id provided');
+          var allDrafts = GmailApp.getDrafts();
+          var found = false;
+          for (var d = 0; d < allDrafts.length; d++) {
+            if (allDrafts[d].getId() === draftId) {
+              allDrafts[d].deleteDraft();
+              found = true;
+              break;
+            }
+          }
+          if (!found) throw new Error('Draft not found: ' + draftId);
+          hubLog('drafts', 'Deleted draft ' + draftId, { draft_id: draftId });
+
         } else if (cmd.type === 'send_datamaster_email') {
           var token = ScriptApp.getOAuthToken();
           var fetchOpts = { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true };
