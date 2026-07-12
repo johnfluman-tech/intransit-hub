@@ -384,11 +384,13 @@ MSG_CHECKING: "We are checking on it now. If we get a response from the OEM, I w
 NEED_TP_500: "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away."
 NEED_TP_2000: "We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away."
 BILL: "Bill will help with this request"
+W3_CHECKING: "Warehouse is checking details and I will update ASAP"
 
 RULES:
 - If the fix involves "checking on it" → use MSG_CHECKING word for word
 - If the fix involves "need TP" → use NEED_TP_500 or NEED_TP_2000 word for word
 - If the fix involves routing to Bill → use BILL word for word
+- If the fix involves a Warehouse#3 / W3 part checking reply → use W3_CHECKING word for word
 - Do NOT include a signature (it is added automatically)
 - Return ONLY valid JSON: {"corrected_body": "...", "advice": "..."}
   corrected_body = the fixed email text (plain text, no HTML)
@@ -529,6 +531,7 @@ MSG_CHECKING: "We are checking on it now. If we get a response from the OEM, I w
 NEED_TP_500: "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away."
 NEED_TP_2000: "We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away."
 BILL: "Bill will help with this request"
+W3_CHECKING: "Warehouse is checking details and I will update ASAP"
 
 ## AVAILABLE ACTIONS
 When John confirms what he wants, append ONE ||ACTION|| block at the end of your response. Use exactly one of these formats:
@@ -1359,6 +1362,7 @@ AUTOMATION RULES:
 - BILL EXT parts: forward to Bill after buyer gives TP — never add to Forte, never MSG_CHECKING
 - OEM EXCESS + no buyer TP → request_tp_500. Buyers commonly say they have no target on the first email — always ask anyway.
 - msg_checking: sent when OEM EXCESS + buyer TP ≥$500 MOV qualifies — "We are checking on it now..."
+- Warehouse#3 (W3) IN STOCK parts (notes contain "Warehouse#3"): reply is "Warehouse is checking details and I will update ASAP" — NOT msg_checking, NOT TP request. W3 parts never need a buyer TP to proceed.
 - Forte entry: only when msg_checking is correct action AND part is NOT BILL EXT
 - Blocked domains: auto-archive, no reply
 - David (david@fortetechno.com) no-stock email → remove_oem action (delete from OEM sheet)
