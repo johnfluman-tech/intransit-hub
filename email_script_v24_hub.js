@@ -1985,7 +1985,14 @@ function addonSubmitFeedback(e) {
 function getRecentSentQuotesFull(mpn, maxThreads) {
   if (!mpn) return 'No MPN provided.';
   try {
-    var threads = GmailApp.search('in:sent "' + mpn + '"', 0, maxThreads || 5);
+    var max = maxThreads || 5;
+    // Multi-strategy: subject search first (more precise), then full-text phrase, then loose (Gmail tokenizes hyphens)
+    var threads = GmailApp.search('in:sent subject:"' + mpn + '"', 0, max);
+    if (!threads.length) threads = GmailApp.search('in:sent "' + mpn + '"', 0, max);
+    if (!threads.length) {
+      var loose = mpn.replace(/-/g, ' ');
+      threads = GmailApp.search('in:sent subject:(' + loose + ')', 0, max);
+    }
     if (!threads.length) return 'No prior sent emails found for ' + mpn + '.';
     var out = [];
     threads.forEach(function(thread) {
@@ -2006,6 +2013,22 @@ function getRecentSentQuotesFull(mpn, maxThreads) {
   }
 }
 
+// Extract an MPN-like token from free-form chat message text
+function extractMPNFromText(text) {
+  if (!text) return null;
+  var SKIP = ['quote', 'history', 'price', 'stock', 'check', 'please', 'have', 'what',
+              'this', 'that', 'with', 'from', 'send', 'need', 'order', 'about', 'more',
+              'the', 'for', 'and', 'get', 'can', 'look', 'into', 'any', 'how', 'much'];
+  var tokens = text.split(/\s+/);
+  for (var i = 0; i < tokens.length; i++) {
+    var tok = tokens[i].replace(/[^A-Za-z0-9\-\/\.#]/g, '').toUpperCase();
+    if (tok.length < 5) continue;
+    if (SKIP.indexOf(tok.toLowerCase()) >= 0) continue;
+    if (/[A-Z]/.test(tok) && /[0-9]/.test(tok)) return tok;
+  }
+  return null;
+}
+
 function addonChat(e) {
   try {
     var params     = e.commonEventObject.parameters;
@@ -2022,6 +2045,11 @@ function addonChat(e) {
 
     // ── Gather full context (Apps Script has Gmail + Sheets access) ──────────
     var mpn = extractMPN(subject);
+    // If user's message contains an MPN not found in the subject, use that instead
+    var msgMpn = extractMPNFromText(message);
+    if (msgMpn && (!mpn || msgMpn.toUpperCase() !== mpn.toUpperCase())) {
+      mpn = msgMpn;
+    }
 
     // Full thread text (up to 5 messages, 600 chars each)
     var fullThread = '';
