@@ -1985,3 +1985,40 @@ function removeNoStk_STM32H573VIT6_Jul13() {
   SpreadsheetApp.flush();
   Logger.log('Stamped Forte row 4048 (STM32H573VIT6) NO STK 7/13/2026');
 }
+
+// ONE-TIME — Run removeNoStk_DS2ESDC24V_Jul13()
+// David sent "DS2E-S-DC24V #4058 no stk" on 2026-07-13.
+// OEM EXCESS row to DELETE: 91585 (799 qty)
+// Forte row 4058: stamp col E = "NO STK 7/13/2026" (3000 qty, $3 TP, CN, Open)
+function removeNoStk_DS2ESDC24V_Jul13() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  oemSheet.deleteRow(91585);
+  Logger.log('Deleted OEM row 91585 (DS2E-S-DC24V 799 qty)');
+
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  forteSheet.getRange(4058, 5).setValue('NO STK 7/13/2026');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4058 (DS2E-S-DC24V) NO STK 7/13/2026');
+}
+
+// ONE-TIME — Run removeNoStk_7286542140_Jul13()
+// David sent "7286-5421-40 #4054 No stk" on 2026-07-13.
+// OEM EXCESS row to DELETE: 74060 (504 qty, Yazaki Europe Ltd Be)
+// Forte row 4054: stamp col E = "NO STK 7/13/2026" (504 qty, $1.50 TP, BE, Open — created by automation Jul 13)
+// NOTE: Check for any MSG_CHECKING draft to EOS Electronic (excess@components-service.com) — do NOT send it.
+function removeNoStk_7286542140_Jul13() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  oemSheet.deleteRow(74060);
+  Logger.log('Deleted OEM row 74060 (7286-5421-40 504 qty)');
+
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  forteSheet.getRange(4054, 5).setValue('NO STK 7/13/2026');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4054 (7286-5421-40) NO STK 7/13/2026');
+}
