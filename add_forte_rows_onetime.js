@@ -1924,3 +1924,64 @@ function addForte_AP7361C33E13_Vinrox_Jul12() {
   SpreadsheetApp.flush();
   Logger.log('Added AP7361C-33E-13 (Vinrox IN, 10000 qty, $0.10) to Forte row ' + nextRow);
 }
+
+// ONE-TIME — Run removeNoStk_STM32G031G6U6TR_Jul12() to clean up David no-stk.
+// David said no-stk; John replied "Ok, removed from listing"; David replied "Thank you".
+// OEM EXCESS rows to DELETE: 126339 (450000 qty) and 126220 (1308 qty).
+// Forte row 4039: stamp col E = "NO STK 7/12/2026".
+// Delete higher row first to avoid row number shifting.
+function removeNoStk_STM32G031G6U6TR_Jul12() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  oemSheet.deleteRow(126339);
+  Logger.log('Deleted OEM row 126339 (STM32G031G6U6TR 450000 qty)');
+  oemSheet.deleteRow(126220);
+  Logger.log('Deleted OEM row 126220 (STM32G031G6U6TR 1308 qty)');
+
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  forteSheet.getRange(4039, 5).setValue('NO STK 7/12/2026');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4039 (STM32G031G6U6TR) NO STK 7/12/2026');
+}
+
+// ONE-TIME — Run removeNoStk_EPCQ64SI16N_Jul12() to clean up David no-stk.
+// David said no-stk; John replied "Ok, removed from listing"; David replied "Thank you".
+// OEM EXCESS row to DELETE: 93821 (100 qty).
+// Forte rows 3649 and 4045: stamp col E = "NO STK 7/12/2026".
+function removeNoStk_EPCQ64SI16N_Jul12() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  oemSheet.deleteRow(93821);
+  Logger.log('Deleted OEM row 93821 (EPCQ64SI16N 100 qty)');
+
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  forteSheet.getRange(4045, 5).setValue('NO STK 7/12/2026');
+  forteSheet.getRange(3649, 5).setValue('NO STK 7/12/2026');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte rows 3649 and 4045 (EPCQ64SI16N) NO STK 7/12/2026');
+}
+
+// ONE-TIME — Run removeNoStk_STM32H573VIT6_Jul13()
+// David sent "STM32H573VIT6 #4048 no stk" on 2026-07-13.
+// IMPORTANT: Run this BEFORE removeNoStk_STM32G031G6U6TR_Jul12 to avoid row-shift issues.
+// OEM EXCESS row to DELETE: 126359 (379222 qty) — matches Forte row 4048 qty.
+// Row 126220 (1308 qty) appears shared with STM32G031G6U6TR — do NOT delete here.
+// Forte row 4048: stamp col E = "NO STK 7/13/2026".
+// NOTE: Do NOT run addForte_STM32H573VIT6_JunWang_Jul12 — OEM is no-stk as of today.
+function removeNoStk_STM32H573VIT6_Jul13() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  oemSheet.deleteRow(126359);
+  Logger.log('Deleted OEM row 126359 (STM32H573VIT6 379222 qty)');
+
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  forteSheet.getRange(4048, 5).setValue('NO STK 7/13/2026');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 4048 (STM32H573VIT6) NO STK 7/13/2026');
+}
