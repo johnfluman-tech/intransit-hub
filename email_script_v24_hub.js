@@ -640,7 +640,11 @@ function executeDecision(decision, thread) {
   if (action === 'no_action') { thread.markRead(); return; }
   if (action === 'no_bid' && !decision.draft_body) { thread.moveToArchive(); return; }
   if (action === 'remove_oem') {
-    if (decision.oem_delete_row) deleteOemRow(decision.oem_delete_row);
+    if (decision.oem_delete_row) {
+      deleteOemRow(decision.oem_delete_row);
+    } else if (decision.mpn) {
+      deletePart(decision.mpn, subject);
+    }
     if (decision.mpn) updateForteSheet(decision.mpn);
   }
   if (action === 'add_to_stan' && decision.forte_entry) {
