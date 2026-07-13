@@ -2022,3 +2022,21 @@ function removeNoStk_7286542140_Jul13() {
   SpreadsheetApp.flush();
   Logger.log('Stamped Forte row 4054 (7286-5421-40) NO STK 7/13/2026');
 }
+
+// ONE-TIME — Run removeNoStk_XC7A100T1FGG484I_Jul13()
+// David sent "XC7A100T-1FGG484I #3994 No Stk" on 2026-07-13.
+// OEM EXCESS row to DELETE: 24662 (138 qty, AMD)
+// Forte row 3994: stamp col E = "NO STK 7/13/2026" (100 qty, $7 TP, CN, Open, Jul 6 2026)
+function removeNoStk_XC7A100T1FGG484I_Jul13() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  oemSheet.deleteRow(24662);
+  Logger.log('Deleted OEM row 24662 (XC7A100T-1FGG484I 138 qty)');
+
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  forteSheet.getRange(3994, 5).setValue('NO STK 7/13/2026');
+  SpreadsheetApp.flush();
+  Logger.log('Stamped Forte row 3994 (XC7A100T-1FGG484I) NO STK 7/13/2026');
+}
