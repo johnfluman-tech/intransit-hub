@@ -1194,7 +1194,7 @@ function processCommandQueue() {
           if (_ex) oemSS.deleteSheet(_ex);
           var tempSheet = oemSS.insertSheet('_ICS_UPLOAD_TEMP');
           try {
-            tempSheet.appendRow(srcData[0]); // header row
+            var filteredRows = [srcData[0]];
             var skipped = 0;
             for (var di = 1; di < srcData.length; di++) {
               var mpn = String(srcData[di][0]).trim();
@@ -1206,15 +1206,16 @@ function processCommandQueue() {
               var cleanRow = srcData[di].slice();
               cleanRow[0] = mpn;
               cleanRow[3] = qtyNum;
-              tempSheet.appendRow(cleanRow);
+              filteredRows.push(cleanRow);
             }
+            tempSheet.getRange(1, 1, filteredRows.length, filteredRows[0].length).setValues(filteredRows);
             SpreadsheetApp.flush();
             var gid = tempSheet.getSheetId();
             oemBlob = UrlFetchApp.fetch(
               'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/export?format=xlsx&gid=' + gid,
               fetchOpts
             ).getBlob().setName('OEM_EXCESS.xlsx');
-            hubLog('inventory', 'OEM EXCESS clean export: ' + (srcData.length - 1 - skipped) + ' rows sent, ' + skipped + ' blank/null-qty rows skipped', {});
+            hubLog('inventory', 'OEM EXCESS clean export: ' + (filteredRows.length - 1) + ' rows sent, ' + skipped + ' blank/null-qty rows skipped', {});
           } finally {
             try { oemSS.deleteSheet(tempSheet); } catch(e) {}
           }
@@ -3473,7 +3474,7 @@ function sendPleasePostNow() {
   if (_existing) oemSS.deleteSheet(_existing);
   var tempSheet = oemSS.insertSheet('_ICS_UPLOAD_TEMP');
   try {
-    tempSheet.appendRow(srcData[0]);
+    var filteredRows = [srcData[0]];
     var skipped = 0;
     for (var i = 1; i < srcData.length; i++) {
       var mpn    = String(srcData[i][0]).trim();
@@ -3482,14 +3483,15 @@ function sendPleasePostNow() {
       var qtyNum = (typeof qtyRaw === 'number') ? qtyRaw : parseFloat(String(qtyRaw).replace(/,/g, ''));
       if (isNaN(qtyNum) || qtyNum <= 0) { skipped++; continue; }
       var row = srcData[i].slice(); row[0] = mpn; row[3] = qtyNum;
-      tempSheet.appendRow(row);
+      filteredRows.push(row);
     }
+    tempSheet.getRange(1, 1, filteredRows.length, filteredRows[0].length).setValues(filteredRows);
     SpreadsheetApp.flush();
     oemBlob = UrlFetchApp.fetch(
       'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/export?format=xlsx&gid=' + tempSheet.getSheetId(),
       fetchOpts
     ).getBlob().setName('OEM_EXCESS.xlsx');
-    Logger.log('OEM EXCESS: ' + (srcData.length - 1 - skipped) + ' rows exported, ' + skipped + ' skipped');
+    Logger.log('OEM EXCESS: ' + (filteredRows.length - 1) + ' rows exported, ' + skipped + ' skipped');
   } finally {
     try { oemSS.deleteSheet(tempSheet); } catch(e) {}
   }
