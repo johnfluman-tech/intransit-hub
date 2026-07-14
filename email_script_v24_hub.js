@@ -17,6 +17,7 @@ var IN_STOCK_ID       = '1iOFHUBiWRgA6EjtO2ujoGpz-8v1qTRkgCXSvCa2Gf54';
 var STAN_SHEET_ID     = '1pGRDpkqftQNoEYna53MxRJfUY8jEf5_w32FNa56OUIM';
 var FORTE_HISTORY_COL = 9;
 var FORTE_STATUS_COL  = 10;
+var PENDING_LABEL     = 'oem-pending-process';
 
 var MSG_NEED_TP_500  = 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.';
 var MSG_NEED_TP_2000 = 'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.';
@@ -243,6 +244,15 @@ function applyRemoteConfig(cfg) {
   if (cfg.DAVID_EMAIL)      DAVID_EMAIL      = cfg.DAVID_EMAIL;
   if (cfg.BILL_EMAIL)       BILL_EMAIL       = cfg.BILL_EMAIL;
   if (cfg.DEB_EMAIL)        DEB_EMAIL        = cfg.DEB_EMAIL;
+}
+
+function getCachedRemoteConfig() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get('remote_config_v2');
+  if (cached) try { return JSON.parse(cached); } catch(e) {}
+  var cfg = getRemoteConfig();
+  try { cache.put('remote_config_v2', JSON.stringify(cfg || {}), 300); } catch(e) {}
+  return cfg || {};
 }
 
 // ── Gmail REST API — threaded draft creation ──────────────────
@@ -833,6 +843,91 @@ function runEmailScan() {
   hubLog('run', 'runEmailScan complete');
 }
 
+// ── Two-phase scanning: fastScanInbox (1 min, labels only) ────
+// ── + processPendingThreads (5 min, Claude calls) ─────────────
+// Root cause of quota exhaustion: runEmailScan calls Claude API
+// synchronously every minute. Each processThread() takes 30-60s,
+// so 10 threads/run = up to 10 min, blowing the 6-min exec limit
+// and consuming the 6-hr daily quota within hours. Fix: label-only
+// fast scan every minute, Claude calls on a slower 5-min trigger.
+
+function fastScanInbox() {
+  var _cfg = getCachedRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) { hubLog('run', 'fastScanInbox: disabled'); return; }
+  try { archiveBlockedDomains(); } catch(e) {}
+  var BLOCKED_DOMAINS = getBlockedDomains();
+  var blockFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
+
+  try { checkDavidNoStockEmails(); } catch(e) { hubLog('error', 'checkDavidNoStockEmails: ' + e); }
+
+  var rfqLabel   = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
+  var tpLabel    = GmailApp.getUserLabelByName('oem-tp-processed') || GmailApp.createLabel('oem-tp-processed');
+  var agentLabel = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
+  var pendingLbl = GmailApp.getUserLabelByName(PENDING_LABEL) || GmailApp.createLabel(PENDING_LABEL);
+
+  var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com OR to:rfq@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -label:oem-rfq-incoming-processed ' + blockFilter;
+  var rfqCount = 0;
+  GmailApp.search(rfqQ, 0, 50).forEach(function(t) {
+    var msgs = t.getMessages();
+    if (msgs.some(function(m){ return m.getFrom().indexOf(JOHN_EMAIL) >= 0; })) return;
+    if (msgs[msgs.length-1].getFrom().indexOf('intransittech.com') >= 0) return;
+    t.addLabel(rfqLabel);
+    t.addLabel(pendingLbl);
+    rfqCount++;
+  });
+
+  var tpQ = 'in:inbox label:oem-rfq-incoming-processed -label:oem-tp-processed -label:' + PENDING_LABEL + ' newer_than:60d ' + blockFilter;
+  var tpCount = 0;
+  GmailApp.search(tpQ, 0, 50).forEach(function(t) {
+    var msgs = t.getMessages();
+    if (msgs[msgs.length-1].getFrom().indexOf(JOHN_EMAIL) >= 0) return;
+    var buyerCount = 0;
+    msgs.forEach(function(m){ if (m.getFrom().indexOf(JOHN_EMAIL) < 0 && m.getFrom().indexOf('intransittech') < 0) buyerCount++; });
+    if (buyerCount < 2) return;
+    t.addLabel(tpLabel);
+    t.addLabel(pendingLbl);
+    tpCount++;
+  });
+
+  var agentQ = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed -label:' + PENDING_LABEL + ' newer_than:3d -from:fortetechno.com ' + blockFilter;
+  var agentCount = 0;
+  GmailApp.search(agentQ, 0, 50).forEach(function(t) {
+    var from = t.getMessages()[0].getFrom().toLowerCase();
+    if (from.indexOf('intransittech.com') >= 0 || from.indexOf('fortetechno.com') >= 0) {
+      t.addLabel(agentLabel);
+      return;
+    }
+    var liveLabels = t.getLabels().map(function(l){ return l.getName(); });
+    if (liveLabels.indexOf('oem-rfq-incoming-processed') >= 0) { t.addLabel(agentLabel); return; }
+    t.addLabel(agentLabel);
+    t.addLabel(rfqLabel);
+    t.addLabel(pendingLbl);
+    agentCount++;
+  });
+
+  if (rfqCount + tpCount + agentCount > 0) {
+    hubLog('run', 'fastScanInbox: queued ' + (rfqCount+tpCount+agentCount) + ' thread(s) (rfq:' + rfqCount + ' tp:' + tpCount + ' agent:' + agentCount + ')');
+  }
+}
+
+function processPendingThreads() {
+  var _cfg = getCachedRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) return;
+  var pendingLbl = GmailApp.getUserLabelByName(PENDING_LABEL);
+  if (!pendingLbl) return;
+  var threads = GmailApp.search('label:' + PENDING_LABEL, 0, 10);
+  if (!threads.length) return;
+  hubLog('run', 'processPendingThreads: processing ' + threads.length + ' thread(s)');
+  threads.forEach(function(t) {
+    t.removeLabel(pendingLbl);
+    var msgs = t.getMessages();
+    var lastMsg = msgs[msgs.length - 1];
+    if (lastMsg.getFrom().indexOf(JOHN_EMAIL) >= 0) return;
+    if (lastMsg.getFrom().indexOf('intransittech.com') >= 0) return;
+    try { processThread(t); } catch(e) { hubLog('error', 'processPendingThreads error: ' + e); }
+  });
+}
+
 
 // ── Trigger 6 — Payment Advice → forward to Deb ──────────────
 function checkInboxForPaymentAdvice() {
@@ -1104,13 +1199,17 @@ function processCommandQueue() {
 
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function(t){ScriptApp.deleteTrigger(t);});
-  ScriptApp.newTrigger('runEmailScan').timeBased().everyMinutes(1).create();
+  // Two-phase architecture: fastScanInbox labels threads only (< 10s/run),
+  // processPendingThreads calls Claude API on a slower 5-min schedule.
+  // This prevents runEmailScan from exhausting the 6-hr daily execution quota.
+  ScriptApp.newTrigger('fastScanInbox').timeBased().everyMinutes(1).create();
+  ScriptApp.newTrigger('processPendingThreads').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processCommandQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('sendDailyCostReport').timeBased().atHour(8).everyDays(1).create();
-  Logger.log('6 triggers installed.');
+  Logger.log('7 triggers installed.');
 }
 
 // ── Gmail Add-on — Draft Review Sidebar ──────────────────────

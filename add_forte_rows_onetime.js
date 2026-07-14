@@ -2040,3 +2040,28 @@ function removeNoStk_XC7A100T1FGG484I_Jul13() {
   SpreadsheetApp.flush();
   Logger.log('Stamped Forte row 3994 (XC7A100T-1FGG484I) NO STK 7/13/2026');
 }
+
+// ONE-TIME — Run addForteRows_Jul14() to add Forte entries for inbox TP-reply threads
+// processed manually on 2026-07-14 (automation backlog sweep).
+// F980J107MMAAXE (kw@ascglobal.com, qty=4000, tp=1.00, PL) — SKIPPED: forte_sheet already has entry (qty=2000, tp=1.4, QUOTED)
+// MKS2B044701K00KSSD (jc.cruz@reboundeu.com, qty=4000, tp=0.30, AE) — SKIPPED: forte_sheet already has entry (qty=10000, tp=0.5, Open)
+// 6098-8236: forte_sheet is empty → ADD (vivien.teo@reboundeu.com, qty=900, tp=1.30, SG)
+function addForteRows_Jul14() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/14/2026';
+  var rows = [
+    // [mpn, qty, buyerTP, country]
+    ['6098-8236', 900, 1.30, 'SG'],  // vivien.teo@reboundeu.com — Rebound EU Singapore; OEM qty=2988
+  ];
+  rows.forEach(function(r) {
+    var nextRow = sheet.getLastRow() + 1;
+    sheet.appendRow([
+      today, r[0], r[1], r[2], '', r[3],
+      '=C' + nextRow + '*D' + nextRow,
+      '', '', '', 'Open'
+    ]);
+    Logger.log('Added: ' + r[0]);
+  });
+  Logger.log('Done — ' + rows.length + ' row(s) added to Forte sheet.');
+}
