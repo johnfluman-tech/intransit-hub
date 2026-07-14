@@ -1222,11 +1222,7 @@ function processCommandQueue() {
             fetchOpts
           ).getBlob().setName('IN STOCK.xlsx');
 
-          GmailApp.sendEmail(NOTIFY_EMAIL, 'Please post', '', {
-            attachments: [oemBlob, inBlob],
-            bcc: DATAMASTER_BCC,
-            name: 'John Fluman'
-          });
+          sendPleasePostViaREST(token, oemBlob, inBlob, DATAMASTER_BCC);
           hubLog('inventory', 'Sent NetCOMPONENTS report (OEM_EXCESS + IN STOCK) to ' + DATAMASTER_BCC, {});
         }
 
@@ -3403,4 +3399,102 @@ function extractMPNFromSubject(subject) {
   var ic = subject.match(/RFQ[:\-\s]+([A-Z0-9][A-Z0-9\-\/\.]{4,})/i);
   if (ic) return ic[1].trim();
   return null;
+}
+
+// ── Please Post — REST API send (no GmailApp quota) ──────────────────────────
+
+function sendPleasePostViaREST(token, oemBlob, inBlob, bccList) {
+  var boundary = 'bnd' + Math.random().toString(36).slice(2, 18);
+  var oemB64   = Utilities.base64Encode(oemBlob.getBytes());
+  var inB64    = Utilities.base64Encode(inBlob.getBytes());
+
+  var rawParts = [
+    'MIME-Version: 1.0',
+    'From: John Fluman <' + JOHN_EMAIL + '>',
+    'To: ' + NOTIFY_EMAIL,
+    'Bcc: ' + bccList,
+    'Subject: Please post',
+    'Content-Type: multipart/mixed; boundary="' + boundary + '"',
+    '',
+    '--' + boundary,
+    'Content-Type: text/plain; charset=UTF-8',
+    '',
+    '',
+    '--' + boundary,
+    'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Transfer-Encoding: base64',
+    'Content-Disposition: attachment; filename="OEM_EXCESS.xlsx"',
+    '',
+    oemB64,
+    '--' + boundary,
+    'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Transfer-Encoding: base64',
+    'Content-Disposition: attachment; filename="IN STOCK.xlsx"',
+    '',
+    inB64,
+    '--' + boundary + '--'
+  ];
+
+  var resp = UrlFetchApp.fetch(
+    'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+    {
+      method: 'POST',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + token },
+      payload: JSON.stringify({ raw: Utilities.base64EncodeWebSafe(rawParts.join('\r\n')) }),
+      muteHttpExceptions: true
+    }
+  );
+  var data = JSON.parse(resp.getContentText());
+  if (data.error) throw new Error('Gmail REST send failed: ' + JSON.stringify(data.error));
+  Logger.log('Please post sent OK — message id: ' + data.id);
+}
+
+// Run this NOW to send the Please Post email immediately (bypasses command queue).
+function sendPleasePostNow() {
+  var token    = ScriptApp.getOAuthToken();
+  var fetchOpts = { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true };
+
+  var DATAMASTER_BCC = [
+    '5BDFA5@stkdst.com',
+    'datamaster@netcomponents.com',
+    'post@icsource.com',
+    'bill@intransittech.com',
+    'david@fortetechno.com',
+    'Stan@amorelectronics.com'
+  ].join(',');
+
+  var oemBlob;
+  var oemSS   = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var srcData = oemSS.getSheets()[0].getDataRange().getValues();
+  var tempSheet = oemSS.insertSheet('_ICS_UPLOAD_TEMP');
+  try {
+    tempSheet.appendRow(srcData[0]);
+    var skipped = 0;
+    for (var i = 1; i < srcData.length; i++) {
+      var mpn    = String(srcData[i][0]).trim();
+      if (!mpn) { skipped++; continue; }
+      var qtyRaw = srcData[i][3];
+      var qtyNum = (typeof qtyRaw === 'number') ? qtyRaw : parseFloat(String(qtyRaw).replace(/,/g, ''));
+      if (isNaN(qtyNum) || qtyNum <= 0) { skipped++; continue; }
+      var row = srcData[i].slice(); row[0] = mpn; row[3] = qtyNum;
+      tempSheet.appendRow(row);
+    }
+    SpreadsheetApp.flush();
+    oemBlob = UrlFetchApp.fetch(
+      'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/export?format=xlsx&gid=' + tempSheet.getSheetId(),
+      fetchOpts
+    ).getBlob().setName('OEM_EXCESS.xlsx');
+    Logger.log('OEM EXCESS: ' + (srcData.length - 1 - skipped) + ' rows exported, ' + skipped + ' skipped');
+  } finally {
+    try { oemSS.deleteSheet(tempSheet); } catch(e) {}
+  }
+
+  var inBlob = UrlFetchApp.fetch(
+    'https://docs.google.com/spreadsheets/d/' + IN_STOCK_ID + '/export?format=xlsx',
+    fetchOpts
+  ).getBlob().setName('IN STOCK.xlsx');
+
+  sendPleasePostViaREST(token, oemBlob, inBlob, DATAMASTER_BCC);
+  Logger.log('sendPleasePostNow: DONE');
 }
