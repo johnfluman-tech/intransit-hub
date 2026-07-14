@@ -858,8 +858,6 @@ function fastScanInbox() {
   var BLOCKED_DOMAINS = getBlockedDomains();
   var blockFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
 
-  try { checkDavidNoStockEmails(); } catch(e) { hubLog('error', 'checkDavidNoStockEmails: ' + e); }
-
   var rfqLabel   = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
   var tpLabel    = GmailApp.getUserLabelByName('oem-tp-processed') || GmailApp.createLabel('oem-tp-processed');
   var agentLabel = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
@@ -1204,12 +1202,13 @@ function setupTriggers() {
   // This prevents runEmailScan from exhausting the 6-hr daily execution quota.
   ScriptApp.newTrigger('fastScanInbox').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('processPendingThreads').timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger('checkDavidNoStockEmails').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processCommandQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('sendDailyCostReport').timeBased().atHour(8).everyDays(1).create();
-  Logger.log('7 triggers installed.');
+  Logger.log('8 triggers installed.');
 }
 
 // ── Gmail Add-on — Draft Review Sidebar ──────────────────────
