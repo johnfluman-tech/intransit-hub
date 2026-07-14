@@ -45,6 +45,71 @@ function getBlockedDomains() {
   return BLOCKED_DOMAINS; // fallback to hardcoded
 }
 
+// ── Gmail REST helpers — bypass premium GmailApp.search() quota ──
+// GmailApp.search() exhausts the Apps Script "premium gmail" daily quota.
+// These helpers use UrlFetchApp (100k calls/day quota) instead.
+var _gmailLabelCache_ = {};
+
+function gmailREST_(path, method, body) {
+  var opts = {
+    method: method || 'get',
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  };
+  if (body) { opts.contentType = 'application/json'; opts.payload = JSON.stringify(body); }
+  var resp = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me' + path, opts);
+  return JSON.parse(resp.getContentText());
+}
+
+function gmailSearchREST(query, maxResults) {
+  var data = gmailREST_('/threads?q=' + encodeURIComponent(query) + '&maxResults=' + (maxResults || 50));
+  return (data.threads || []).map(function(t) { return t.id; });
+}
+
+function getLabelId_(labelName) {
+  if (_gmailLabelCache_[labelName]) return _gmailLabelCache_[labelName];
+  var props = PropertiesService.getScriptProperties();
+  var key = 'lbl_' + labelName.replace(/[^a-zA-Z0-9]/g, '_');
+  var cached = props.getProperty(key);
+  if (cached) { _gmailLabelCache_[labelName] = cached; return cached; }
+  var all = gmailREST_('/labels');
+  (all.labels || []).forEach(function(l) {
+    var k = 'lbl_' + l.name.replace(/[^a-zA-Z0-9]/g, '_');
+    props.setProperty(k, l.id);
+    _gmailLabelCache_[l.name] = l.id;
+  });
+  if (_gmailLabelCache_[labelName]) return _gmailLabelCache_[labelName];
+  var created = gmailREST_('/labels', 'post', { name: labelName });
+  if (created.id) {
+    props.setProperty(key, created.id);
+    _gmailLabelCache_[labelName] = created.id;
+    return created.id;
+  }
+  return null;
+}
+
+function gmailModifyThread_(threadId, addLabels, removeLabels) {
+  var add = (addLabels || []).map(getLabelId_).filter(Boolean);
+  var rem = (removeLabels || []).map(getLabelId_).filter(Boolean);
+  if (!add.length && !rem.length) return;
+  gmailREST_('/threads/' + threadId + '/modify', 'post', { addLabelIds: add, removeLabelIds: rem });
+}
+
+function gmailArchiveThread_(threadId) {
+  gmailREST_('/threads/' + threadId + '/modify', 'post', { removeLabelIds: ['INBOX'] });
+}
+
+function gmailGetThreadMeta_(threadId) {
+  var data = gmailREST_('/threads/' + threadId + '?format=METADATA&metadataHeaders=From');
+  var msgs = data.messages || [];
+  var senders = msgs.map(function(m) {
+    var h = ((m.payload || {}).headers || []).filter(function(h) { return h.name === 'From'; });
+    return h.length ? h[0].value : '';
+  });
+  var lastLabelIds = msgs.length ? (msgs[msgs.length - 1].labelIds || []) : [];
+  return { senders: senders, labelIds: lastLabelIds };
+}
+
 // Dispatcher — routes sidebar action to the correct executor
 function executeAction(action, threadId, subject, fromH) {
   var type = action.type || 'create_draft';
@@ -212,13 +277,10 @@ function hubPatchEntry(id, payload) {
 function archiveBlockedDomains() {
   var BLOCKED_DOMAINS = getBlockedDomains();
   BLOCKED_DOMAINS.forEach(function(domain) {
-    var threads = GmailApp.search('in:inbox from:' + domain, 0, 50);
-    if (!threads.length) return;
-    threads.forEach(function(thread) {
-      thread.moveToArchive();
-      Logger.log('Blocked & archived: ' + domain + ' | ' + thread.getFirstMessageSubject());
-    });
-    hubLog('run', 'Blocked & archived ' + threads.length + ' email(s) from ' + domain);
+    var ids = gmailSearchREST('in:inbox from:' + domain, 50);
+    if (!ids.length) return;
+    ids.forEach(function(tid) { gmailArchiveThread_(tid); });
+    hubLog('run', 'archiveBlockedDomains: archived ' + ids.length + ' from ' + domain);
   });
 }
 
@@ -550,20 +612,21 @@ function checkDavidNoStockEmails() {
   // John's Gmail filter auto-labels ALL David emails with oem-nostock-seen, so
   // -label:oem-nostock-seen would exclude every David email and return 0 forever.
   var query = 'from:' + DAVID_EMAIL + ' in:inbox';
-  var threads = GmailApp.search(query, 0, 20);
-  hubLog('run', 'checkDavidNoStockEmails: ' + threads.length + ' thread(s)');
-  if (!threads.length) return;
+  var threadIds = gmailSearchREST(query, 20);
+  hubLog('run', 'checkDavidNoStockEmails: ' + threadIds.length + ' thread(s)');
+  if (!threadIds.length) return;
   var noStkKeywords = ['no stk', 'no stock', 'stk sold', 'stock sold', 'cant find', 'cant share', 'cannot find', 'removed', 'no inventory'];
-  var label = GmailApp.getUserLabelByName(INCOMING_LABEL) || GmailApp.createLabel(INCOMING_LABEL);
-  threads.forEach(function(thread) {
+  threadIds.forEach(function(tid) {
+    var thread = GmailApp.getThreadById(tid);
+    if (!thread) return;
     var msg = thread.getMessages()[thread.getMessageCount() - 1];
     var subjectLower = msg.getSubject().toLowerCase();
     var bodySnippet = msg.getPlainBody().toLowerCase().substring(0, 300);
     var isNoStk = noStkKeywords.some(function(kw) { return subjectLower.indexOf(kw) >= 0 || bodySnippet.indexOf(kw) >= 0; });
     if (!isNoStk) return;
     try { processThread(thread); } catch(e) { hubLog('error', 'checkDavidNoStockEmails processThread error: ' + e, {}); }
-    thread.addLabel(label);
-    thread.moveToArchive();
+    gmailModifyThread_(tid, [INCOMING_LABEL], []);
+    gmailArchiveThread_(tid);
   });
 }
 
@@ -858,48 +921,47 @@ function fastScanInbox() {
   var BLOCKED_DOMAINS = getBlockedDomains();
   var blockFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
 
-  var rfqLabel   = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
-  var tpLabel    = GmailApp.getUserLabelByName('oem-tp-processed') || GmailApp.createLabel('oem-tp-processed');
-  var agentLabel = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
-  var pendingLbl = GmailApp.getUserLabelByName(PENDING_LABEL) || GmailApp.createLabel(PENDING_LABEL);
+  // All label lookups via REST (cached in Script Properties — zero premium gmail quota cost)
+  var rfqLabelId     = getLabelId_('oem-rfq-incoming-processed');
+  var tpLabelId      = getLabelId_('oem-tp-processed');
+  var agentLabelId   = getLabelId_(AGENT_LABEL);
+  var pendingLabelId = getLabelId_(PENDING_LABEL);
 
   var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com OR to:rfq@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -label:oem-rfq-incoming-processed ' + blockFilter;
   var rfqCount = 0;
-  GmailApp.search(rfqQ, 0, 50).forEach(function(t) {
-    var msgs = t.getMessages();
-    if (msgs.some(function(m){ return m.getFrom().indexOf(JOHN_EMAIL) >= 0; })) return;
-    if (msgs[msgs.length-1].getFrom().indexOf('intransittech.com') >= 0) return;
-    t.addLabel(rfqLabel);
-    t.addLabel(pendingLbl);
+  gmailSearchREST(rfqQ, 50).forEach(function(tid) {
+    var meta = gmailGetThreadMeta_(tid);
+    if (meta.senders.some(function(s){ return s.indexOf(JOHN_EMAIL) >= 0; })) return;
+    if (meta.senders.length && meta.senders[meta.senders.length-1].indexOf('intransittech.com') >= 0) return;
+    gmailModifyThread_(tid, ['oem-rfq-incoming-processed', PENDING_LABEL], []);
     rfqCount++;
   });
 
   var tpQ = 'in:inbox label:oem-rfq-incoming-processed -label:oem-tp-processed -label:' + PENDING_LABEL + ' newer_than:60d ' + blockFilter;
   var tpCount = 0;
-  GmailApp.search(tpQ, 0, 50).forEach(function(t) {
-    var msgs = t.getMessages();
-    if (msgs[msgs.length-1].getFrom().indexOf(JOHN_EMAIL) >= 0) return;
-    var buyerCount = 0;
-    msgs.forEach(function(m){ if (m.getFrom().indexOf(JOHN_EMAIL) < 0 && m.getFrom().indexOf('intransittech') < 0) buyerCount++; });
+  gmailSearchREST(tpQ, 50).forEach(function(tid) {
+    var meta = gmailGetThreadMeta_(tid);
+    if (meta.senders.length && meta.senders[meta.senders.length-1].indexOf(JOHN_EMAIL) >= 0) return;
+    var buyerCount = meta.senders.filter(function(s){ return s.indexOf(JOHN_EMAIL) < 0 && s.indexOf('intransittech') < 0; }).length;
     if (buyerCount < 2) return;
-    t.addLabel(tpLabel);
-    t.addLabel(pendingLbl);
+    gmailModifyThread_(tid, ['oem-tp-processed', PENDING_LABEL], []);
     tpCount++;
   });
 
   var agentQ = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed -label:' + PENDING_LABEL + ' newer_than:3d -from:fortetechno.com ' + blockFilter;
   var agentCount = 0;
-  GmailApp.search(agentQ, 0, 50).forEach(function(t) {
-    var from = t.getMessages()[0].getFrom().toLowerCase();
-    if (from.indexOf('intransittech.com') >= 0 || from.indexOf('fortetechno.com') >= 0) {
-      t.addLabel(agentLabel);
+  gmailSearchREST(agentQ, 50).forEach(function(tid) {
+    var meta = gmailGetThreadMeta_(tid);
+    var firstSender = (meta.senders[0] || '').toLowerCase();
+    if (firstSender.indexOf('intransittech.com') >= 0 || firstSender.indexOf('fortetechno.com') >= 0) {
+      gmailModifyThread_(tid, [AGENT_LABEL], []);
       return;
     }
-    var liveLabels = t.getLabels().map(function(l){ return l.getName(); });
-    if (liveLabels.indexOf('oem-rfq-incoming-processed') >= 0) { t.addLabel(agentLabel); return; }
-    t.addLabel(agentLabel);
-    t.addLabel(rfqLabel);
-    t.addLabel(pendingLbl);
+    if (rfqLabelId && meta.labelIds.indexOf(rfqLabelId) >= 0) {
+      gmailModifyThread_(tid, [AGENT_LABEL], []);
+      return;
+    }
+    gmailModifyThread_(tid, [AGENT_LABEL, 'oem-rfq-incoming-processed', PENDING_LABEL], []);
     agentCount++;
   });
 
@@ -911,13 +973,13 @@ function fastScanInbox() {
 function processPendingThreads() {
   var _cfg = getCachedRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) return;
-  var pendingLbl = GmailApp.getUserLabelByName(PENDING_LABEL);
-  if (!pendingLbl) return;
-  var threads = GmailApp.search('label:' + PENDING_LABEL, 0, 10);
-  if (!threads.length) return;
-  hubLog('run', 'processPendingThreads: processing ' + threads.length + ' thread(s)');
-  threads.forEach(function(t) {
-    t.removeLabel(pendingLbl);
+  var threadIds = gmailSearchREST('label:' + PENDING_LABEL, 10);
+  if (!threadIds.length) return;
+  hubLog('run', 'processPendingThreads: processing ' + threadIds.length + ' thread(s)');
+  threadIds.forEach(function(tid) {
+    gmailModifyThread_(tid, [], [PENDING_LABEL]);
+    var t = GmailApp.getThreadById(tid);
+    if (!t) return;
     var msgs = t.getMessages();
     var lastMsg = msgs[msgs.length - 1];
     if (lastMsg.getFrom().indexOf(JOHN_EMAIL) >= 0) return;
@@ -932,26 +994,22 @@ function checkInboxForPaymentAdvice() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'checkInboxForPaymentAdvice: disabled via hub config'); return; }
   var query = 'in:inbox subject:"payment advice" -label:oem-payment-forwarded';
-  var threads = GmailApp.search(query,0,10);
-  hubLog('run', 'checkInboxForPaymentAdvice: ' + threads.length + ' thread(s)');
-  if (!threads.length) return;
-  var label = GmailApp.getUserLabelByName('oem-payment-forwarded')||GmailApp.createLabel('oem-payment-forwarded');
-  threads.forEach(function(thread) {
-    var threadLabelNames = thread.getLabels().map(function(l){return l.getName();});
-    if (threadLabelNames.indexOf('oem-payment-forwarded') >= 0) {
-      Logger.log('Payment advice already forwarded (label present): ' + thread.getFirstMessageSubject());
-      return;
-    }
+  var threadIds = gmailSearchREST(query, 10);
+  hubLog('run', 'checkInboxForPaymentAdvice: ' + threadIds.length + ' thread(s)');
+  if (!threadIds.length) return;
+  threadIds.forEach(function(tid) {
+    var thread = GmailApp.getThreadById(tid);
+    if (!thread) return;
     var messages = thread.getMessages();
     var firstMsg = messages[0];
     if (firstMsg.getFrom().toLowerCase().indexOf('intransittech.com') >= 0) {
-      thread.addLabel(label);
+      gmailModifyThread_(tid, ['oem-payment-forwarded'], []);
       Logger.log('Payment advice skipped — internal sender: ' + firstMsg.getFrom());
       return;
     }
     var recipients = (firstMsg.getTo() + ',' + (firstMsg.getCc() || '')).toLowerCase();
     if (recipients.indexOf(DEB_EMAIL.toLowerCase()) >= 0) {
-      thread.addLabel(label);
+      gmailModifyThread_(tid, ['oem-payment-forwarded'], []);
       Logger.log('Payment advice skipped — Deb already a recipient: ' + firstMsg.getSubject());
       return;
     }
@@ -962,7 +1020,7 @@ function checkInboxForPaymentAdvice() {
     } catch(e) {
       Logger.log('Forward error: ' + e.toString());
     }
-    thread.addLabel(label);
+    gmailModifyThread_(tid, ['oem-payment-forwarded'], []);
   });
 }
 
@@ -3257,12 +3315,13 @@ function checkBillNetcompRemovals() {
   var query = 'from:' + BILL_EMAIL +
     ' (netcomp OR netcomponents) (remove OR removing OR removed)' +
     ' -label:' + DONE_LABEL + ' newer_than:14d';
-  var threads = GmailApp.search(query, 0, 20);
-  hubLog('run', 'checkBillNetcompRemovals: ' + threads.length + ' thread(s)');
-  if (!threads.length) return;
-  var doneLabel = GmailApp.getUserLabelByName(DONE_LABEL) || GmailApp.createLabel(DONE_LABEL);
+  var threadIds = gmailSearchREST(query, 20);
+  hubLog('run', 'checkBillNetcompRemovals: ' + threadIds.length + ' thread(s)');
+  if (!threadIds.length) return;
 
-  threads.forEach(function(thread) {
+  threadIds.forEach(function(tid) {
+    var thread = GmailApp.getThreadById(tid);
+    if (!thread) return;
     var msgs    = thread.getMessages();
     var lastMsg = msgs[msgs.length - 1];
     var subject = thread.getFirstMessageSubject();
@@ -3294,13 +3353,13 @@ function checkBillNetcompRemovals() {
       createThreadedDraft(BILL_EMAIL, 'Re: ' + subject, replyBody, lastMsg.getId(), thread.getId(), null);
       hubLog('run', 'Bill netcomp removal [' + result + ']: ' + mpn, { mpn: mpn });
       Logger.log('Bill removal [' + result + ']: ' + mpn);
-      thread.moveToArchive();
+      gmailArchiveThread_(tid);
     } else {
       Logger.log('Bill removal: could not extract MPN from body or subject: ' + subject);
       GmailApp.sendEmail(NOTIFY_EMAIL, 'OEM EXCESS: Bill removal — could not extract MPN',
         'Subject: "' + subject + '"\nhttps://mail.google.com/mail/u/0/#inbox/' + thread.getId());
     }
-    thread.addLabel(doneLabel);
+    gmailModifyThread_(tid, [DONE_LABEL], []);
   });
 }
 
