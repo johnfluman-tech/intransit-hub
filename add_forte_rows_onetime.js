@@ -2041,6 +2041,85 @@ function removeNoStk_XC7A100T1FGG484I_Jul13() {
   Logger.log('Stamped Forte row 3994 (XC7A100T-1FGG484I) NO STK 7/13/2026');
 }
 
+// ONE-TIME — Run removeNoStk_ZOE_CCM_Jul14() AFTER sending both David reply drafts:
+//   r7869308420403183158 (ZOE-M8G-0 → David thread 19f6087d394bf95d)
+//   r9156615699556308437 (CCM03-3512 → David thread 19f6080e0ad6c550)
+// ZOE-M8G-0: OEM row 133619, Forte row 4063
+// CCM03-3512 LFT R851B: OEM row 87788, Forte row 4035
+function removeNoStk_ZOE_CCM_Jul14() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var noStkDate = '7/14/2026';
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+
+  // Delete OEM rows descending (133619 > 87788)
+  var oemEntries = [
+    { row: 133619, expectedMpn: 'ZOE-M8G-0' },
+    { row: 87788,  expectedMpn: 'CCM03-3512' }
+  ];
+  oemEntries.forEach(function(e) {
+    var rowData = oemSheet.getRange(e.row, 1, 1, 3).getValues()[0];
+    Logger.log('OEM row ' + e.row + ': ' + JSON.stringify(rowData));
+    if (String(rowData[0]).toUpperCase().indexOf(e.expectedMpn.toUpperCase()) < 0) {
+      Logger.log('ERROR: row ' + e.row + ' MPN mismatch — expected ' + e.expectedMpn + ', got ' + rowData[0]);
+      return;
+    }
+    oemSheet.getRange(e.row, 5).setValue('NO STK ' + noStkDate);
+    oemSheet.deleteRow(e.row);
+    Logger.log('Stamped and deleted OEM row ' + e.row + ' (' + e.expectedMpn + ')');
+  });
+  SpreadsheetApp.flush();
+
+  // Stamp Forte col E = "NO STK date" at specific rows with MPN verification
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var forteEntries = [
+    { row: 4063, expectedMpn: 'ZOE-M8G-0' },
+    { row: 4035, expectedMpn: 'CCM03-3512' }
+  ];
+  forteEntries.forEach(function(e) {
+    var fData = forteSheet.getRange(e.row, 1, 1, 3).getValues()[0];
+    Logger.log('Forte row ' + e.row + ' MPN: ' + fData[1]);
+    if (String(fData[1]).toUpperCase().indexOf(e.expectedMpn.toUpperCase()) < 0) {
+      Logger.log('ERROR: Forte row ' + e.row + ' MPN mismatch — expected ' + e.expectedMpn + ', got ' + fData[1]);
+      return;
+    }
+    forteSheet.getRange(e.row, 5).setValue('NO STK ' + noStkDate);
+    Logger.log('Stamped Forte row ' + e.row + ' (' + e.expectedMpn + ') → NO STK ' + noStkDate);
+  });
+  SpreadsheetApp.flush();
+  Logger.log('removeNoStk_ZOE_CCM_Jul14 complete');
+}
+
+// ONE-TIME — Run addForte_PVX6012PBF_Jul14() after sending msg_checking draft r-738142460803916118.
+// Buyer: Ken (sales@holmeselectronics.com), Holmes Electronics LLC, US.
+// Confirmed TP=$5, qty=114, line=$570. OEM row 118053 (not BILL EXT).
+function addForte_PVX6012PBF_Jul14() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/14/2026', 'PVX6012PBF', 114, 5, '', 'US',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  SpreadsheetApp.flush();
+  Logger.log('Added PVX6012PBF to Forte row ' + nextRow + ' (qty=114, TP=$5, US — Holmes Electronics)');
+}
+
+// ONE-TIME — Run deleteWrongDraft_LMK05318BRGZR_Jul14() to remove the wrong request_tp_500 draft
+// created for LMK05318BRGZR (Sharon Shao / Amble Electronics). Bug: BILL EXT 117 + TP=$8 in
+// original RFQ should have been bill_handle — automation missed both the BILL EXT tag and the TP.
+// Correct drafts already created: r4343185015141196463 (reply to Sharon CC Bill), r2470618555022853058 (FW to Bill).
+function deleteWrongDraft_LMK05318BRGZR_Jul14() {
+  var token = ScriptApp.getOAuthToken();
+  try {
+    UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/r2658864817345049120', {
+      method: 'delete',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    Logger.log('Deleted wrong request_tp_500 draft r2658864817345049120 for LMK05318BRGZR (Sharon/Amble)');
+  } catch(e) {
+    Logger.log('Draft r2658864817345049120 already gone or error: ' + e);
+  }
+}
+
 // ONE-TIME — Run addForteRows_Jul14() to add Forte entries for inbox TP-reply threads
 // processed manually on 2026-07-14 (automation backlog sweep).
 // F980J107MMAAXE (kw@ascglobal.com, qty=4000, tp=1.00, PL) — SKIPPED: forte_sheet already has entry (qty=2000, tp=1.4, QUOTED)
