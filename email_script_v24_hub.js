@@ -1190,6 +1190,8 @@ function processCommandQueue() {
           var oemBlob;
           var oemSS = SpreadsheetApp.openById(SPREADSHEET_ID);
           var srcData = oemSS.getSheets()[0].getDataRange().getValues();
+          var _ex = oemSS.getSheetByName('_ICS_UPLOAD_TEMP');
+          if (_ex) oemSS.deleteSheet(_ex);
           var tempSheet = oemSS.insertSheet('_ICS_UPLOAD_TEMP');
           try {
             tempSheet.appendRow(srcData[0]); // header row
@@ -3467,6 +3469,8 @@ function sendPleasePostNow() {
   var oemBlob;
   var oemSS   = SpreadsheetApp.openById(SPREADSHEET_ID);
   var srcData = oemSS.getSheets()[0].getDataRange().getValues();
+  var _existing = oemSS.getSheetByName('_ICS_UPLOAD_TEMP');
+  if (_existing) oemSS.deleteSheet(_existing);
   var tempSheet = oemSS.insertSheet('_ICS_UPLOAD_TEMP');
   try {
     tempSheet.appendRow(srcData[0]);
