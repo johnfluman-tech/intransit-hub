@@ -769,6 +769,21 @@ async function extractMpnFromThread(subject, content, env) {
   } catch(e) { return null; }
 }
 
+// Returns true when resultMpn is close enough to requestMpn to be used for routing.
+// Accepts exact match, prefix match, and minor suffix differences (≤3 chars).
+// Rejects significant variant differences (e.g. LP2951ACM vs LP2951ACMX-3.3/NOPB).
+function isMpnMatch(requestMpn, resultMpn) {
+  if (!requestMpn || !resultMpn) return false;
+  const norm = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const a = norm(requestMpn);
+  const b = norm(resultMpn);
+  if (a === b) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer  = a.length <= b.length ? b : a;
+  // One must start with the other and the trailing suffix ≤ 3 chars
+  return longer.startsWith(shorter) && (longer.length - shorter.length) <= 3;
+}
+
 async function handleEmailAgent(request, env) {
   const body = await request.json();
   const { thread_id, last_message_id, subject, sender, thread_content, current_labels, prior_quotes } = body;
@@ -797,6 +812,13 @@ async function handleEmailAgent(request, env) {
     in_stock_results = in_stock_results || [];
     stan_results     = stan_results     || [];
     forte_results    = forte_results    || [];
+  }
+
+  // Filter in_stock_results to exact/close MPN matches only — removes web-app fuzzy
+  // results that would wrongly trigger stan_quoted / add_to_stan routing (Bug 2).
+  const requestMpn = body.mpn || (Array.isArray(oem_results) && oem_results[0] && oem_results[0].mpn) || null;
+  if (requestMpn && Array.isArray(in_stock_results) && in_stock_results.length > 0) {
+    in_stock_results = in_stock_results.filter(r => isMpnMatch(requestMpn, r.mpn));
   }
 
   // Fetch lessons learned from John's past corrections — inject into every decision
@@ -960,6 +982,25 @@ async function handleEmailAgent(request, env) {
         }
       }
     } catch(auditErr) {}
+  }
+
+  // IC Source duplicate guard (Bug 4): same MPN actioned within 30 min → no_action.
+  // IC Source buyers sometimes submit the same part 2-3× in rapid succession.
+  // MPN-only match is intentional — IC Source sender is always autosend@icsource.com.
+  if (decision.mpn && !['no_action','no_bid','remove_oem','forward_deb'].includes(decision.action)) {
+    try {
+      const { results: recentDec } = await env.DB.prepare(
+        `SELECT id FROM agent_decisions
+         WHERE mpn = ? AND action NOT IN ('no_action','no_bid','remove_oem','forward_deb')
+         AND created_at > datetime('now', '-30 minutes') LIMIT 1`
+      ).bind(decision.mpn).all();
+      if (recentDec && recentDec.length > 0) {
+        decision.action      = 'no_action';
+        decision.reasoning   = 'Duplicate suppressed — same MPN actioned within 30 minutes';
+        decision.draft_body  = null;
+        decision.forte_entry = null;
+      }
+    } catch(e) {}
   }
 
   const { meta } = await env.DB.prepare(
