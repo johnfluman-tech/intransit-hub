@@ -3504,3 +3504,10 @@ function sendPleasePostNow() {
   sendPleasePostViaREST(token, oemBlob, inBlob, DATAMASTER_BCC);
   Logger.log('sendPleasePostNow: DONE');
 }
+
+// ONE-TIME: Add IDT7202LA50P* to Stan's RFQ sheet (was misrouted as own_stock on Jul 16 2026)
+// Run once from Apps Script editor, then delete.
+function addIDT7202ToStanSheet_oneTime() {
+  addToStanSheet('IDT7202LA50P*', 'FR', 226, '');
+  Logger.log('Done — IDT7202LA50P* added to Stan sheet (FR, qty 226, no TP)');
+}

@@ -929,6 +929,18 @@ async function handleEmailAgent(request, env) {
     decision.draft_body = DRAFT_TEMPLATES[decision.action];
   }
 
+  // Code-level Warehouse# guard: if Haiku said own_stock but every in_stock row has
+  // "Warehouse#N" in its notes, the part lives in an external warehouse — force add_to_stan.
+  if (decision.action === 'own_stock' && Array.isArray(in_stock_results) && in_stock_results.length > 0) {
+    const allWarehouse = in_stock_results.every(r => /Warehouse#\d/i.test(r.notes || ''));
+    if (allWarehouse) {
+      decision._corrected_from    = 'own_stock';
+      decision._correction_reason = 'All in_stock rows have Warehouse#N in notes — must be add_to_stan not own_stock';
+      decision.action    = 'add_to_stan';
+      decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+    }
+  }
+
   // Auto-set oem_delete_row from lookup data so Apps Script just calls deleteOemRow(row)
   if (decision.action === 'remove_oem' && oem_results && oem_results.length > 0) {
     decision.oem_delete_row = oem_results[0].row || null;
