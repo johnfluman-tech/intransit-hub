@@ -2206,3 +2206,22 @@ function addMissingStanRows_Jul16() {
   SpreadsheetApp.flush();
   Logger.log('addMissingStanRows_Jul16 complete — added: ' + added + ', skipped: ' + skipped);
 }
+
+// ONE-TIME — Run addMissing3Stan_Jul16b() to force-add the 3 entries that were
+// still missing from Stan sheet after addMissingStanRows_Jul16() ran.
+// Web app confirmed MISSING for these 3 on Jul 16 check.
+function addMissing3Stan_Jul16b() {
+  var sheet = SpreadsheetApp.openById(STAN_SHEET_ID).getSheets()[0];
+  var entries = [
+    ['ADM3491ARZ',       'CN', 1071, ''],  // Bonnie Chan / Shenzhen Hengchenxin — Jul 16
+    ['L6202',            'NL', 50,   ''],  // Richard Cross / ChipSource Europe — Jul 16
+    ['TR3B107M010C1400', 'CN', 2000, ''],  // YiMin Ke / Innovation Ray — Jul 15
+  ];
+  var date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+  entries.forEach(function(e) {
+    sheet.appendRow(['', '', '', date, e[0], e[1], e[2], e[3]]);
+    Logger.log('ADDED: ' + e[0]);
+  });
+  SpreadsheetApp.flush();
+  Logger.log('addMissing3Stan_Jul16b done — 3 rows added');
+}
