@@ -1677,6 +1677,13 @@ function buildContextualCard(e) {
         .setOnClickAction(CardService.newAction()
           .setFunctionName('addonCreateDraft')
           .setParameters({ threadId: gmailThreadId, subject: subject, fromEmail: fromH })));
+      noSection.addWidget(CardService.newTextButton()
+        .setText('📋 Missed Draft — Pick What Should Have Been Sent')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#e65100')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonWrongDraftPicker')
+          .setParameters({ draftId: '', threadId: gmailThreadId, subject: subject, toEmail: fromH, missed: '1' })));
       builder.addSection(noSection);
     }
 
@@ -2222,12 +2229,13 @@ function addonWrongDraftPicker(e) {
     var threadId = params.threadId || '';
     var subject  = params.subject  || '';
     var toEmail  = params.toEmail  || '';
+    var missed   = params.missed   === '1';
 
     var card  = CardService.newCardBuilder().setHeader(
-      CardService.newCardHeader().setTitle('📋 Pick Correct Response')
+      CardService.newCardHeader().setTitle(missed ? '📋 Missed Draft — Pick Action' : '📋 Pick Correct Response')
     );
     var sect = CardService.newCardSection()
-      .setHeader('What should the draft have said?');
+      .setHeader(missed ? 'What should have been sent?' : 'What should the draft have said?');
 
     // Dropdown of all standard actions
     var dropdown = CardService.newSelectionInput()
@@ -2239,21 +2247,21 @@ function addonWrongDraftPicker(e) {
     });
     sect.addWidget(dropdown);
 
-    // Reason text box
+    // Reason text box — label differs for missed vs wrong
     sect.addWidget(CardService.newTextInput()
       .setFieldName('wrong_reason')
-      .setTitle('Why was the draft wrong?')
+      .setTitle(missed ? 'Why should this have triggered?' : 'Why was the draft wrong?')
       .setHint('Used to train the AI — be specific')
       .setMultiline(true));
 
     // Submit button
     sect.addWidget(CardService.newTextButton()
-      .setText('Fix Draft & Log Bug')
+      .setText(missed ? 'Create Correct Draft & Log Bug' : 'Fix Draft & Log Bug')
       .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
       .setBackgroundColor('#1565c0')
       .setOnClickAction(CardService.newAction()
         .setFunctionName('addonWrongDraftApply')
-        .setParameters({ draftId: draftId, threadId: threadId, subject: subject, toEmail: toEmail })));
+        .setParameters({ draftId: draftId, threadId: threadId, subject: subject, toEmail: toEmail, missed: missed ? '1' : '0' })));
 
     card.addSection(sect);
     return CardService.newActionResponseBuilder()
@@ -2273,6 +2281,7 @@ function addonWrongDraftApply(e) {
     var toEmail    = params.toEmail  || '';
     var formInputs = e.commonEventObject.formInputs || {};
 
+    var missed = params.missed === '1';
     var correctAction = '';
     if (formInputs.correct_action && formInputs.correct_action.stringInputs) {
       correctAction = (formInputs.correct_action.stringInputs.value || [])[0] || '';
@@ -2286,21 +2295,23 @@ function addonWrongDraftApply(e) {
 
     var token = ScriptApp.getOAuthToken();
 
-    // Capture wrong draft body before deleting
+    // Capture wrong draft body before deleting (skip if no draft)
     var wrongDraftBody = '';
-    try {
-      var fetchResp = UrlFetchApp.fetch(
-        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
-        { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-      );
-      if (fetchResp.getResponseCode() === 200) {
-        var draftData = JSON.parse(fetchResp.getContentText());
-        var rawHtml = extractDraftHtmlBody(draftData.message && draftData.message.payload);
-        wrongDraftBody = rawHtml ? rawHtml.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().substring(0,400) : '';
-      }
-    } catch(eF) {}
+    if (draftId) {
+      try {
+        var fetchResp = UrlFetchApp.fetch(
+          'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
+          { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+        );
+        if (fetchResp.getResponseCode() === 200) {
+          var draftData = JSON.parse(fetchResp.getContentText());
+          var rawHtml = extractDraftHtmlBody(draftData.message && draftData.message.payload);
+          wrongDraftBody = rawHtml ? rawHtml.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().substring(0,400) : '';
+        }
+      } catch(eF) {}
+    }
 
-    // Delete the wrong draft
+    // Delete the wrong draft (only if one existed)
     if (draftId) {
       UrlFetchApp.fetch(
         'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId,
@@ -2324,22 +2335,27 @@ function addonWrongDraftApply(e) {
           var lastMsg  = messages[messages.length - 1];
           var htmlBody = buildSimpleHTML(newDraftBody);
           lastMsg.createDraftReply('', { htmlBody: htmlBody });
-          notificationText = '✅ Wrong draft deleted. Correct draft created: ' + actionDef.label;
+          notificationText = missed
+            ? '✅ Draft created: ' + actionDef.label + '. Bug logged.'
+            : '✅ Wrong draft deleted. Correct draft created: ' + actionDef.label;
         } else {
-          notificationText = '⚠️ Draft deleted but could not find thread to create replacement.';
+          notificationText = '⚠️ Could not find thread to create draft.';
         }
       } catch(eD) {
-        notificationText = '⚠️ Draft deleted. Error creating replacement: ' + eD.toString();
+        notificationText = '⚠️ Error creating draft: ' + eD.toString();
       }
     } else {
       // Dynamic action (own_stock, stan_quoted, no_bid, no_action) — can't auto-generate
-      notificationText = '✅ Wrong draft deleted. Action "' + correctAction + '" requires manual draft — please create it yourself.';
+      notificationText = missed
+        ? '✅ Bug logged. Action "' + correctAction + '" requires manual draft — please create it yourself.'
+        : '✅ Wrong draft deleted. Action "' + correctAction + '" requires manual draft — please create it yourself.';
     }
 
     // Log the lesson via hubLearn
     if (wrongReason.trim()) {
+      var lessonPrefix = missed ? '[MISSED DRAFT] ' : '[WRONG DRAFT] ';
       hubLearn(
-        wrongReason + ' [Correct action should have been: ' + correctAction + ']',
+        lessonPrefix + wrongReason + ' [Correct action should have been: ' + correctAction + ']',
         wrongDraftBody,
         newDraftBody || '[' + correctAction + ' — dynamic, not auto-generated]',
         threadId, subject, toEmail, '', correctAction
