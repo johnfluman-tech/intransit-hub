@@ -1565,16 +1565,36 @@ function buildContextualCard(e) {
             headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true
           };
         });
+        var baseSubject = subject.replace(/^(Re:\s*)+/i, '').trim().toLowerCase();
+        var subjectFallback = null, subjectFallbackTo = '';
         UrlFetchApp.fetchAll(reqs).forEach(function(r, i) {
           if (r.getResponseCode() !== 200 || matchDraftId) return;
           var d = JSON.parse(r.getContentText());
+          var headers = (d.message && d.message.payload && d.message.payload.headers) || [];
+          var draftTo = '', draftSubject = '';
+          headers.forEach(function(h) {
+            if (h.name === 'To') draftTo = h.value;
+            if (h.name === 'Subject') draftSubject = h.value;
+          });
+          // Primary match: same threadId
           if (d.message && d.message.threadId === gmailThreadId) {
             matchDraftId = allStubs[i].id;
-            (d.message.payload && d.message.payload.headers || []).forEach(function(h) {
-              if (h.name === 'To') matchToH = h.value;
-            });
+            matchToH = draftTo;
+          }
+          // Fallback: subject matches (catches MCP-created drafts not tied to thread)
+          if (!subjectFallback && baseSubject && draftSubject) {
+            var ds = draftSubject.replace(/^(Re:\s*)+/i, '').trim().toLowerCase();
+            if (ds === baseSubject) {
+              subjectFallback = allStubs[i].id;
+              subjectFallbackTo = draftTo;
+            }
           }
         });
+        // Use subject fallback only if threadId match wasn't found
+        if (!matchDraftId && subjectFallback) {
+          matchDraftId = subjectFallback;
+          matchToH = subjectFallbackTo;
+        }
       }
     } catch(e3) { Logger.log('buildContextualCard draft search error: ' + e3); }
 
