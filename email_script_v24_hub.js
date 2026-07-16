@@ -1543,16 +1543,23 @@ function buildContextualCard(e) {
       }
     } catch(e2) { Logger.log('buildContextualCard D1 error: ' + e2); }
 
-    // Find a Gmail draft for this thread
+    // Find a Gmail draft for this thread — paginate up to 500 drafts
     var matchDraftId = null, matchToH = '';
     try {
-      var listResp = UrlFetchApp.fetch(
-        'https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=50',
-        { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-      );
-      var stubs = JSON.parse(listResp.getContentText()).drafts || [];
-      if (stubs.length > 0) {
-        var reqs = stubs.map(function(s) {
+      var allStubs = [], pageToken = null;
+      do {
+        var pageUrl = 'https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=100' +
+                      (pageToken ? '&pageToken=' + pageToken : '');
+        var listResp = UrlFetchApp.fetch(pageUrl,
+          { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+        var listData = JSON.parse(listResp.getContentText());
+        var page = listData.drafts || [];
+        allStubs = allStubs.concat(page);
+        pageToken = listData.nextPageToken || null;
+      } while (pageToken && allStubs.length < 500 && !matchDraftId);
+
+      if (allStubs.length > 0) {
+        var reqs = allStubs.map(function(s) {
           return {
             url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + s.id + '?format=metadata&metadataHeaders=To',
             headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true
@@ -1562,7 +1569,7 @@ function buildContextualCard(e) {
           if (r.getResponseCode() !== 200 || matchDraftId) return;
           var d = JSON.parse(r.getContentText());
           if (d.message && d.message.threadId === gmailThreadId) {
-            matchDraftId = stubs[i].id;
+            matchDraftId = allStubs[i].id;
             (d.message.payload && d.message.payload.headers || []).forEach(function(h) {
               if (h.name === 'To') matchToH = h.value;
             });
