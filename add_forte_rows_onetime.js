@@ -2144,3 +2144,65 @@ function addForteRows_Jul14() {
   });
   Logger.log('Done — ' + rows.length + ' row(s) added to Forte sheet.');
 }
+
+// ONE-TIME — Run addForte_LA100PSP13_AEService_Jul16() to add missed Forte entry.
+// Cédric DERNONCOURT (cdernoncourt@aeservice.fr, A.E. Service, FR) replied TP=$20, qty=250.
+// Automation processed TP reply (oem-tp-processed) but did NOT create MSG_CHECKING draft.
+// Correct MSG_CHECKING draft created manually: r-6875666363410168244
+function addForte_LA100PSP13_AEService_Jul16() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['7/16/2026', 'LA100-P/SP13', 250, 20, '', 'FR',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added LA100-P/SP13 to Forte row ' + nextRow + ' (250 qty, $20 TP, FR)');
+}
+
+// ONE-TIME — Run addMissingStanRows_Jul16() to backfill all Stan RFQ sheet entries
+// that were missed due to the executeDecision bug (add_to_stan only called
+// addToStanSheet when forte_entry was present — fixed in Jul 16 commit).
+// Covers "Warehouse is checking" replies sent May 26 – Jul 16, 2026 where
+// no corresponding Stan sheet row exists. addToStanSheet() has built-in dedup
+// so safe to run even if some rows already exist.
+function addMissingStanRows_Jul16() {
+  var entries = [
+    // [mpn, country, qty, tp]  — tp = '' if buyer gave no TP
+    ['ADM3491ARZ',          'CN', 1071, ''],    // Bonnie Chan / Shenzhen Hengchenxin — Jul 16
+    ['L6202',               'NL', 50,   ''],    // Richard Cross / ChipSource Europe — Jul 16
+    ['TR3B107M010C1400',    'CN', 2000, ''],    // YiMin Ke / Innovation Ray — Jul 15
+    ['IDT72V235L15TF',      'HK', 75,   ''],    // Wan Yiu Ling / Linkduty Co. — Jul 14
+    ['ADG5404BRUZ',         'CN', 6400, 2],     // Kevin Hu / Zhichenxing (earliest, has TP $2) — Jul 11-13
+    ['XC6SLX150T-3FGG676I', 'GB', 33,   ''],    // Charmaine / Vital Electronics UK — Jul 7
+    ['BCM5421A1IMLG',       'CN', 1300, ''],    // Binacupeng@foxmail.com — Jul 3
+    ['EL4390CM',            'SG', 100,  ''],    // Sumit Gupta / India Electronics — Jun 30 (dedup handles if already in sheet)
+    ['E28F800B5T90',        'US', 60,   2.50],  // Sales Group / Alpha-Micro Electronics — Jun 19
+    ['EPM7128STC100-10',    'US', 200,  ''],    // Tiffany Hull / AERI — Jun 18
+    ['K4S561632C-TC75',     'FR', 50,   ''],    // Lou Barbe / Club Electronics — Jun 17
+    ['ADF4116BRUZ',         'CN', 133,  1.80],  // Bonnie Chan / Shenzhen Hengchenxin — Jun 4 (TP $1.80 given Jun 8)
+    ['Z8S18020VEC',         'US', 80,   ''],    // George Beezer / Arcadia Components — Jun 1
+    ['PPC440GX-3CF800C',    'CN', 40,   ''],    // David Zhang / Shenzhen Mino Industry — May 27
+    ['XC2S150-5FG256I',     'US', 100,  ''],    // Olivia Zenteno / Velocity Electronics — May 26
+    ['LTL533-11',           'CN', 5000, ''],    // Joey Zhang / HK DCY Technology — May 26
+    ['IS42S32400E-7TLI',    'CN', 400,  ''],    // Bonnie Chan / Shenzhen Hengchenxin — May 26
+    ['EPF10K30ABC356-1',    'US', 10,   ''],    // Han Taehoon / 4 Star Electronics — May 26
+    ['AM28F010120JC',       'US', 250,  ''],    // Han Taehoon / 4 Star Electronics — May 26
+  ];
+
+  var added = 0, skipped = 0;
+  entries.forEach(function(e) {
+    var mpn = e[0], country = e[1], qty = e[2], tp = e[3];
+    var existing = searchStanSheet(mpn);
+    if (existing.length > 0) {
+      Logger.log('SKIP (already in Stan): ' + mpn);
+      skipped++;
+      return;
+    }
+    var sheet = SpreadsheetApp.openById(STAN_SHEET_ID).getSheets()[0];
+    var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+    sheet.appendRow(['', '', '', today, mpn, country, qty, tp || '']);
+    Logger.log('ADDED to Stan: ' + mpn + ' | ' + country + ' | QTY:' + qty + ' | TP:' + (tp || 'none'));
+    added++;
+  });
+  SpreadsheetApp.flush();
+  Logger.log('addMissingStanRows_Jul16 complete — added: ' + added + ', skipped: ' + skipped);
+}

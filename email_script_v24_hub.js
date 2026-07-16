@@ -720,9 +720,13 @@ function executeDecision(decision, thread) {
     }
     if (decision.mpn) updateForteSheet(decision.mpn);
   }
-  if (action === 'add_to_stan' && decision.forte_entry) {
-    var fe0 = decision.forte_entry;
-    addToStanSheet(fe0.mpn, fe0.country || 'USA', fe0.qty || '', fe0.target_price || '');
+  if (action === 'add_to_stan') {
+    var fe0 = decision.forte_entry || {};
+    var stanMpn = fe0.mpn || decision.mpn || '';
+    var stanCountry = fe0.country || decision.country || 'USA';
+    var stanQty = fe0.qty || decision.qty || '';
+    var stanTp = fe0.target_price || decision.target_price || '';
+    if (stanMpn) addToStanSheet(stanMpn, stanCountry, stanQty, stanTp);
   }
   if (action === 'david_nostock') {
     if (decision.mpn) {
@@ -742,10 +746,18 @@ function executeDecision(decision, thread) {
   }
   if (decision.draft_body) {
     var replyTo = decision.buyer_email || extractBuyerEmail(lastMsg.getFrom());
-    if (!replyTo || replyTo.indexOf('intransittech.com') >= 0) {
+    var isRelayAddr = function(addr) {
+      return !addr || addr.indexOf('intransittech.com') >= 0 ||
+             addr.indexOf('messagesend@netcomponents') >= 0 ||
+             addr.indexOf('autosend@icsource') >= 0;
+    };
+    if (isRelayAddr(replyTo)) {
       for (var i = messages.length - 1; i >= 0; i--) {
-        var sf = messages[i].getFrom();
-        if (sf.indexOf('intransittech.com') < 0) { replyTo = extractBuyerEmail(sf); break; }
+        var candidate = extractBuyerEmail(messages[i].getFrom());
+        if (!isRelayAddr(candidate)) { replyTo = candidate; break; }
+        // For ICS/relay emails, try Reply-To header
+        var rt = extractBuyerEmail(messages[i].getReplyTo() || '');
+        if (!isRelayAddr(rt)) { replyTo = rt; break; }
       }
     }
     if (!replyTo || replyTo.indexOf('intransittech.com') >= 0) {
@@ -810,13 +822,15 @@ function extractNetcompRFQ(messages) {
         if (/^qty/i.test(v)) { if (qtyCol < 0 || /qtyreq/i.test(v)) qtyCol = i; }
         if (/target\s*price|tgt\s*price|tgtprice/i.test(v)) tpCol = i;
       });
-      if (qtyCol >= 0 && tpCol >= 0) foundHeader = true;
+      if (qtyCol >= 0) foundHeader = true;
       continue;
     }
-    if (foundHeader && vals.length > Math.max(qtyCol, tpCol)) {
+    if (foundHeader && vals.length > qtyCol) {
       var qty = parseInt((vals[qtyCol] || '').replace(/,/g, ''), 10);
-      var tp = parseFloat((vals[tpCol] || '').replace(/[$,\s]/g, ''));
-      if (!isNaN(qty) && qty > 0 && !isNaN(tp) && tp > 0) return { qtyReq: qty, tgtPrice: tp };
+      if (!isNaN(qty) && qty > 0) {
+        var tp = (tpCol >= 0 && vals.length > tpCol) ? parseFloat((vals[tpCol] || '').replace(/[$,\s]/g, '')) : NaN;
+        return { qtyReq: qty, tgtPrice: (!isNaN(tp) && tp > 0) ? tp : null };
+      }
     }
   }
   return null;
@@ -837,7 +851,7 @@ function processThread(thread) {
 
   var parsedRFQ = extractNetcompRFQ(messages);
   if (parsedRFQ) {
-    content = '[PARSED_RFQ: QtyReq=' + parsedRFQ.qtyReq + ', TgtPrice=' + parsedRFQ.tgtPrice + ']\n' + content;
+    content = '[PARSED_RFQ: QtyReq=' + parsedRFQ.qtyReq + ', TgtPrice=' + (parsedRFQ.tgtPrice !== null ? parsedRFQ.tgtPrice : '') + ']\n' + content;
   }
 
   var mpnHint = extractMPNFromSubject(subject) || extractMPN(subject);
