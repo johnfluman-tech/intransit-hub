@@ -1621,6 +1621,13 @@ function buildContextualCard(e) {
         .setOnClickAction(CardService.newAction()
           .setFunctionName('addonSubmitFeedback')
           .setParameters({ draftId: matchDraftId, threadId: gmailThreadId, fbField: fbField })));
+      fixSection.addWidget(CardService.newTextButton()
+        .setText('📋 Wrong Draft — Pick Correct Response')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#e65100')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonWrongDraftPicker')
+          .setParameters({ draftId: matchDraftId, threadId: gmailThreadId, subject: subject, toEmail: matchToH })));
 
       builder.addSection(infoSection).addSection(fixSection);
 
@@ -2155,6 +2162,178 @@ function addonSubmitFeedback(e) {
     return notify('Error: ' + err.toString());
   }
 }
+
+// ─── WRONG DRAFT PICKER ──────────────────────────────────────────────────────
+
+var WRONG_DRAFT_ACTIONS = [
+  { key: 'request_tp_500',  label: 'Ask for TP ($500 min)',
+    body: 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.' },
+  { key: 'request_tp_2000', label: 'Ask for TP ($2,000 min)',
+    body: 'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.' },
+  { key: 'msg_checking',    label: 'Checking on it (MSG_CHECKING)',
+    body: 'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.' },
+  { key: 'add_to_stan',     label: 'Warehouse checking (add to Stan)',
+    body: 'Warehouse is checking details and I will update ASAP' },
+  { key: 'bill_handle',     label: 'Bill will help',
+    body: 'Bill will help with this request' },
+  { key: 'remove_oem',      label: 'Remove from listing (David no-stk)',
+    body: 'Ok, removed from listing.' },
+  { key: 'own_stock',       label: 'Own stock — quote directly (dynamic)',
+    body: null },
+  { key: 'stan_quoted',     label: 'Stan quoted — send pricing (dynamic)',
+    body: null },
+  { key: 'no_bid',          label: 'No bid (silent — no reply)',
+    body: null },
+  { key: 'no_action',       label: 'No action needed (skip)',
+    body: null },
+];
+
+function addonWrongDraftPicker(e) {
+  try {
+    var params = e.commonEventObject.parameters;
+    var draftId  = params.draftId  || '';
+    var threadId = params.threadId || '';
+    var subject  = params.subject  || '';
+    var toEmail  = params.toEmail  || '';
+
+    var card  = CardService.newCardBuilder().setHeader(
+      CardService.newCardHeader().setTitle('📋 Pick Correct Response')
+    );
+    var sect = CardService.newCardSection()
+      .setHeader('What should the draft have said?');
+
+    // Dropdown of all standard actions
+    var dropdown = CardService.newSelectionInput()
+      .setType(CardService.SelectionInputType.DROPDOWN)
+      .setFieldName('correct_action')
+      .setTitle('Correct action');
+    WRONG_DRAFT_ACTIONS.forEach(function(a) {
+      dropdown.addItem(a.label, a.key, false);
+    });
+    sect.addWidget(dropdown);
+
+    // Reason text box
+    sect.addWidget(CardService.newTextInput()
+      .setFieldName('wrong_reason')
+      .setTitle('Why was the draft wrong?')
+      .setHint('Used to train the AI — be specific')
+      .setMultiline(true));
+
+    // Submit button
+    sect.addWidget(CardService.newTextButton()
+      .setText('Fix Draft & Log Bug')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1565c0')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonWrongDraftApply')
+        .setParameters({ draftId: draftId, threadId: threadId, subject: subject, toEmail: toEmail })));
+
+    card.addSection(sect);
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build()))
+      .build();
+  } catch(err) {
+    return notify('addonWrongDraftPicker error: ' + err.toString());
+  }
+}
+
+function addonWrongDraftApply(e) {
+  try {
+    var params     = e.commonEventObject.parameters;
+    var draftId    = params.draftId  || '';
+    var threadId   = params.threadId || '';
+    var subject    = params.subject  || '';
+    var toEmail    = params.toEmail  || '';
+    var formInputs = e.commonEventObject.formInputs || {};
+
+    var correctAction = '';
+    if (formInputs.correct_action && formInputs.correct_action.stringInputs) {
+      correctAction = (formInputs.correct_action.stringInputs.value || [])[0] || '';
+    }
+    var wrongReason = '';
+    if (formInputs.wrong_reason && formInputs.wrong_reason.stringInputs) {
+      wrongReason = (formInputs.wrong_reason.stringInputs.value || [])[0] || '';
+    }
+
+    if (!correctAction) return notify('Please select the correct action first.');
+
+    var token = ScriptApp.getOAuthToken();
+
+    // Capture wrong draft body before deleting
+    var wrongDraftBody = '';
+    try {
+      var fetchResp = UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
+        { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+      );
+      if (fetchResp.getResponseCode() === 200) {
+        var draftData = JSON.parse(fetchResp.getContentText());
+        var rawHtml = extractDraftHtmlBody(draftData.message && draftData.message.payload);
+        wrongDraftBody = rawHtml ? rawHtml.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().substring(0,400) : '';
+      }
+    } catch(eF) {}
+
+    // Delete the wrong draft
+    if (draftId) {
+      UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId,
+        { method: 'DELETE', headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+      );
+    }
+
+    // Find the correct action definition
+    var actionDef = null;
+    WRONG_DRAFT_ACTIONS.forEach(function(a) { if (a.key === correctAction) actionDef = a; });
+
+    var newDraftBody = actionDef ? actionDef.body : null;
+    var notificationText = '';
+
+    if (newDraftBody) {
+      // Fixed-template action — create the correct draft now
+      try {
+        var thread = GmailApp.getThreadById(threadId);
+        if (thread) {
+          var messages = thread.getMessages();
+          var lastMsg  = messages[messages.length - 1];
+          var htmlBody = buildSimpleHTML(newDraftBody);
+          lastMsg.createDraftReply('', { htmlBody: htmlBody });
+          notificationText = '✅ Wrong draft deleted. Correct draft created: ' + actionDef.label;
+        } else {
+          notificationText = '⚠️ Draft deleted but could not find thread to create replacement.';
+        }
+      } catch(eD) {
+        notificationText = '⚠️ Draft deleted. Error creating replacement: ' + eD.toString();
+      }
+    } else {
+      // Dynamic action (own_stock, stan_quoted, no_bid, no_action) — can't auto-generate
+      notificationText = '✅ Wrong draft deleted. Action "' + correctAction + '" requires manual draft — please create it yourself.';
+    }
+
+    // Log the lesson via hubLearn
+    if (wrongReason.trim()) {
+      hubLearn(
+        wrongReason + ' [Correct action should have been: ' + correctAction + ']',
+        wrongDraftBody,
+        newDraftBody || '[' + correctAction + ' — dynamic, not auto-generated]',
+        threadId, subject, toEmail, '', correctAction
+      );
+    }
+
+    hubLog('feedback', 'Wrong draft corrected: ' + correctAction + ' | Reason: ' + (wrongReason || '(none)'), {
+      draft_id: draftId, thread_id: threadId, correct_action: correctAction
+    });
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().popCard())
+      .setNotification(CardService.newNotification().setText(notificationText))
+      .build();
+
+  } catch(err) {
+    return notify('addonWrongDraftApply error: ' + err.toString());
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function getRecentSentQuotesFull(mpn, maxThreads) {
   if (!mpn) return 'No MPN provided.';
