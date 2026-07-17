@@ -620,10 +620,30 @@ function checkDavidNoStockEmails() {
     var thread = GmailApp.getThreadById(tid);
     if (!thread) return;
     var msg = thread.getMessages()[thread.getMessageCount() - 1];
-    var subjectLower = msg.getSubject().toLowerCase();
+    var subject = msg.getSubject();
+    var subjectLower = subject.toLowerCase();
     var bodySnippet = msg.getPlainBody().toLowerCase().substring(0, 300);
     var isNoStk = noStkKeywords.some(function(kw) { return subjectLower.indexOf(kw) >= 0 || bodySnippet.indexOf(kw) >= 0; });
     if (!isNoStk) return;
+    // Stamp Forte col K directly by row number extracted from subject (#XXXX)
+    // This runs before processThread so it always fires even if worker decision fails
+    var rowMatch = subject.match(/#(\d{3,5})/);
+    if (rowMatch) {
+      var forteRow = parseInt(rowMatch[1], 10);
+      try {
+        var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+        var statusCell = forteSheet.getRange(forteRow, FORTE_STATUS_COL + 1);
+        var currentVal = String(statusCell.getValue()).trim();
+        if (currentVal.toUpperCase().indexOf('NO STK') === -1 && currentVal.toUpperCase() !== 'CLOSED') {
+          var stamp = 'NO STK - ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+          statusCell.clearDataValidations();
+          statusCell.setValue(stamp);
+          hubLog('run', 'checkDavidNoStockEmails: stamped Forte row ' + forteRow + ' directly from subject', {});
+        }
+      } catch(e) {
+        hubLog('error', 'checkDavidNoStockEmails: Forte row stamp error row ' + forteRow + ': ' + e, {});
+      }
+    }
     try { processThread(thread); } catch(e) { hubLog('error', 'checkDavidNoStockEmails processThread error: ' + e, {}); }
     gmailModifyThread_(tid, [INCOMING_LABEL], []);
     gmailArchiveThread_(tid);
@@ -732,7 +752,8 @@ function executeDecision(decision, thread) {
     if (decision.mpn) {
       var dRes = deletePart(decision.mpn, subject);
       hubLog('run', 'david_nostock: deletePart ' + decision.mpn + ' → ' + dRes, {});
-      if (dRes === 'DELETED' || dRes === 'FUZZY') updateForteSheet(decision.mpn);
+      // Always stamp Forte col K regardless of whether part was found in OEM EXCESS
+      updateForteSheet(decision.mpn);
     }
   }
   if (decision.forte_entry) {
@@ -3830,11 +3851,63 @@ function addJul17ManualEntries_oneTime() {
   Logger.log('addJul17ManualEntries_oneTime: DONE');
 }
 
-// ONE-TIME: Jul 17 2026 — delete David no-stock parts from OEM EXCESS
-// Run once from Apps Script editor, then delete.
-function deleteDavidNoStocks_Jul17_oneTime() {
-  deletePart('AD7682BCPZRL7', 'AD7682BCPZRL7 #4091 No stock');
-  Logger.log('Done — AD7682BCPZRL7 stamped NO STK and deleted from OEM EXCESS');
-  deletePart('D12S400A', 'D12S400A #4089 No stk');
-  Logger.log('Done — D12S400A stamped NO STK and deleted from OEM EXCESS');
+// ONE-TIME: Jul 17 2026 — full audit of Forte rows 4010+ with David no-stk in col L but col K still Open
+// Stamps col K with NO STK - 7/17/2026 by direct row number AND tries to delete from OEM EXCESS.
+// Run once from Apps Script editor. Safe to re-run (idempotent — skips already-stamped rows).
+function davidNoStockAuditJul17_oneTime() {
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var dateStr = '7/17/2026';
+  var newStatus = 'NO STK - ' + dateStr;
+
+  // [forteSheetRow, mpnAsInForteColB]
+  var noStkRows = [
+    [4010, 'SLI-343P8G3F'],
+    [4014, 'W25Q256JWEIM'],
+    [4019, 'LMX2594RHAT'],
+    [4022, 'AD8676ARMZ-REEL'],
+    [4024, 'TPSI2140QDWQRQ1'],
+    [4025, 'STM32G474RET6'],
+    [4028, 'MP9100-75.0-1'],
+    [4035, 'CCM03-3512LFTR851B'],
+    [4037, 'ADA4940-1ACPZ-R7'],
+    [4038, 'ISL9R3060G2'],
+    [4039, 'STM32G031G6U6TR'],
+    [4040, 'IPI024N06N3G'],
+    [4041, 'STM32H750VBT6TR'],
+    [4043, 'STM32L476JGY3TR'],
+    [4045, 'EPCQ64SI16N'],
+    [4048, 'STM32H573VIT6'],
+    [4049, 'DS-D076H030'],
+    [4053, 'CA91C142D-33IE'],
+    [4054, '7286-5421-40'],
+    [4057, 'DS2E-S-DC24V'],
+    [4062, 'ZOE-M8G-0'],
+    [4067, 'W25X40CLSNIG'],
+    [4075, 'BMS13-78T10C01G008'],
+    [4080, 'MT48LC4M16A2B4-6AIT:J'],
+    [4088, 'ADUM1200ARZ-RL7'],
+    [4089, 'D12S400A'],
+    [4090, 'DH82029PCHSLKM8'],
+    [4091, 'AD7682BCPZRL7'],
+  ];
+
+  noStkRows.forEach(function(entry) {
+    var rowNum = entry[0];
+    var mpn = entry[1];
+    // Stamp Forte col K directly by row number (more reliable than MPN search)
+    var statusCell = forteSheet.getRange(rowNum, FORTE_STATUS_COL + 1);
+    var currentVal = String(statusCell.getValue()).trim();
+    if (currentVal.toUpperCase().indexOf('NO STK') === -1 && currentVal.toUpperCase() !== 'CLOSED') {
+      statusCell.clearDataValidations();
+      statusCell.setValue(newStatus);
+      Logger.log('Stamped Forte row ' + rowNum + ' (' + mpn + '): ' + newStatus);
+    } else {
+      Logger.log('Already stamped row ' + rowNum + ' (' + mpn + '): ' + currentVal);
+    }
+    // Delete from OEM EXCESS if present
+    var dRes = deletePart(mpn, 'davidNoStockAudit Jul17');
+    Logger.log('OEM EXCESS deletePart(' + mpn + ') → ' + dRes);
+  });
+
+  Logger.log('davidNoStockAuditJul17_oneTime: DONE — ' + noStkRows.length + ' rows processed');
 }
