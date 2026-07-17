@@ -2253,3 +2253,21 @@ function addForte230N3V14_Jul17() {
   addToForteSheet('230N3V14', 250, 2.00, 'US', '');
   Logger.log('addForte230N3V14_Jul17: DONE');
 }
+
+// ONE-TIME — Run deleteRAA2100404_Jul17() for David no-stk #4095 (Jul 17 2026)
+// Stamps Forte row 4095 NO STK (black/white/bold) + deletes from OEM EXCESS
+function deleteRAA2100404_Jul17() {
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var cell = forteSheet.getRange(4095, FORTE_STATUS_COL + 1);
+  var cur = String(cell.getValue()).trim().toUpperCase();
+  if (cur.indexOf('NO STK') === -1 && cur !== 'CLOSED') {
+    cell.clearDataValidations();
+    cell.setValue('NO STK - 7/17/2026');
+    cell.setBackground('#000000'); cell.setFontColor('#FFFFFF'); cell.setFontWeight('bold');
+    Logger.log('Stamped Forte row 4095');
+  } else {
+    Logger.log('Row 4095 already stamped: ' + cur);
+  }
+  var r = deletePart('RAA2100404GLGMD0', 'David no-stk #4095 Jul17');
+  Logger.log('deletePart RAA2100404GLGMD0 → ' + r);
+}
