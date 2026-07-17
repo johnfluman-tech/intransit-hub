@@ -1293,7 +1293,7 @@ function setupTriggers() {
   // Two-phase architecture: fastScanInbox labels threads only (< 10s/run),
   // processPendingThreads calls Claude API on a slower 5-min schedule.
   // This prevents runEmailScan from exhausting the 6-hr daily execution quota.
-  ScriptApp.newTrigger('fastScanInbox').timeBased().everyMinutes(2).create();
+  ScriptApp.newTrigger('fastScanInbox').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('processPendingThreads').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkDavidNoStockEmails').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
