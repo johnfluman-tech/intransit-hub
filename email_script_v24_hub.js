@@ -638,6 +638,7 @@ function checkDavidNoStockEmails() {
           var stamp = 'NO STK - ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
           statusCell.clearDataValidations();
           statusCell.setValue(stamp);
+          statusCell.setBackground('#000000'); statusCell.setFontColor('#FFFFFF'); statusCell.setFontWeight('bold');
           hubLog('run', 'checkDavidNoStockEmails: stamped Forte row ' + forteRow + ' directly from subject', {});
         }
       } catch(e) {
@@ -3900,6 +3901,7 @@ function davidNoStockAuditJul17_oneTime() {
     if (currentVal.toUpperCase().indexOf('NO STK') === -1 && currentVal.toUpperCase() !== 'CLOSED') {
       statusCell.clearDataValidations();
       statusCell.setValue(newStatus);
+      statusCell.setBackground('#000000'); statusCell.setFontColor('#FFFFFF'); statusCell.setFontWeight('bold');
       Logger.log('Stamped Forte row ' + rowNum + ' (' + mpn + '): ' + newStatus);
     } else {
       Logger.log('Already stamped row ' + rowNum + ' (' + mpn + '): ' + currentVal);
@@ -3910,4 +3912,20 @@ function davidNoStockAuditJul17_oneTime() {
   });
 
   Logger.log('davidNoStockAuditJul17_oneTime: DONE — ' + noStkRows.length + ' rows processed');
+}
+
+// One-time: apply black/white formatting to the 28 rows already stamped with NO STK text
+function fixNoStkFormatJul17_oneTime() {
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var rows = [4010,4014,4019,4022,4024,4025,4028,4035,4037,4038,4039,4040,4041,4043,4045,4048,4049,4053,4054,4057,4062,4067,4075,4080,4088,4089,4090,4091];
+  var fixed = 0;
+  rows.forEach(function(rowNum) {
+    var cell = forteSheet.getRange(rowNum, FORTE_STATUS_COL + 1);
+    var val = String(cell.getValue()).trim();
+    if (val.toUpperCase().indexOf('NO STK') !== -1) {
+      cell.setBackground('#000000'); cell.setFontColor('#FFFFFF'); cell.setFontWeight('bold');
+      fixed++;
+    }
+  });
+  Logger.log('fixNoStkFormatJul17_oneTime: applied black/white to ' + fixed + ' of ' + rows.length + ' rows');
 }
