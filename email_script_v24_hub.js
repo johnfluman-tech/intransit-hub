@@ -2682,10 +2682,25 @@ function addonBlockDomain(e) {
   }
 }
 
+function cleanSendNowTriggers() {
+  var deleted = 0;
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'sendPleasePostNow') {
+      ScriptApp.deleteTrigger(t);
+      deleted++;
+    }
+  });
+  Logger.log('cleanSendNowTriggers: deleted ' + deleted + ' stale sendPleasePostNow triggers');
+}
+
 function addonSendNetCom(e) {
   try {
-    // Create a one-time trigger so sendPleasePostNow() fires in ~5 seconds.
-    // This bypasses the worker command queue and works even if recurring triggers are down.
+    // Delete any stale sendPleasePostNow triggers first to avoid hitting the add-on limit
+    ScriptApp.getProjectTriggers().forEach(function(t) {
+      if (t.getHandlerFunction() === 'sendPleasePostNow') {
+        ScriptApp.deleteTrigger(t);
+      }
+    });
     ScriptApp.newTrigger('sendPleasePostNow').timeBased().after(5000).create();
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText('✅ Sending NetCOMPONENTS email now (in a few seconds)...'))
