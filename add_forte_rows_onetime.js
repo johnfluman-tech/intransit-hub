@@ -2243,3 +2243,13 @@ function deleteJul17NoStockOEM_oneTime() {
 
   Logger.log('deleteJul17NoStockOEM_oneTime: DONE');
 }
+
+// ONE-TIME — Run addForte230N3V14_Jul17() to add 230N3V14 to Forte.
+// Wanda/Nexelec (US) gave TP=$2.00 for qty 250 (line=$500, meets $500 min).
+// MSG_CHECKING draft sent Jul 17 2026.
+function addForte230N3V14_Jul17() {
+  var existing = checkForteForMPN('230N3V14', 60);
+  if (existing) { Logger.log('230N3V14 already in Forte within 60 days — skipping'); return; }
+  addToForteSheet('230N3V14', 250, 2.00, 'US', '');
+  Logger.log('addForte230N3V14_Jul17: DONE');
+}
