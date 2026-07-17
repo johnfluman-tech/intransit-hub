@@ -1013,14 +1013,19 @@ function processPendingThreads() {
   if (!threadIds.length) return;
   hubLog('run', 'processPendingThreads: processing ' + threadIds.length + ' thread(s)');
   threadIds.forEach(function(tid) {
-    gmailModifyThread_(tid, [], [PENDING_LABEL]);
     var t = GmailApp.getThreadById(tid);
-    if (!t) return;
+    if (!t) { gmailModifyThread_(tid, [], [PENDING_LABEL]); return; }
     var msgs = t.getMessages();
     var lastMsg = msgs[msgs.length - 1];
-    if (lastMsg.getFrom().indexOf(JOHN_EMAIL) >= 0) return;
-    if (lastMsg.getFrom().indexOf('intransittech.com') >= 0) return;
-    try { processThread(t); } catch(e) { hubLog('error', 'processPendingThreads error: ' + e); }
+    if (lastMsg.getFrom().indexOf(JOHN_EMAIL) >= 0) { gmailModifyThread_(tid, [], [PENDING_LABEL]); return; }
+    if (lastMsg.getFrom().indexOf('intransittech.com') >= 0) { gmailModifyThread_(tid, [], [PENDING_LABEL]); return; }
+    try {
+      processThread(t);
+      gmailModifyThread_(tid, [], [PENDING_LABEL]); // only remove label on success — keeps retry on failure
+    } catch(e) {
+      hubLog('error', 'processPendingThreads error (will retry next run): ' + e);
+      // PENDING_LABEL stays → processPendingThreads will retry on next trigger fire
+    }
   });
 }
 
