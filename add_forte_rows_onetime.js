@@ -2225,3 +2225,21 @@ function addMissing3Stan_Jul16b() {
   SpreadsheetApp.flush();
   Logger.log('addMissing3Stan_Jul16b done — 3 rows added');
 }
+
+// ONE-TIME — Run deleteJul17NoStockOEM_oneTime() to clean up OEM EXCESS for:
+//   1. DA7217-00U32 (BILL EXT): Bill confirmed sold, no longer available (Jul 17)
+//   2. ADM232AARNZ-REEL7 (row 4094): David said no stock (Jul 17) — belt+suspenders
+// Also stamps Forte row 4094 black/white in case automation hasn't run yet.
+function deleteJul17NoStockOEM_oneTime() {
+  // Delete DA7217-00U32 from OEM EXCESS (BILL EXT — not in Forte)
+  var r1 = deletePart('DA7217-00U32', 'Jul17 Bill confirmed sold');
+  Logger.log('DA7217-00U32 deletePart → ' + r1);
+
+  // Delete ADM232AARNZ-REEL7 from OEM EXCESS + stamp Forte row 4094
+  var r2 = deletePart('ADM232AARNZ-REEL7', 'Jul17 David no stock #4094');
+  Logger.log('ADM232AARNZ-REEL7 deletePart → ' + r2);
+  updateForteSheet('ADM232AARNZ-REEL7');
+  Logger.log('ADM232AARNZ-REEL7 Forte stamped');
+
+  Logger.log('deleteJul17NoStockOEM_oneTime: DONE');
+}
