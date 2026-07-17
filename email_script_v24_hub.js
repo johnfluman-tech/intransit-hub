@@ -2684,14 +2684,11 @@ function addonBlockDomain(e) {
 
 function addonSendNetCom(e) {
   try {
-    UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({ type: 'send_datamaster_email' }),
-      muteHttpExceptions: true
-    });
+    // Create a one-time trigger so sendPleasePostNow() fires in ~5 seconds.
+    // This bypasses the worker command queue and works even if recurring triggers are down.
+    ScriptApp.newTrigger('sendPleasePostNow').timeBased().after(5000).create();
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('✅ Queued: NetCOMPONENTS email will send in ~5 min'))
+      .setNotification(CardService.newNotification().setText('✅ Sending NetCOMPONENTS email now (in a few seconds)...'))
       .build();
   } catch(err) {
     return CardService.newActionResponseBuilder()
@@ -3746,4 +3743,83 @@ function sendPleasePostNow() {
 function addIDT7202ToStanSheet_oneTime() {
   addToStanSheet('IDT7202LA50P*', 'FR', 226, '');
   Logger.log('Done — IDT7202LA50P* added to Stan sheet (FR, qty 226, no TP)');
+}
+
+// ONE-TIME: Jul 17 2026 — add manually processed entries from trigger-outage day (Jul 14/17)
+// Run once from Apps Script editor, then delete.
+function addJul17ManualEntries_oneTime() {
+  // Forte: XC7Z020-1CLG400I (msg_checking sent to Amelia, Newchip HK, qty=1080, TP=$20)
+  var dup = checkForteForMPN('XC7Z020-1CLG400I', 60);
+  if (dup && dup.length > 0) {
+    Logger.log('XC7Z020-1CLG400I: duplicate in Forte within 60 days — skipping');
+  } else {
+    addToForteSheet('XC7Z020-1CLG400I', 1080, 20.00, 'HK', '');
+    Logger.log('Forte added: XC7Z020-1CLG400I | qty=1080 | TP=$20 | HK');
+  }
+
+  // Forte: ADM232AARNZ-REEL7 (msg_checking sent to Amelia, Newchip HK, qty=3000, TP=$1.28 — OEM EXCESS, not Warehouse#3)
+  var dupAdm = checkForteForMPN('ADM232AARNZ-REEL7', 60);
+  if (dupAdm && dupAdm.length > 0) {
+    Logger.log('ADM232AARNZ-REEL7: duplicate in Forte within 60 days — skipping');
+  } else {
+    addToForteSheet('ADM232AARNZ-REEL7', 3000, 1.28, 'HK', '');
+    Logger.log('Forte added: ADM232AARNZ-REEL7 | qty=3000 | TP=$1.28 | HK');
+  }
+
+  // Stan sheet: STM32L496VGT6 (Warehouse#4, Damon, Forex Electronics GB, qty=1250, TP=$4)
+  addToStanSheet('STM32L496VGT6', 'GB', 1250, 4.00);
+  Logger.log('Stan added: STM32L496VGT6 | GB | qty=1250 | TP=$4');
+
+  // Forte: RAA2100404GLGMD0 (msg_checking sent to JIA EN Jiang, Standard International HK/CN, qty=1000, TP=$1.50)
+  var dup2 = checkForteForMPN('RAA2100404GLGMD0', 60);
+  if (dup2 && dup2.length > 0) {
+    Logger.log('RAA2100404GLGMD0: duplicate in Forte within 60 days — skipping');
+  } else {
+    addToForteSheet('RAA2100404GLGMD0', 1000, 1.50, 'CN', '');
+    Logger.log('Forte added: RAA2100404GLGMD0 | qty=1000 | TP=$1.50 | CN');
+  }
+
+  // NOTE: ATTINY85-20SUR (Andy Kang, HK Rudder) SKIPPED — 310 × $0.60 = $186, below $500 min line value. No msg_checking, no Forte entry.
+
+  // Forte: MAX538BESA+ (msg_checking sent to Min Liu, Zhong Ce Electronic Technology CN, qty=1600, TP=$4.7)
+  var dupMax = checkForteForMPN('MAX538BESA+', 60);
+  if (dupMax && dupMax.length > 0) {
+    Logger.log('MAX538BESA+: duplicate in Forte within 60 days — skipping');
+  } else {
+    addToForteSheet('MAX538BESA+', 1600, 4.70, 'CN', '');
+    Logger.log('Forte added: MAX538BESA+ | qty=1600 | TP=$4.70 | CN');
+  }
+
+  // Forte: APTS050A0X3-SRPHZ (msg_checking sent to ZOE ZOE, SZ Xinhe Tianxia CN, qty=556, TP=$13)
+  var dupApts = checkForteForMPN('APTS050A0X3-SRPHZ', 60);
+  if (dupApts && dupApts.length > 0) {
+    Logger.log('APTS050A0X3-SRPHZ: duplicate in Forte within 60 days — skipping');
+  } else {
+    addToForteSheet('APTS050A0X3-SRPHZ', 556, 13.00, 'CN', '');
+    Logger.log('Forte added: APTS050A0X3-SRPHZ | qty=556 | TP=$13 | CN');
+  }
+
+  // Forte: 8L02-05-00 (msg_checking sent to Veeresh HB, Converge EMEA IN, qty=10000, TP=$3.5)
+  var dup8L = checkForteForMPN('8L02-05-00', 60);
+  if (dup8L && dup8L.length > 0) {
+    Logger.log('8L02-05-00: duplicate in Forte within 60 days — skipping');
+  } else {
+    addToForteSheet('8L02-05-00', 10000, 3.50, 'IN', '');
+    Logger.log('Forte added: 8L02-05-00 | qty=10000 | TP=$3.50 | IN');
+  }
+
+  // Stan sheet: LMX2594RHA (W3_CHECKING sent to icpurchase2016@sina.com, LingFeng Huizhou CN, qty=200, TP=$6 — Warehouse#3 has 300 pcs)
+  addToStanSheet('LMX2594RHA', 'CN', 200, 6.00);
+  Logger.log('Stan added: LMX2594RHA | CN | qty=200 | TP=$6');
+
+  Logger.log('addJul17ManualEntries_oneTime: DONE');
+}
+
+// ONE-TIME: Jul 17 2026 — delete David no-stock parts from OEM EXCESS
+// Run once from Apps Script editor, then delete.
+function deleteDavidNoStocks_Jul17_oneTime() {
+  deletePart('AD7682BCPZRL7', 'AD7682BCPZRL7 #4091 No stock');
+  Logger.log('Done — AD7682BCPZRL7 stamped NO STK and deleted from OEM EXCESS');
+  deletePart('D12S400A', 'D12S400A #4089 No stk');
+  Logger.log('Done — D12S400A stamped NO STK and deleted from OEM EXCESS');
 }
