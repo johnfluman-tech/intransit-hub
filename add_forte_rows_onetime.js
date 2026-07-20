@@ -2272,6 +2272,21 @@ function deleteRAA2100404_Jul17() {
   Logger.log('deletePart RAA2100404GLGMD0 → ' + r);
 }
 
+// ── msg_checking Forte entries Jul 20 2026 ───────────────────
+// 2 buyer TP replies processed manually. Drafts created via Gmail MCP.
+// Run once to add Forte entries.
+function addForteEntries_Jul20_oneTime() {
+  var today = '7/20/2026';
+  // SIM-ST-MFF2 — jason@southelectronics.com, 400pcs @ $2.50, US
+  // Prior Forte entry from Jan 2025 (row 1935) — outside 60-day window, OK to add
+  addToForteSheet('SIM-ST-MFF2', 400, 2.50, 'US', '');
+  Logger.log('Added SIM-ST-MFF2');
+  // 151-02245 — sofiag@chip1.com, 20000pcs @ $1.50, US
+  // No prior Forte entry
+  addToForteSheet('151-02245', 20000, 1.50, 'US', '');
+  Logger.log('Added 151-02245');
+}
+
 // ── David no-stk Jul 20 2026 ──────────────────────────────────
 // 5 no-stock emails from David. Drafts already created via Gmail MCP.
 // Run this once to stamp Forte rows + delete from OEM EXCESS.
