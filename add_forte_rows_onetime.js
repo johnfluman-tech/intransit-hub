@@ -2271,3 +2271,36 @@ function deleteRAA2100404_Jul17() {
   var r = deletePart('RAA2100404GLGMD0', 'David no-stk #4095 Jul17');
   Logger.log('deletePart RAA2100404GLGMD0 → ' + r);
 }
+
+// ── David no-stk Jul 20 2026 ──────────────────────────────────
+// 5 no-stock emails from David. Drafts already created via Gmail MCP.
+// Run this once to stamp Forte rows + delete from OEM EXCESS.
+function davidNoStk_Jul20_oneTime() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var FORTE_STATUS_COL = 10;
+  var stamp = 'NO STK - 7/20/2026';
+  var noStks = [
+    { row: 4102, mpn: 'CAT4237TD-GT3' },
+    { row: 4106, mpn: 'BAT165-E6327' },
+    { row: 4104, mpn: 'ICM-42670-P' },
+    { row: 3695, mpn: 'BUK9875-100A/CUX' },
+    { row: 4100, mpn: 'LDECD4100KA0N00' },
+  ];
+  noStks.forEach(function(item) {
+    var cell = forteSheet.getRange(item.row, FORTE_STATUS_COL);
+    var cur = cell.getValue();
+    if (!cur || cur.toString().toUpperCase().indexOf('NO STK') === -1) {
+      cell.clearDataValidations();
+      cell.setValue(stamp);
+      cell.setBackground('#000000');
+      cell.setFontColor('#FFFFFF');
+      cell.setFontWeight('bold');
+      Logger.log('Stamped Forte row ' + item.row + ' (' + item.mpn + ')');
+    } else {
+      Logger.log('Row ' + item.row + ' already stamped: ' + cur);
+    }
+    var result = deletePart(item.mpn, 'David no-stk Jul20');
+    Logger.log('deletePart ' + item.mpn + ' → ' + result);
+  });
+}
