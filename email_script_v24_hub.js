@@ -651,6 +651,63 @@ function checkDavidNoStockEmails() {
   });
 }
 
+// ── Forte no-stock reply handler ──────────────────────────────
+// When Forte replies "no stock" on a thread where we already sent msg_checking
+// (oem-tp-processed label), auto-create a buyer decline draft.
+function checkForteNoStockReplies() {
+  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
+  if (_cfg.enabled === false) return;
+  var query = 'label:oem-tp-processed in:inbox from:fortetechno.com -label:forte-nostock-processed';
+  var threadIds = gmailSearchREST(query, 20);
+  hubLog('run', 'checkForteNoStockReplies: ' + threadIds.length + ' thread(s)');
+  if (!threadIds.length) return;
+  var noStkKeywords = ['no stk', 'no stock', 'out of stock', "don't have", 'dont have',
+                       'not available', 'cannot source', 'no inventory', 'cant source',
+                       'unavailable', 'not in stock', 'cannot fill', 'cant fill', 'nothing available'];
+  threadIds.forEach(function(tid) {
+    var thread = GmailApp.getThreadById(tid);
+    if (!thread) return;
+    gmailModifyThread_(tid, ['forte-nostock-processed'], []);
+    var messages = thread.getMessages();
+    var subject = thread.getFirstMessageSubject().replace(/^(Re:\s*)+/i, '').trim();
+    var forteMsg = null;
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].getFrom().toLowerCase().indexOf('fortetechno.com') >= 0) {
+        forteMsg = messages[i]; break;
+      }
+    }
+    if (!forteMsg) return;
+    var body = forteMsg.getPlainBody().toLowerCase();
+    var isNoStock = noStkKeywords.some(function(kw) { return body.indexOf(kw) >= 0; });
+    if (!isNoStock) {
+      hubLog('run', 'checkForteNoStockReplies: Forte reply not no-stock for "' + subject + '" — skipped for manual review', {});
+      return;
+    }
+    var buyerEmail = null;
+    for (var j = 0; j < messages.length; j++) {
+      var from = messages[j].getFrom().toLowerCase();
+      if (from.indexOf('intransittech.com') < 0 && from.indexOf('fortetechno.com') < 0) {
+        var rt = messages[j].getReplyTo();
+        buyerEmail = extractBuyerEmail((rt && rt.indexOf('@') >= 0) ? rt : messages[j].getFrom());
+        break;
+      }
+    }
+    if (!buyerEmail || buyerEmail.indexOf('intransittech.com') >= 0) {
+      hubLog('error', 'checkForteNoStockReplies: no buyer email for "' + subject + '"', {});
+      return;
+    }
+    var declineBody = 'Thank you for your inquiry. Unfortunately, we are unable to source '
+      + subject + ' at this time. We appreciate the opportunity and hope to work with you on future requirements.';
+    try {
+      var lastMsg = messages[messages.length - 1];
+      lastMsg.createDraftReply('', { htmlBody: buildSimpleHTML(declineBody.replace(/\n/g, '<br>')) });
+      hubLog('run', 'checkForteNoStockReplies: buyer decline draft created for "' + subject + '" → ' + buyerEmail, {});
+    } catch(e) {
+      hubLog('error', 'checkForteNoStockReplies: draft error for "' + subject + '": ' + e, {});
+    }
+  });
+}
+
 
 function sendDailyCostReport() {
   try {
@@ -901,6 +958,7 @@ function runEmailScan() {
   var blockFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
 
   try { checkDavidNoStockEmails(); } catch(e) { hubLog('error', 'checkDavidNoStockEmails crashed: ' + e, {}); }
+  try { checkForteNoStockReplies(); } catch(e) { hubLog('error', 'checkForteNoStockReplies crashed: ' + e, {}); }
 
   var rfqLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
   var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:david@fortetechno.com -from:steve@fortetechno.com -label:oem-rfq-incoming-processed ' + blockFilter;
