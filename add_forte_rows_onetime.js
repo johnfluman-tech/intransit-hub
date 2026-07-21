@@ -2293,7 +2293,7 @@ function addForteEntries_Jul20_oneTime() {
 function davidNoStk_Jul20_oneTime() {
   var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
   var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var FORTE_STATUS_COL = 10;
+  var FORTE_STATUS_COL = 11;
   var stamp = 'NO STK - 7/20/2026';
   var noStks = [
     { row: 4102, mpn: 'CAT4237TD-GT3' },
@@ -2323,7 +2323,7 @@ function davidNoStk_Jul20_oneTime() {
 function davidNoStk_FT232RL_Jul20_oneTime() {
   var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
   var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var FORTE_STATUS_COL = 10;
+  var FORTE_STATUS_COL = 11;
   var stamp = 'NO STK - 7/20/2026';
   var cell = forteSheet.getRange(4114, FORTE_STATUS_COL);
   cell.clearDataValidations();
@@ -2339,7 +2339,7 @@ function davidNoStk_FT232RL_Jul20_oneTime() {
 function davidNoStk_XP1001000_Jul20_oneTime() {
   var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
   var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var FORTE_STATUS_COL = 10;
+  var FORTE_STATUS_COL = 11;
   var stamp = 'NO STK - 7/20/2026';
   var cell = forteSheet.getRange(4008, FORTE_STATUS_COL);
   cell.clearDataValidations();
@@ -2355,7 +2355,7 @@ function davidNoStk_XP1001000_Jul20_oneTime() {
 function davidNoStk_LF353DR_Jul21_oneTime() {
   var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
   var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var FORTE_STATUS_COL = 10;
+  var FORTE_STATUS_COL = 11;
   var stamp = 'NO STK - 7/21/2026';
   var cell = forteSheet.getRange(3813, FORTE_STATUS_COL);
   cell.clearDataValidations();
@@ -2371,7 +2371,7 @@ function davidNoStk_LF353DR_Jul21_oneTime() {
 function davidNoStk_NRF52840_Jul21_oneTime() {
   var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
   var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var FORTE_STATUS_COL = 10;
+  var FORTE_STATUS_COL = 11;
   var stamp = 'NO STK - 7/21/2026';
   var cell = forteSheet.getRange(4092, FORTE_STATUS_COL);
   cell.clearDataValidations();
@@ -2387,7 +2387,7 @@ function davidNoStk_NRF52840_Jul21_oneTime() {
 function davidNoStk_MT60B1G16HD_Jul21_oneTime() {
   var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
   var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var FORTE_STATUS_COL = 10;
+  var FORTE_STATUS_COL = 11;
   var stamp = 'NO STK - 7/21/2026';
   var cell = forteSheet.getRange(4103, FORTE_STATUS_COL);
   cell.clearDataValidations();
@@ -2403,7 +2403,7 @@ function davidNoStk_MT60B1G16HD_Jul21_oneTime() {
 function davidNoStk_PEX8724_Jul21_oneTime() {
   var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
   var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var FORTE_STATUS_COL = 10;
+  var FORTE_STATUS_COL = 11;
   var stamp = 'NO STK - 7/21/2026';
   var cell = forteSheet.getRange(4101, FORTE_STATUS_COL);
   cell.clearDataValidations();
