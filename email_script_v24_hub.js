@@ -1057,7 +1057,13 @@ function fastScanInbox() {
     tpCount++;
   });
 
-  var agentQ = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed -label:' + PENDING_LABEL + ' newer_than:3d -from:fortetechno.com ' + blockFilter;
+  // Bug 24 fix: require subject/sender keyword so consumer notification emails
+  // (receipts, order confirmations, restaurant alerts) are not sent to the AI worker.
+  var agentQ = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed -label:' + PENDING_LABEL +
+    ' newer_than:3d -from:fortetechno.com ' + blockFilter +
+    ' (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for"' +
+    ' OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts' +
+    ' OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend)';
   var agentCount = 0;
   gmailSearchREST(agentQ, 50).forEach(function(tid) {
     var meta = gmailGetThreadMeta_(tid);

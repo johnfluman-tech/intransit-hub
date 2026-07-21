@@ -1029,16 +1029,17 @@ async function handleEmailAgent(request, env) {
     } catch(auditErr) {}
   }
 
-  // IC Source duplicate guard (Bug 4): same MPN actioned within 30 min → no_action.
-  // IC Source buyers sometimes submit the same part 2-3× in rapid succession.
-  // MPN-only match is intentional — IC Source sender is always autosend@icsource.com.
-  if (decision.mpn && !['no_action','no_bid','remove_oem','forward_deb'].includes(decision.action)) {
+  // Bug 4 / Bug 23 fix: same THREAD+MPN actioned within 30 min → no_action.
+  // Guards against IC Source sending the same RFQ email 2-3× in rapid succession.
+  // Must check thread_id (not MPN alone) — different buyers RFQing the same MPN
+  // should each get their own response, not be suppressed as duplicates.
+  if (decision.mpn && thread_id && !['no_action','no_bid','remove_oem','forward_deb'].includes(decision.action)) {
     try {
       const { results: recentDec } = await env.DB.prepare(
         `SELECT id FROM agent_decisions
-         WHERE mpn = ? AND action NOT IN ('no_action','no_bid','remove_oem','forward_deb')
+         WHERE thread_id = ? AND mpn = ? AND action NOT IN ('no_action','no_bid','remove_oem','forward_deb')
          AND created_at > datetime('now', '-30 minutes') LIMIT 1`
-      ).bind(decision.mpn).all();
+      ).bind(thread_id, decision.mpn).all();
       if (recentDec && recentDec.length > 0) {
         decision.action      = 'no_action';
         decision.reasoning   = 'Duplicate suppressed — same MPN actioned within 30 minutes';
