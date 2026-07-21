@@ -2795,15 +2795,16 @@ function cleanSendNowTriggers() {
 
 function addonSendNetCom(e) {
   try {
-    // Delete any stale sendPleasePostNow triggers first to avoid hitting the add-on limit
-    ScriptApp.getProjectTriggers().forEach(function(t) {
-      if (t.getHandlerFunction() === 'sendPleasePostNow') {
-        ScriptApp.deleteTrigger(t);
-      }
+    // Queue via command queue — avoids trigger limit entirely.
+    // processCommandQueue (runs every 5 min) picks this up and calls sendPleasePostViaREST.
+    UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
+      method: 'POST', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ type: 'send_datamaster_email', data: {} }),
+      muteHttpExceptions: true
     });
-    ScriptApp.newTrigger('sendPleasePostNow').timeBased().after(5000).create();
     return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('✅ Sending NetCOMPONENTS email now (in a few seconds)...'))
+      .setNotification(CardService.newNotification().setText('✅ Queued — NetCOMPONENTS email sending within ~5 min'))
       .build();
   } catch(err) {
     return CardService.newActionResponseBuilder()
