@@ -2319,3 +2319,99 @@ function davidNoStk_Jul20_oneTime() {
     Logger.log('deletePart ' + item.mpn + ' → ' + result);
   });
 }
+
+function davidNoStk_FT232RL_Jul20_oneTime() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var FORTE_STATUS_COL = 10;
+  var stamp = 'NO STK - 7/20/2026';
+  var cell = forteSheet.getRange(4114, FORTE_STATUS_COL);
+  cell.clearDataValidations();
+  cell.setValue(stamp);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4114 (FT232RL-REEL)');
+  var result = deletePart('FT232RL-REEL', 'David no-stk Jul20');
+  Logger.log('deletePart FT232RL-REEL → ' + result);
+}
+
+function davidNoStk_XP1001000_Jul20_oneTime() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var FORTE_STATUS_COL = 10;
+  var stamp = 'NO STK - 7/20/2026';
+  var cell = forteSheet.getRange(4008, FORTE_STATUS_COL);
+  cell.clearDataValidations();
+  cell.setValue(stamp);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4008 (XP1001000-05R)');
+  var result = deletePart('XP1001000-05R', 'David no-stk Jul20');
+  Logger.log('deletePart XP1001000-05R → ' + result);
+}
+
+function davidNoStk_LF353DR_Jul21_oneTime() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var FORTE_STATUS_COL = 10;
+  var stamp = 'NO STK - 7/21/2026';
+  var cell = forteSheet.getRange(3813, FORTE_STATUS_COL);
+  cell.clearDataValidations();
+  cell.setValue(stamp);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 3813 (LF353DR)');
+  var result = deletePart('LF353DR', 'David no-stk Jul21');
+  Logger.log('deletePart LF353DR → ' + result);
+}
+
+function davidNoStk_NRF52840_Jul21_oneTime() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var FORTE_STATUS_COL = 10;
+  var stamp = 'NO STK - 7/21/2026';
+  var cell = forteSheet.getRange(4092, FORTE_STATUS_COL);
+  cell.clearDataValidations();
+  cell.setValue(stamp);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4092 (NRF52840-CKAA-R)');
+  var result = deletePart('NRF52840-CKAA-R', 'David no-stk Jul21');
+  Logger.log('deletePart NRF52840-CKAA-R → ' + result);
+}
+
+function davidNoStk_MT60B1G16HD_Jul21_oneTime() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var FORTE_STATUS_COL = 10;
+  var stamp = 'NO STK - 7/21/2026';
+  var cell = forteSheet.getRange(4103, FORTE_STATUS_COL);
+  cell.clearDataValidations();
+  cell.setValue(stamp);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4103 (MT60B1G16HD-64B:H)');
+  var result = deletePart('MT60B1G16HD-64B:H', 'David no-stk Jul21');
+  Logger.log('deletePart MT60B1G16HD-64B:H → ' + result);
+}
+
+function davidNoStk_PEX8724_Jul21_oneTime() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var FORTE_STATUS_COL = 10;
+  var stamp = 'NO STK - 7/21/2026';
+  var cell = forteSheet.getRange(4101, FORTE_STATUS_COL);
+  cell.clearDataValidations();
+  cell.setValue(stamp);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4101 (PEX8724-CA80BC)');
+  var result = deletePart('PEX8724-CA80BC', 'David no-stk Jul21');
+  Logger.log('deletePart PEX8724-CA80BC → ' + result);
+}

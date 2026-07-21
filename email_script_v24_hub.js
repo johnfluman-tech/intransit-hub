@@ -608,10 +608,11 @@ function deletePart(partNumber, emailSubject) {
 function checkDavidNoStockEmails() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) return;
-  // Query relies on in:inbox only — do NOT filter by INCOMING_LABEL here.
-  // John's Gmail filter auto-labels ALL David emails with oem-nostock-seen, so
-  // -label:oem-nostock-seen would exclude every David email and return 0 forever.
-  var query = 'from:' + DAVID_EMAIL + ' in:inbox';
+  // Bug 22 fix: John's Gmail filter skips inbox for ALL David emails (archives directly).
+  // 'in:inbox' therefore always returns 0. Use -label:oem-rfq-incoming-processed to skip
+  // already-processed threads, and newer_than:7d to bound the search.
+  // Do NOT use -label:oem-nostock-seen — that label is auto-applied to every David email.
+  var query = 'from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed newer_than:7d';
   var threadIds = gmailSearchREST(query, 20);
   hubLog('run', 'checkDavidNoStockEmails: ' + threadIds.length + ' thread(s)');
   if (!threadIds.length) return;
