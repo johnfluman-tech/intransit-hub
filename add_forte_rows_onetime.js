@@ -2272,6 +2272,20 @@ function deleteRAA2100404_Jul17() {
   Logger.log('deletePart RAA2100404GLGMD0 → ' + r);
 }
 
+// Jul 21 2026 — manual TP inbox processing
+
+function addForteH58G78CK8BX185_Jul21_oneTime() {
+  // Angel Morales / b2microtech.com | 150 pcs | TP $18 | draft r-2210928267753163323
+  var result = addToForteSheet('H58G78CK8BX185', 150, 18, 'US', '');
+  Logger.log('addToForteSheet H58G78CK8BX185 → ' + result);
+}
+
+function addForteIDT74LVC16245APVG_Jul21_oneTime() {
+  // Gareth Walters / GC Components Ltd (gccomponents.co.uk) | 560 pcs | TP $2 | draft r1248194306594367194
+  var result = addToForteSheet('IDT74LVC16245APVG', 560, 2, 'GB', '');
+  Logger.log('addToForteSheet IDT74LVC16245APVG → ' + result);
+}
+
 // ── msg_checking Forte entries Jul 20 2026 ───────────────────
 // 2 buyer TP replies processed manually. Drafts created via Gmail MCP.
 // Run once to add Forte entries.
