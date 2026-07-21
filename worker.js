@@ -661,6 +661,7 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 BILL EXT DEFINITION: A row is BILL EXT if its OEM notes field starts with or contains "BILL EXT" — this includes "BILL EXT 117", "BILL EXT 234", "BILL EXT 99 - OEM EXCESS! $500 MIN TP REQUIRED", etc. The number after "BILL EXT" is an internal code reference, not part of the classification. Any note containing "BILL EXT" as a prefix followed by anything (a number, a dash, more text) is a BILL EXT row. A note like "OEM EXCESS! $500 MIN TP REQUIRED" with NO "BILL EXT" prefix is NOT a BILL EXT row.
 - no_bid: Part not found in any inventory (oem_results AND in_stock_results both empty). If buyer gave an explicit TP → set draft_body to: "Thank you for your inquiry. Unfortunately, we are unable to source [MPN] at this time. We appreciate the opportunity and hope to work with you on future requirements." (replace [MPN] with the actual part number). If buyer gave NO TP → draft_body: null (silent no-bid).
 - remove_oem: (1) Email from David saying part has no stock → reply confirming removal. MPN format: "[MPN] #[num]" → before #; "#[num] [MPN]" → after #. NEVER use the issue number as MPN. (2) Email from bill.pratt@intransittech.com with "@John" + MPN → remove from OEM EXCESS and confirm to Bill. Set buyer_email = "bill.pratt@intransittech.com" so the draft goes to Bill, not the buyer.
+- ask_similar_mpn: Inventory has a close but not exact MPN (indicated by [SIMILAR_MPN] prefix). Ask buyer if they can use the available MPN before proceeding with any quote or TP request. Draft: "We have [INVENTORY_MPN] available — would you be able to use this part number? Please let us know and we will get back to you right away." Replace [INVENTORY_MPN] with the MPN from the [SIMILAR_MPN] note. No Forte entry, no TP check.
 - no_action: Internal thread, cancellation notice, Warehouse#3 operator email (Stan@amorelectronics.com), or already has "checking on it now" from John.
 - forward_deb: Payment advice / remittance from a bank or ERP → forward to deb@intransittech.com.
 
@@ -674,7 +675,8 @@ If the THREAD CONTENT starts with a line like:
 Do NOT try to re-extract TgtPrice or QtyReq from the messy plain text below — the Apps Script already did it correctly. The plain text from netCOMPONENTS collapses table columns together (e.g. "XFL4030-472MECCOIL1.00273810001.00") making values unreliable to parse. Trust [PARSED_RFQ] unconditionally.
 
 ## DECISION RULES (in priority order)
-DAVID NO-STK OVERRIDE (evaluate FIRST, before all rules below): If sender is david@fortetechno.com AND subject/body contains "no stk", "no stock", "cant share", "cant find", or similar → ALWAYS remove_oem. Set buyer_email = "david@fortetechno.com". Draft: "Ok, removed from listing." This fires regardless of oem_results content — even if oem_results has rows, David is confirming no stock and the part must be removed. Never request_tp_500 or no_bid for David no-stk emails.
+SIMILAR MPN OVERRIDE: If the message starts with [SIMILAR_MPN: ...], inventory has a close variant but NOT the exact MPN the buyer requested. Use action ask_similar_mpn immediately — do NOT apply TP checks, min line checks, or any other rule. Replace [INVENTORY_MPN] in the draft with the MPN shown in the [SIMILAR_MPN] note. forte_entry: null.
+DAVID NO-STK OVERRIDE (evaluate FIRST after SIMILAR MPN check, before all rules below): If sender is david@fortetechno.com AND subject/body contains "no stk", "no stock", "cant share", "cant find", or similar → ALWAYS remove_oem. Set buyer_email = "david@fortetechno.com". Draft: "Ok, removed from listing." This fires regardless of oem_results content — even if oem_results has rows, David is confirming no stock and the part must be removed. Never request_tp_500 or no_bid for David no-stk emails.
 0. in_stock_results present with rows whose notes do NOT contain "Warehouse#" → own_stock. Overrides everything except remove_oem, no_action, forward_deb. CRITICAL: own_stock REQUIRES non-empty in_stock_results. NEVER choose own_stock if in_stock_results is empty — use OEM rules (rules 1–4) instead. "This is Our Stock!" or similar text in OEM EXCESS notes is OUR listing label, NOT evidence of own physical inventory. Prior sent quotes (prior_quotes) showing this MPN was quoted before do NOT make it own_stock — only in_stock_results rows matter.
 0b. in_stock_results present where ALL rows have "Warehouse#" in their notes field (any external warehouse: Warehouse#3, Warehouse#4, etc.) + stan_results has a row with status "QUOTED" (case-insensitive — "Quoted", "quoted", and "QUOTED" all match) → stan_quoted. A row is external-warehouse if notes contains "Warehouse#". own_stock is ONLY for rows where notes do NOT contain "Warehouse#".
 0c. in_stock_results present with ONLY external-warehouse rows (all notes contain "Warehouse#") + stan_results empty/not-QUOTED → add_to_stan.
@@ -829,6 +831,25 @@ async function handleEmailAgent(request, env) {
     return json({ action: 'no_bid', reasoning: 'No inventory found for this MPN', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
   }
 
+  // Detect similar-but-not-exact MPN: e.g. buyer wants PMEG3020EJ, we have PMEG3020EJ115.
+  // Inject [SIMILAR_MPN] note so Haiku knows to ask the buyer before quoting.
+  let similarMpnNote = '';
+  if (requestMpn) {
+    const normFn = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const normReq = normFn(requestMpn);
+    const allInvMpns = [
+      ...(oem_results || []).map(r => r.mpn),
+      ...(in_stock_results || []).map(r => r.mpn),
+    ].filter(Boolean);
+    const hasExact = allInvMpns.some(m => normFn(m) === normReq);
+    if (!hasExact) {
+      const similar = [...new Set(allInvMpns.filter(m => isMpnMatch(requestMpn, m) && normFn(m) !== normReq))];
+      if (similar.length > 0) {
+        similarMpnNote = `[SIMILAR_MPN: buyer requested "${requestMpn}" but inventory has "${similar.join('", "')}" — ask buyer if they can use our available MPN]\n\n`;
+      }
+    }
+  }
+
   // Fetch lessons learned from John's past corrections — inject into every decision
   let lessonsBlock = '';
   try {
@@ -882,6 +903,7 @@ async function handleEmailAgent(request, env) {
       : `NETCOMPONENTS CHECK: Part searchable (apiId: ${ncResult.apiId}) but our listing row not found in result page\n\n`;
 
   const userMessage =
+    similarMpnNote +
     `EMAIL THREAD\nSubject: ${subject || '(none)'}\nSender: ${sender || '(unknown)'}\nCurrent labels: ${(current_labels || []).join(', ') || 'none'}\n\n` +
     `THREAD CONTENT:\n${thread_content || '(empty)'}\n\n` +
     `IN STOCK RESULTS:\n${JSON.stringify(in_stock_results || [], null, 2)}\n\n` +
