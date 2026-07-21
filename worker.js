@@ -823,6 +823,12 @@ async function handleEmailAgent(request, env) {
     in_stock_results = in_stock_results.filter(r => isMpnMatch(requestMpn, r.mpn));
   }
 
+  // Cost opt: skip all Claude calls when nothing is in inventory — result is always no_bid.
+  // Saves ~$1/day by eliminating ~60% of email-agent calls for parts not in our system.
+  if (oem_results.length === 0 && in_stock_results.length === 0 && stan_results.length === 0) {
+    return json({ action: 'no_bid', reasoning: 'No inventory found for this MPN', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+  }
+
   // Fetch lessons learned from John's past corrections — inject into every decision
   let lessonsBlock = '';
   try {
@@ -891,12 +897,16 @@ async function handleEmailAgent(request, env) {
     headers: {
       'x-api-key': env.CLAUDE_API_KEY,
       'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'prompt-caching-2024-07-31',
       'content-type': 'application/json',
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1000,
-      system: AGENT_SYSTEM_PROMPT + lessonsBlock,
+      system: [
+        { type: 'text', text: AGENT_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+        ...(lessonsBlock ? [{ type: 'text', text: lessonsBlock }] : []),
+      ],
       messages: [{ role: 'user', content: userMessage }],
     }),
   });
@@ -995,8 +1005,9 @@ async function handleEmailAgent(request, env) {
         `Is this decision correct? Find any mistakes.`;
       const auditRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 800, system: AUDIT_PROMPT,
+        headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'prompt-caching-2024-07-31', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 800,
+          system: [{ type: 'text', text: AUDIT_PROMPT, cache_control: { type: 'ephemeral' } }],
           messages: [{ role: 'user', content: auditMsg }] }),
       });
       const auditData = await auditRes.json();

@@ -6,3 +6,9 @@ node_modules/
 *.jpeg
 
 .env.local
+*env.local
+nc_cookies.txt
+nc_logon.html
+UsersflumaAppDataLocalTemp*
+add_forte_XC7A200T_Jul14.js
+create_inbox_drafts_Jul14.js
