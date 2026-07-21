@@ -608,47 +608,61 @@ function deletePart(partNumber, emailSubject) {
 function checkDavidNoStockEmails() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) return;
-  // Bug 22 fix: John's Gmail filter skips inbox for ALL David emails (archives directly).
-  // 'in:inbox' therefore always returns 0. Use -label:oem-rfq-incoming-processed to skip
-  // already-processed threads, and newer_than:7d to bound the search.
-  // Do NOT use -label:oem-nostock-seen — that label is auto-applied to every David email.
-  var query = 'from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed newer_than:7d';
-  var threadIds = gmailSearchREST(query, 20);
-  hubLog('run', 'checkDavidNoStockEmails: ' + threadIds.length + ' thread(s)');
-  if (!threadIds.length) return;
+  // Dual query: all-mail search (for Gmail-filtered/archived emails) + explicit inbox search
+  // (Gmail filter occasionally misses David emails, leaving them in inbox only).
+  // oem-rfq-incoming-processed is applied to ALL processed David threads (no-stk or not)
+  // so they're properly excluded on re-runs. oem-nostock-seen can't be used — Gmail filter
+  // auto-applies it to every David email regardless of processing status.
+  var seenIds = {};
+  var allIds = [];
+  var q1 = 'from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed newer_than:7d';
+  var q2 = 'in:inbox from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed';
+  gmailSearchREST(q1, 20).concat(gmailSearchREST(q2, 20)).forEach(function(tid) {
+    if (!seenIds[tid]) { seenIds[tid] = true; allIds.push(tid); }
+  });
+  hubLog('run', 'checkDavidNoStockEmails: ' + allIds.length + ' thread(s)');
+  if (!allIds.length) return;
   var noStkKeywords = ['no stk', 'no stock', 'stk sold', 'stock sold', 'cant find', 'cant share', 'cannot find', 'removed', 'no inventory'];
-  threadIds.forEach(function(tid) {
-    var thread = GmailApp.getThreadById(tid);
-    if (!thread) return;
-    var msg = thread.getMessages()[thread.getMessageCount() - 1];
-    var subject = msg.getSubject();
-    var subjectLower = subject.toLowerCase();
-    var bodySnippet = msg.getPlainBody().toLowerCase().substring(0, 300);
-    var isNoStk = noStkKeywords.some(function(kw) { return subjectLower.indexOf(kw) >= 0 || bodySnippet.indexOf(kw) >= 0; });
-    if (!isNoStk) return;
-    // Stamp Forte col K directly by row number extracted from subject (#XXXX)
-    // This runs before processThread so it always fires even if worker decision fails
-    var rowMatch = subject.match(/#(\d{3,5})/);
-    if (rowMatch) {
-      var forteRow = parseInt(rowMatch[1], 10);
-      try {
-        var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-        var statusCell = forteSheet.getRange(forteRow, FORTE_STATUS_COL + 1);
-        var currentVal = String(statusCell.getValue()).trim();
-        if (currentVal.toUpperCase().indexOf('NO STK') === -1 && currentVal.toUpperCase() !== 'CLOSED') {
-          var stamp = 'NO STK - ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
-          statusCell.clearDataValidations();
-          statusCell.setValue(stamp);
-          statusCell.setBackground('#000000'); statusCell.setFontColor('#FFFFFF'); statusCell.setFontWeight('bold');
-          hubLog('run', 'checkDavidNoStockEmails: stamped Forte row ' + forteRow + ' directly from subject', {});
-        }
-      } catch(e) {
-        hubLog('error', 'checkDavidNoStockEmails: Forte row stamp error row ' + forteRow + ': ' + e, {});
+  allIds.forEach(function(tid) {
+    try {
+      var thread = GmailApp.getThreadById(tid);
+      if (!thread) { gmailModifyThread_(tid, ['oem-rfq-incoming-processed'], []); return; }
+      var msg = thread.getMessages()[thread.getMessageCount() - 1];
+      var subject = msg.getSubject();
+      var subjectLower = subject.toLowerCase();
+      var bodySnippet = msg.getPlainBody().toLowerCase().substring(0, 300);
+      var isNoStk = noStkKeywords.some(function(kw) { return subjectLower.indexOf(kw) >= 0 || bodySnippet.indexOf(kw) >= 0; });
+      if (!isNoStk) {
+        // Not a no-stk — mark processed so it stops appearing in search results
+        gmailModifyThread_(tid, ['oem-rfq-incoming-processed'], []);
+        return;
       }
+      // Stamp Forte col K directly by row number extracted from subject (#XXXX)
+      // This runs before processThread so it always fires even if worker decision fails
+      var rowMatch = subject.match(/#(\d{3,5})/);
+      if (rowMatch) {
+        var forteRow = parseInt(rowMatch[1], 10);
+        try {
+          var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+          var statusCell = forteSheet.getRange(forteRow, FORTE_STATUS_COL + 1);
+          var currentVal = String(statusCell.getValue()).trim();
+          if (currentVal.toUpperCase().indexOf('NO STK') === -1 && currentVal.toUpperCase() !== 'CLOSED') {
+            var stamp = 'NO STK - ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+            statusCell.clearDataValidations();
+            statusCell.setValue(stamp);
+            statusCell.setBackground('#000000'); statusCell.setFontColor('#FFFFFF'); statusCell.setFontWeight('bold');
+            hubLog('run', 'checkDavidNoStockEmails: stamped Forte row ' + forteRow + ' directly from subject', {});
+          }
+        } catch(e) {
+          hubLog('error', 'checkDavidNoStockEmails: Forte row stamp error row ' + forteRow + ': ' + e, {});
+        }
+      }
+      try { processThread(thread); } catch(e) { hubLog('error', 'checkDavidNoStockEmails processThread error: ' + e, {}); }
+      gmailModifyThread_(tid, [INCOMING_LABEL, 'oem-rfq-incoming-processed'], []);
+      gmailArchiveThread_(tid);
+    } catch(e) {
+      hubLog('error', 'checkDavidNoStockEmails thread ' + tid + ' error: ' + e, {});
     }
-    try { processThread(thread); } catch(e) { hubLog('error', 'checkDavidNoStockEmails processThread error: ' + e, {}); }
-    gmailModifyThread_(tid, [INCOMING_LABEL], []);
-    gmailArchiveThread_(tid);
   });
 }
 

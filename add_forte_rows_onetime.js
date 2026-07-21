@@ -2415,3 +2415,32 @@ function davidNoStk_PEX8724_Jul21_oneTime() {
   var result = deletePart('PEX8724-CA80BC', 'David no-stk Jul21');
   Logger.log('deletePart PEX8724-CA80BC → ' + result);
 }
+
+// ONE-TIME — Run fixDavidNoStk_Jul21_Missed() to stamp Forte col K and delete from OEM EXCESS
+// for 2 no-stk emails missed by automation on Jul 21 2026:
+//   row 4027 → KLMAG1JETD-B041   row 4074 → PR-K-24
+function fixDavidNoStk_Jul21_Missed() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var stamp = 'NO STK - 7/21/2026';
+  var rows = [
+    { row: 4027, mpn: 'KLMAG1JETD-B041' },
+    { row: 4074, mpn: 'PR-K-24' },
+  ];
+  rows.forEach(function(r) {
+    var cell = sheet.getRange(r.row, 11); // col K = Status
+    var current = String(cell.getValue()).trim().toUpperCase();
+    if (current.indexOf('NO STK') === -1 && current !== 'CLOSED') {
+      cell.clearDataValidations();
+      cell.setValue(stamp);
+      cell.setBackground('#000000');
+      cell.setFontColor('#FFFFFF');
+      cell.setFontWeight('bold');
+      Logger.log('Stamped Forte row ' + r.row + ' (' + r.mpn + ')');
+    } else {
+      Logger.log('Skipped Forte row ' + r.row + ' (' + r.mpn + ') — already: ' + current);
+    }
+    var result = deletePart(r.mpn, 'David no-stk Jul21');
+    Logger.log('deletePart ' + r.mpn + ' → ' + result);
+  });
+}
