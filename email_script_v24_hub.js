@@ -789,7 +789,7 @@ function executeDecision(decision, thread) {
   var threadId = thread.getId();
   var subject = thread.getFirstMessageSubject();
   if (action === 'no_action') { thread.markRead(); return; }
-  if (action === 'no_bid' && !decision.draft_body) { thread.moveToArchive(); return; }
+  if (action === 'no_bid' && !decision.draft_body) { thread.markRead(); return; }
   if (action === 'remove_oem') {
     if (decision.oem_delete_row) {
       deleteOemRow(decision.oem_delete_row);
@@ -866,7 +866,7 @@ function executeDecision(decision, thread) {
       } catch(e) {}
     }
   }
-  if (action === 'no_bid') thread.moveToArchive();
+  if (action === 'no_bid') thread.markRead();
   if (decision._corrected_from) {
     try {
       GmailApp.sendEmail(NOTIFY_EMAIL,
