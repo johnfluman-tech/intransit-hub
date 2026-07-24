@@ -3017,3 +3017,27 @@ function davidNoStk_MIC5219_Jul24() {
   thread.addLabel(processedLabel);
   Logger.log('davidNoStk_MIC5219_Jul24 complete');
 }
+
+// ONE-TIME — Run noBid_NexGen_5PB1203_Jul24() to:
+//   Create no-bid decline draft for Courtney Hart (NexGen Digital) re: 5PB1203NTGK8.
+//   Buyer gave TP $150/ea on Jul 23 but MPN has zero inventory (OEM EXCESS, IN STOCK,
+//   Stan all empty). Automation early-exited silently; draft was never created.
+function noBid_NexGen_5PB1203_Jul24() {
+  var DECLINE = 'Thank you for your inquiry. Unfortunately, we are unable to source 5PB1203NTGK8 at this time.';
+  var threads = GmailApp.search('subject:"Request For Quotation #716128" from:courtneyh@nexgendigital.com', 0, 1);
+  if (!threads.length) {
+    // Fallback search
+    threads = GmailApp.search('"5PB1203NTGK8" from:courtneyh@nexgendigital.com newer_than:10d', 0, 1);
+  }
+  if (!threads.length) { Logger.log('ERROR: NexGen 5PB1203 thread not found'); return; }
+  var thread = threads[0];
+  var msgs = thread.getMessages();
+  Logger.log('Found NexGen thread: ' + thread.getId() + ' (' + msgs.length + ' messages)');
+  var origMsg = msgs[0];
+  var html = buildDraftHTML(DECLINE, origMsg);
+  var draftId = createThreadedDraft('courtneyh@nexgendigital.com',
+    'Re: Request For Quotation #716128 from COURTNEY HART at NexGen Digital Inc.',
+    html, msgs[msgs.length - 1].getId(), thread.getId(), null);
+  Logger.log('NexGen 5PB1203 no-bid draft: ' + draftId);
+  Logger.log('noBid_NexGen_5PB1203_Jul24 complete');
+}
