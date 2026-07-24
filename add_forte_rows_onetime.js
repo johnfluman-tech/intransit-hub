@@ -2382,6 +2382,23 @@ function davidNoStk_LF353DR_Jul21_oneTime() {
   Logger.log('deletePart LF353DR → ' + result);
 }
 
+function davidNoStk_TMC2130LAT_Jul21_oneTime() {
+  // David no-stk Jul 21 2026 | Forte row 4126 | OEM row 128241 | draft r-2986268434165399348
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var FORTE_STATUS_COL = 11;
+  var stamp = 'NO STK - 7/21/2026';
+  var cell = forteSheet.getRange(4126, FORTE_STATUS_COL);
+  cell.clearDataValidations();
+  cell.setValue(stamp);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4126 (TMC2130-LA-T)');
+  var result = deletePart('TMC2130-LA-T', 'David no-stk Jul21');
+  Logger.log('deletePart TMC2130-LA-T → ' + result);
+}
+
 function davidNoStk_NRF52840_Jul21_oneTime() {
   var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
   var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
@@ -2457,4 +2474,459 @@ function fixDavidNoStk_Jul21_Missed() {
     var result = deletePart(r.mpn, 'David no-stk Jul21');
     Logger.log('deletePart ' + r.mpn + ' → ' + result);
   });
+}
+
+// ── David no-stk Jul 23 2026 ──────────────────────────────────
+// 4 no-stock emails. Drafts created via Gmail MCP. Run once after sending drafts.
+// WG82574IT: two OEM rows (133758 WG82574IT + 133759 WG82574ITSLBAC) — both deleted.
+// XCF08PVOG48C: only OEM row 134509 deleted — Warehouse#3 in_stock + Stan sheet remain.
+// ST1S14PHR: David said "cant find" — Forte row 4050.
+function davidNoStk_Jul23_oneTime() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var FORTE_STATUS_COL = 11;
+  var stamp = 'NO STK - 7/23/2026';
+  var noStks = [
+    { row: 4061, mpn: 'WG82574IT' },         // draft r1737062218023755153
+    { row: 4071, mpn: 'XCF08PVOG48C' },       // draft r3962085168418600369
+    { row: 4143, mpn: 'TPS563200DDCR' },      // draft r-993498072531848844
+    { row: 4050, mpn: 'ST1S14PHR' },          // draft r9164791251273303786
+  ];
+  noStks.forEach(function(item) {
+    var cell = forteSheet.getRange(item.row, FORTE_STATUS_COL);
+    var cur = cell.getValue();
+    if (!cur || cur.toString().toUpperCase().indexOf('NO STK') === -1) {
+      cell.clearDataValidations();
+      cell.setValue(stamp);
+      cell.setBackground('#000000');
+      cell.setFontColor('#FFFFFF');
+      cell.setFontWeight('bold');
+      Logger.log('Stamped Forte row ' + item.row + ' (' + item.mpn + ')');
+    } else {
+      Logger.log('Row ' + item.row + ' already stamped: ' + cur);
+    }
+    var result = deletePart(item.mpn, 'David no-stk Jul23');
+    Logger.log('deletePart ' + item.mpn + ' → ' + result);
+  });
+  // WG82574IT has a second OEM row under the ITSLBAC suffix — delete that too
+  var r2 = deletePart('WG82574ITSLBAC', 'David no-stk Jul23');
+  Logger.log('deletePart WG82574ITSLBAC → ' + r2);
+}
+
+function davidNoStk_SMTPFLSM_Jul23_oneTime() {
+  // David subject said #4410 — typo, actual Forte row is 4110. OEM row 121422.
+  // draft r-3130590489834642135
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var cell = forteSheet.getRange(4110, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - 7/23/2026');
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4110 (SMTPFLSM-M3-0ET)');
+  var result = deletePart('SMTPFLSM-M3-0ET', 'David no-stk Jul23');
+  Logger.log('deletePart SMTPFLSM-M3-0ET → ' + result);
+}
+
+function addForte_S29AL016J70TFI020_Jul23_oneTime() {
+  // Marco Cioppa / EGBINC (mc@egbinc.com) | 2000 pcs | TP $1.40 | US | draft r5556359412410751531
+  var result = addToForteSheet('S29AL016J70TFI020', 2000, 1.40, 'US', '');
+  Logger.log('addToForteSheet S29AL016J70TFI020 → ' + result);
+}
+
+function davidNoStk_1410187_Jul23_oneTime() {
+  // David no-stk Jul 23 | Forte row 4147 | OEM row 31348 | draft r5087134358653736366
+  var forteSheet = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var cell = forteSheet.getRange(4147, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - 7/23/2026');
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4147 (1410187-3)');
+  var result = deletePart('1410187-3', 'David no-stk Jul23');
+  Logger.log('deletePart 1410187-3 → ' + result);
+}
+
+function addStanSheet_UDN2982LWT_Jul23_oneTime() {
+  // W3_CHECKING sent Jul 21 manually — Stan sheet entry was never added. Adding now.
+  // Vyrian (Nick Silver / Danny Godse) | 4 pcs | no TP | US
+  addToStanSheet('UDN2982LW-T', 'US', 4, '');
+  Logger.log('addToStanSheet UDN2982LW-T done');
+}
+
+function addForte_IRFB20N50KPBF_Jul23_oneTime() {
+  // Arpa Jane Diaz / Rebound Electronics (arpa.diaz@reboundeu.com) | 4000 pcs | TP $7 | AE
+  // draft r-5715563651057394236
+  var result = addToForteSheet('IRFB20N50KPBF', 4000, 7, 'AE', '');
+  Logger.log('addToForteSheet IRFB20N50KPBF → ' + result);
+}
+
+function davidNoStk_Jul22_sixparts_oneTime() {
+  // 6 David no-stk emails Jul 21-22
+  // MT25QU256ABA8E12-0AAT #3895 | OEM rows 105126 (BILL EXT) + 105127 | Jul 22
+  // 1217136-1 #4141             | OEM row 30490                         | Jul 22
+  // 553SCMGI8 #4139             | OEM row 44846                         | Jul 22
+  // MT46V32M16P-5BIT.J #4011   | OEM rows 105332+105333 (colon variant) | Jul 22
+  // EPM7032LC44-15T #4138       | OEM row 79910 (W3 rows untouched)     | Jul 22
+  // BZX84C13-7 #4131            | OEM row 69484 | David said 4131, Forte=4130 | Jul 21
+  var forte = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+
+  function stampNoStk(row, dateStr) {
+    var cell = forte.getRange(row, 11);
+    cell.clearDataValidations();
+    cell.setValue('NO STK - ' + dateStr);
+    cell.setBackground('#000000');
+    cell.setFontColor('#FFFFFF');
+    cell.setFontWeight('bold');
+    Logger.log('Stamped Forte row ' + row + ' NO STK ' + dateStr);
+  }
+
+  stampNoStk(3895, '7/22/2026');
+  Logger.log('deletePart MT25QU256ABA8E12-0AAT → ' + deletePart('MT25QU256ABA8E12-0AAT', 'David no-stk Jul22'));
+
+  stampNoStk(4141, '7/22/2026');
+  Logger.log('deletePart 1217136-1 → ' + deletePart('1217136-1', 'David no-stk Jul22'));
+
+  stampNoStk(4139, '7/22/2026');
+  Logger.log('deletePart 553SCMGI8 → ' + deletePart('553SCMGI8', 'David no-stk Jul22'));
+
+  stampNoStk(4011, '7/22/2026');
+  Logger.log('deletePart MT46V32M16P-5BIT:J → ' + deletePart('MT46V32M16P-5BIT:J', 'David no-stk Jul22'));
+
+  stampNoStk(4138, '7/22/2026');
+  Logger.log('deletePart EPM7032LC44-15T → ' + deletePart('EPM7032LC44-15T', 'David no-stk Jul22'));
+
+  stampNoStk(4130, '7/21/2026');
+  Logger.log('deletePart BZX84C13-7 → ' + deletePart('BZX84C13-7', 'David no-stk Jul21'));
+}
+
+function deleteOem_BillNoStock_Jul22_oneTime() {
+  // Bill email Jul 22 thread 19f8a910b81f6ba0 — OEM site denied sale on both parts
+  // ADIN1300CCPZ row 62243 — Bill said "site already denied the sale due to increased demand"
+  // MC68711E20CFNE2 row 100542 — BILL EXT 117, site denying since Mar 2026
+  // No active Forte entries for either — OEM deletion only, no col K stamp needed
+  Logger.log('deletePart ADIN1300CCPZ → ' + deletePart('ADIN1300CCPZ', 'Bill no-stock Jul22'));
+  Logger.log('deletePart MC68711E20CFNE2 → ' + deletePart('MC68711E20CFNE2', 'Bill no-stock Jul22'));
+}
+
+function davidNoStk_Jul23_threeparts_oneTime() {
+  // MX29F040CQI-70G #4065  | OEM row 106011                              | Jul 23
+  // IDT74LVC16245APVG #4128 | OEM row 86309                              | Jul 23
+  // ADUM1100ARZ-RL7 #4142   | OEM rows 62737 (BILL EXT 117) + 62738     | Jul 23
+  //   Note: row 62736 is ADUM1100ARZ (no -RL7 suffix) — NOT deleted
+  var forte = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  function stampNoStk(row, dateStr) {
+    var cell = forte.getRange(row, 11);
+    cell.clearDataValidations();
+    cell.setValue('NO STK - ' + dateStr);
+    cell.setBackground('#000000');
+    cell.setFontColor('#FFFFFF');
+    cell.setFontWeight('bold');
+    Logger.log('Stamped Forte row ' + row + ' NO STK ' + dateStr);
+  }
+  stampNoStk(4065, '7/23/2026');
+  Logger.log('deletePart MX29F040CQI-70G → ' + deletePart('MX29F040CQI-70G', 'David no-stk Jul23'));
+  stampNoStk(4128, '7/23/2026');
+  Logger.log('deletePart IDT74LVC16245APVG → ' + deletePart('IDT74LVC16245APVG', 'David no-stk Jul23'));
+  stampNoStk(4142, '7/23/2026');
+  Logger.log('deletePart ADUM1100ARZ-RL7 → ' + deletePart('ADUM1100ARZ-RL7', 'David no-stk Jul23'));
+}
+
+function deleteOem_BillNoStock_LMZ20502SIL_Jul23_oneTime() {
+  // Bill email Jul 23 — OEM retaining stock, site denied sale (multiple low offers)
+  // LMZ20502SILT row 92907 — BILL EXT 117
+  // No active Forte entry — OEM deletion only
+  Logger.log('deletePart LMZ20502SILT → ' + deletePart('LMZ20502SILT', 'Bill no-stock Jul23'));
+}
+
+function addForte_V3021SO8B_Jul23_oneTime() {
+  // Joe Drgastin / Sourceability — thread 19f903b27064c43e — Jul 23
+  // V3021SO8B — OEM row 132737, 5000 qty — TP $0.70, want all 5K — MOV $3,500
+  // MSG_CHECKING draft r-7923092174651251247 created
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/23/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, 'V3021SO8B', 5000, 0.70, '', 'US',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': V3021SO8B 5000 @0.70 US');
+}
+
+function fix_PCA82C250TYM_Jul23_oneTime() {
+  // 1. Delete wrong below_min_line draft for PCA82C250T/YM
+  // 2. Create correct MSG_CHECKING draft to mike@exacom.net
+  // 3. Add Forte entry: 5000 pcs, $0.60, KR
+  // Root cause: tpQ lost qty from Mike's TP reply (only said "$0.60/each", no qty) → below_min_line wrong
+
+  var SIG_HTML = '<br><br><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">Regards,</span></b></div>'
+    + '<div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">John Fluman</span></b></div>'
+    + '<div><b><span style="color:rgb(31,73,125);font-family:Arial,sans-serif;font-size:8pt">Intransit Technologies</span></b></div>'
+    + '<div><a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a></div>'
+    + '<div><i><span style="color:gray;font-family:Arial,sans-serif;font-size:7.5pt">An ISO 9001 Certified Company</span></i></div>'
+    + '<div><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:8pt">Toll (877) 677-5868 x101 - Local (949) 481-7935 x101</span></div>'
+    + '<br><div><span style="color:rgb(166,166,166);font-family:Calibri,sans-serif;font-size:8pt">The information contained in this communication and its attachment(s) is intended only for the use of the individual to whom it is addressed and may contain information that is privileged, confidential, or exempt from disclosure. If the reader of this message is not the intended recipient, you are hereby notified that any dissemination, distribution, or copying of this communication is strictly prohibited. If you have received this communication in error, please notify <a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a> and delete the communication without retaining any copies. Thank you.</span></div>';
+
+  // Delete wrong draft(s) for this thread
+  var wrongDrafts = GmailApp.search('in:drafts subject:"PCA82C250T" newer_than:3d');
+  wrongDrafts.forEach(function(t) {
+    var drafts = t.getMessages();
+    drafts.forEach(function(m) {
+      Logger.log('Checking draft subject: ' + m.getSubject());
+    });
+  });
+  // Use Drafts API to find and delete
+  var allDrafts = GmailApp.getDrafts();
+  allDrafts.forEach(function(d) {
+    var subj = d.getMessage().getSubject();
+    if (subj && subj.indexOf('PCA82C250T') !== -1) {
+      Logger.log('Deleting wrong draft: ' + subj + ' | id: ' + d.getId());
+      d.deleteDraft();
+    }
+  });
+
+  // Find the thread and reply to Mike's TP message
+  var threads = GmailApp.search('subject:"PCA82C250T/YM" newer_than:3d');
+  if (threads.length === 0) {
+    Logger.log('ERROR: PCA82C250T/YM thread not found');
+    return;
+  }
+  var thread = threads[0];
+  var messages = thread.getMessages();
+  var lastMsg = messages[messages.length - 1]; // Mike's TP reply
+
+  var body = 'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.' + SIG_HTML;
+  thread.createDraftReply(body, {htmlBody: body, to: 'mike@exacom.net'});
+  Logger.log('Created MSG_CHECKING draft for PCA82C250T/YM to mike@exacom.net');
+
+  // Add Forte: 5000 pcs, $0.60, KR
+  var forte = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var nextRow = forte.getLastRow() + 1;
+  forte.appendRow(['7/23/2026', 'PCA82C250T/YM', 5000, 0.60, '', 'KR',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': PCA82C250T/YM 5000 @0.60 KR');
+}
+
+function fix_MT41K128M16JT_Jul23_oneTime() {
+  // Create MSG_CHECKING draft for mamomo2025@126.com
+  // MT41K128M16JT-107IT:K — OEM row 105263, 12,571 qty — TP $6.00 — MOV $75,426
+  // tpQ may miss this if qty dropped; creating manually
+
+  var SIG_HTML = '<br><br><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">Regards,</span></b></div>'
+    + '<div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">John Fluman</span></b></div>'
+    + '<div><b><span style="color:rgb(31,73,125);font-family:Arial,sans-serif;font-size:8pt">Intransit Technologies</span></b></div>'
+    + '<div><a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a></div>'
+    + '<div><i><span style="color:gray;font-family:Arial,sans-serif;font-size:7.5pt">An ISO 9001 Certified Company</span></i></div>'
+    + '<div><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:8pt">Toll (877) 677-5868 x101 - Local (949) 481-7935 x101</span></div>'
+    + '<br><div><span style="color:rgb(166,166,166);font-family:Calibri,sans-serif;font-size:8pt">The information contained in this communication and its attachment(s) is intended only for the use of the individual to whom it is addressed and may contain information that is privileged, confidential, or exempt from disclosure. If the reader of this message is not the intended recipient, you are hereby notified that any dissemination, distribution, or copying of this communication is strictly prohibited. If you have received this communication in error, please notify <a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a> and delete the communication without retaining any copies. Thank you.</span></div>';
+
+  var threads = GmailApp.search('subject:"MT41K128M16JT" from:mamomo2025 newer_than:3d');
+  if (threads.length === 0) {
+    // fallback: search by subject only
+    threads = GmailApp.search('subject:"MT41K128M16JT-107IT" newer_than:3d');
+  }
+  if (threads.length === 0) {
+    Logger.log('ERROR: MT41K128M16JT thread not found');
+    return;
+  }
+  var thread = threads[0];
+
+  // Check if MSG_CHECKING already sent (avoid duplicate)
+  var messages = thread.getMessages();
+  var alreadySent = false;
+  messages.forEach(function(m) {
+    if (m.getFrom().indexOf('john.fluman@intransittech.com') !== -1
+        && m.getBody().indexOf('checking on it now') !== -1) {
+      alreadySent = true;
+    }
+  });
+  if (alreadySent) {
+    Logger.log('MSG_CHECKING already sent for MT41K128M16JT — skipping draft');
+  } else {
+    var body = 'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.' + SIG_HTML;
+    thread.createDraftReply(body, {htmlBody: body, to: 'mamomo2025@126.com'});
+    Logger.log('Created MSG_CHECKING draft for MT41K128M16JT-107IT:K to mamomo2025@126.com');
+  }
+
+  // Add Forte: 12571 pcs, $6.00, CN
+  var forte = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var nextRow = forte.getLastRow() + 1;
+  forte.appendRow(['7/23/2026', 'MT41K128M16JT-107IT:K', 12571, 6.00, '', 'CN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': MT41K128M16JT-107IT:K 12571 @6.00 CN');
+}
+
+function addForte_MT41K128M16JT107ITK_Jul23_oneTime() {
+  // mamomo2025@126.com — Jul 23 — MT41K128M16JT-107IT:K
+  // OEM row 105263, 12,571 qty, Micron — TP $6.00, 12,571 pcs — MOV $75,426
+  // MSG_CHECKING draft created manually (automation missed qty from TP reply)
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/23/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, 'MT41K128M16JT-107IT:K', 12571, 6.00, '', 'CN',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': MT41K128M16JT-107IT:K 12571 @6.00 CN');
+}
+
+function addForte_PCA82C250TYM_Mike_Jul23_oneTime() {
+  // Mike Jang / EXACOMNET (mike@exacom.net) — IC Source RFQ — Jul 23
+  // PCA82C250T/YM — OEM row 110120, 3,562 qty, NXP — TP $0.60, 5,000 qty — MOV $3,000
+  // below_min_line draft was WRONG (automation lost qty from TP reply) — MSG_CHECKING is correct
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/23/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, 'PCA82C250T/YM', 5000, 0.60, '', 'KR',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': PCA82C250T/YM 5000 @0.60 KR');
+}
+
+function addForte_809002_Nuri_Jul23_oneTime() {
+  // Nuri Hernandez / Freelance Electronics — thread 19f905b41a96fa14 — Jul 23
+  // 809-002 — OEM row 56420, GlenAir, 41,433 qty — TP $3.00, wants 1K/2K/4K — MOV $12,000
+  // MSG_CHECKING draft r5075105312012174954 created
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var today = '7/23/2026';
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([today, '809-002', 4000, 3.00, '', 'US',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': 809-002 4000 @3.00 US');
+}
+
+// ONE-TIME — Run fixMsgCheckingDrafts_Jul24() to:
+//   Add Forte entries for PCA82C250T/YM and HFS002TFM9X186N.
+//   MSG_CHECKING drafts were already created by fix-queue (items 3 & 5).
+//   This only handles the Forte sheet entries.
+function fixMsgCheckingDrafts_Jul24() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var today = '7/24/2026';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+
+  // PCA82C250T/YM — 5000 qty @ $0.60, EXACOMNET Co Ltd (US — verify country if needed)
+  var row1 = forteSheet.getLastRow() + 1;
+  forteSheet.appendRow([today, 'PCA82C250T/YM', 5000, 0.60, '', 'US',
+    '=C' + row1 + '*D' + row1, '', '', '', 'Open']);
+  Logger.log('PCA82C250T/YM Forte row ' + row1 + ' (5000 @$0.60 US)');
+
+  // HFS002TFM9X186N — 15 qty @ $300, A&K Electronics (US)
+  var row2 = forteSheet.getLastRow() + 1;
+  forteSheet.appendRow([today, 'HFS002TFM9X186N', 15, 300, '', 'US',
+    '=C' + row2 + '*D' + row2, '', '', '', 'Open']);
+  Logger.log('HFS002TFM9X186N Forte row ' + row2 + ' (15 @$300 US)');
+
+  Logger.log('fixMsgCheckingDrafts_Jul24 complete');
+}
+
+// ONE-TIME — Run fixSerendipityAndBill_Jul24() to:
+//   1. Create MSG_CHECKING draft for 35578195 → tom@serendipityelectronics.com
+//      Wrong request_tp_500 was created (1500 qty × $0.57 = $855 line value > $500 min).
+//      Add to Forte: 35578195, qty=1500, TP=$0.57, country=US
+//   2. Create "Ok, removed from listing." reply draft → Bill (MC68711E20CFNE2)
+//      Bill's Jul 22 @John email was never processed. Part is already gone from OEM EXCESS.
+function fixSerendipityAndBill_Jul24() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var MSG_CHECKING = 'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.';
+  var today = '7/24/2026';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+
+  // ── Thread 1: 35578195 (tom@serendipityelectronics.com) ────
+  var threads1 = GmailApp.search('subject:"RFQ from netCOMPONENTS Member (Serendipity Electronics | 35578195)"', 0, 1);
+  if (threads1.length) {
+    var thread1 = threads1[0];
+    var msgs1 = thread1.getMessages();
+    // Delete any existing wrong drafts for this thread
+    var allDrafts = GmailApp.getDrafts();
+    for (var d = 0; d < allDrafts.length; d++) {
+      try {
+        if (allDrafts[d].getMessage().getThread().getId() === thread1.getId()) {
+          allDrafts[d].deleteDraft();
+          Logger.log('Deleted wrong draft from 35578195 thread');
+        }
+      } catch(e2) {}
+    }
+    // Extract actual MPN from netCOMPONENTS email body
+    var body1 = msgs1[0].getPlainBody();
+    var mpnMatch = body1.match(/Part\s*(?:Number|#|No\.?)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\.\/]{2,40})/i)
+                || body1.match(/MPN\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\.\/]{2,40})/i)
+                || body1.match(/\[PARSED_RFQ:[^\]]*MPN=([^\s,\]]+)/i);
+    var actualMpn1 = mpnMatch ? mpnMatch[1].trim() : '35578195-UNKNOWN';
+    Logger.log('35578195 actual MPN: ' + actualMpn1);
+    Logger.log('35578195 body preview: ' + body1.substring(0, 500));
+
+    var origMsg1 = msgs1[0];
+    var html1 = buildDraftHTML(MSG_CHECKING, origMsg1);
+    var draftId1 = createThreadedDraft('tom@serendipityelectronics.com',
+      'Re: RFQ from netCOMPONENTS Member (Serendipity Electronics | 35578195)',
+      html1, msgs1[msgs1.length - 1].getId(), thread1.getId(), null);
+    Logger.log('35578195 MSG_CHECKING draft: ' + draftId1);
+
+    // Forte entry: qty=1500, TP=$0.57, country=US
+    var row1 = forteSheet.getLastRow() + 1;
+    forteSheet.appendRow([today, actualMpn1, 1500, 0.57, '', 'US',
+      '=C' + row1 + '*D' + row1, '', '', '', 'Open']);
+    Logger.log('35578195 Forte row ' + row1 + ' (' + actualMpn1 + ' 1500 @$0.57 US)');
+  } else {
+    Logger.log('ERROR: 35578195 thread not found');
+  }
+
+  // ── Thread 2: MC68711E20CFNE2 — reply to Bill ──────────────
+  // Bill said "We'll remove them asap. @John Fluman - MC68711E20CFNE2" on Jul 22
+  var threads2 = GmailApp.search('from:bill.pratt@intransittech.com MC68711E20CFNE2 newer_than:5d', 0, 1);
+  if (threads2.length) {
+    var thread2 = threads2[0];
+    var msgs2 = thread2.getMessages();
+    var lastMsg2 = msgs2[msgs2.length - 1];
+    var html2 = buildSimpleHTML('Ok, removed from listing.');
+    var draftId2 = createThreadedDraft('bill.pratt@intransittech.com',
+      'Re: ' + thread2.getFirstMessageSubject(),
+      html2, lastMsg2.getId(), thread2.getId(), null);
+    Logger.log('MC68711E20CFNE2 Bill reply draft: ' + draftId2);
+  } else {
+    Logger.log('ERROR: Bill MC68711E20CFNE2 thread not found');
+  }
+
+  Logger.log('fixSerendipityAndBill_Jul24 complete');
+}
+
+// ONE-TIME — Run fixGlobotechRFQ_Jul24() to:
+//   Force-create a request_tp_500 draft for Globotech Networks RFQ (MT62F4G32D8DV-023 WT:C).
+//   The thread got labeled oem-rfq-incoming-processed but never reached processThread
+//   (likely PENDING_LABEL cache miss in fastScanInbox).
+//   Sergio Ramirez, sergio@globotechnetworks.com — gave no target price.
+function fixGlobotechRFQ_Jul24() {
+  var TP_500 = 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.';
+  var threads = GmailApp.search('subject:"IC Source RFQ on MT62F4G32D8DV-023 WT:C from Globotech Networks Inc"', 0, 1);
+  if (!threads.length) {
+    Logger.log('ERROR: Globotech thread not found');
+    return;
+  }
+  var thread = threads[0];
+  var msgs = thread.getMessages();
+  Logger.log('Found Globotech thread: ' + thread.getId() + ' (' + msgs.length + ' messages)');
+
+  // Delete any existing wrong drafts
+  var allDrafts = GmailApp.getDrafts();
+  for (var d = 0; d < allDrafts.length; d++) {
+    try {
+      if (allDrafts[d].getMessage().getThread().getId() === thread.getId()) {
+        allDrafts[d].deleteDraft();
+        Logger.log('Deleted existing draft from Globotech thread');
+      }
+    } catch(e2) {}
+  }
+
+  var origMsg = msgs[0];
+  var html = buildDraftHTML(TP_500, origMsg);
+  var draftId = createThreadedDraft('sergio@globotechnetworks.com',
+    'Re: IC Source RFQ on MT62F4G32D8DV-023 WT:C from Globotech Networks Inc',
+    html, msgs[msgs.length - 1].getId(), thread.getId(), null);
+  Logger.log('Globotech request_tp_500 draft: ' + draftId);
+
+  // Ensure thread is marked so automation won't re-process it
+  var rfqLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
+  thread.addLabel(rfqLabel);
+  Logger.log('fixGlobotechRFQ_Jul24 complete');
 }

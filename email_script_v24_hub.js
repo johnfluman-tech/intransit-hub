@@ -1211,6 +1211,9 @@ function processFixQueue() {
           );
           if (!draftId) throw new Error('createThreadedDraft returned null');
 
+          // Ensure oem-tp-processed is on the thread so tpQ won't re-pick it
+          gmailModifyThread_(fix.thread_id, ['oem-tp-processed'], []);
+
           UrlFetchApp.fetch(HUB_URL + '/api/fix-queue/' + fix.id, {
             method: 'PATCH', contentType: 'application/json',
             headers: { Authorization: 'Bearer ' + HUB_SECRET },
