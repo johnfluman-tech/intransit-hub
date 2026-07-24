@@ -2978,3 +2978,42 @@ function fixLCMXO640C_Jul24() {
   }
   Logger.log('fixLCMXO640C_Jul24 complete');
 }
+
+// ONE-TIME — Run davidNoStk_MIC5219_Jul24() to:
+//   David email 7/24 "no stk" for MIC5219-3.3YML-TR #4152
+//   1. Stamp Forte row 4152 col E: "NO STK 7/24/2026"
+//   2. Delete OEM EXCESS row 102333
+//   3. Create "Ok, removed from listing." reply draft to david@fortetechno.com
+function davidNoStk_MIC5219_Jul24() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var OEM_SHEET_ID   = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var oemSheet   = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+
+  // 1. Stamp Forte row 4152 col E (col 5)
+  forteSheet.getRange(4152, 5).setValue('NO STK 7/24/2026');
+  Logger.log('Stamped Forte row 4152 col E: NO STK 7/24/2026');
+
+  // 2. Delete OEM EXCESS row 102333
+  oemSheet.deleteRow(102333);
+  Logger.log('Deleted OEM EXCESS row 102333 (MIC5219-3.3YML-TR)');
+
+  // 3. Find David thread and create reply draft
+  var threads = GmailApp.search('from:david@fortetechno.com MIC5219-3.3YML-TR newer_than:3d', 0, 1);
+  if (!threads.length) {
+    Logger.log('ERROR: David MIC5219-3.3YML-TR thread not found');
+    return;
+  }
+  var thread = threads[0];
+  var msgs = thread.getMessages();
+  var lastMsg = msgs[msgs.length - 1];
+  var html = buildSimpleHTML('Ok, removed from listing.');
+  var draftId = createThreadedDraft('david@fortetechno.com',
+    'Re: ' + thread.getFirstMessageSubject(),
+    html, lastMsg.getId(), thread.getId(), null);
+  Logger.log('David MIC5219-3.3YML-TR reply draft: ' + draftId);
+
+  var processedLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
+  thread.addLabel(processedLabel);
+  Logger.log('davidNoStk_MIC5219_Jul24 complete');
+}
