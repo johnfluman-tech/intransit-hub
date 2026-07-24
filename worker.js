@@ -120,6 +120,15 @@ export default {
       if (p === '/api/session-log'   && m === 'GET')  return handleSessionLog(env);
       if (p === '/api/smart-reply'   && m === 'POST') return handleSmartReply(request, env);
 
+      // Gmail API endpoints
+      if (p === '/api/gmail/search'  && m === 'GET')  return handleGmailSearch(url, env);
+      if (p === '/api/gmail/draft'   && m === 'POST') return handleGmailDraft(request, env);
+      if (p === '/api/gmail/label'   && m === 'POST') return handleGmailLabel(request, env);
+      const gmailThreadM = p.match(/^\/api\/gmail\/thread\/([^/]+)$/);
+      if (gmailThreadM && m === 'GET') return handleGetGmailThread(env, gmailThreadM[1]);
+      const gmailDraftDelM = p.match(/^\/api\/gmail\/draft\/([^/]+)$/);
+      if (gmailDraftDelM && m === 'DELETE') return handleDeleteGmailDraft(env, gmailDraftDelM[1]);
+
       return json({ error: 'Not found' }, 404);
     } catch (err) {
       return json({ error: err.message }, 500);
@@ -1818,4 +1827,144 @@ async function checkNetcomponentsListing(mpn, env) {
   } catch(e) {
     return null;
   }
+}
+
+// ── Gmail API ──────────────────────────────────────────────────────────────────
+
+const JOHN_FROM = 'John Fluman <john.fluman@intransittech.com>';
+const SIG_HTML = '<br><br><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">Regards,</span></b></div><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">John Fluman</span></b></div><div><b><span style="color:rgb(31,73,125);font-family:Arial,sans-serif;font-size:8pt">Intransit Technologies</span></b></div><div><a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a></div><div><i><span style="color:gray;font-family:Arial,sans-serif;font-size:7.5pt">An ISO 9001 Certified Company</span></i></div><div><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:8pt">Toll (877) 677-5868 x101 - Local (949) 481-7935 x101</span></div><br><div><span style="color:rgb(166,166,166);font-family:Calibri,sans-serif;font-size:8pt">The information contained in this communication and its attachment(s) is intended only for the use of the individual to whom it is addressed and may contain information that is privileged, confidential, or exempt from disclosure. If the reader of this message is not the intended recipient, you are hereby notified that any dissemination, distribution, or copying of this communication is strictly prohibited. If you have received this communication in error, please notify john.fluman@intransittech.com and delete the communication without retaining any copies. Thank you.</span></div>';
+
+async function getGmailToken(env) {
+  if (!env.GMAIL_CLIENT_ID || !env.GMAIL_REFRESH_TOKEN) throw new Error('Gmail secrets not configured');
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `client_id=${encodeURIComponent(env.GMAIL_CLIENT_ID)}&client_secret=${encodeURIComponent(env.GMAIL_CLIENT_SECRET)}&refresh_token=${encodeURIComponent(env.GMAIL_REFRESH_TOKEN)}&grant_type=refresh_token`
+  });
+  const d = await r.json();
+  if (!d.access_token) throw new Error('Gmail token failed: ' + JSON.stringify(d));
+  return d.access_token;
+}
+
+async function gmailGet(env, path) {
+  const token = await getGmailToken(env);
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me' + path, {
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  return r.json();
+}
+
+async function gmailPost(env, path, body) {
+  const token = await getGmailToken(env);
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me' + path, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return r.json();
+}
+
+function base64url(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function buildMime(to, subject, htmlBody, gmailMsgId) {
+  const lines = [
+    'From: ' + JOHN_FROM,
+    'To: ' + to,
+    'Subject: ' + subject,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=utf-8'
+  ];
+  if (gmailMsgId) {
+    lines.push('In-Reply-To: ' + gmailMsgId);
+    lines.push('References: ' + gmailMsgId);
+  }
+  return lines.join('\r\n') + '\r\n\r\n' + htmlBody;
+}
+
+// GET /api/gmail/search?q=...&maxResults=5
+async function handleGmailSearch(url, env) {
+  const q = url.searchParams.get('q');
+  if (!q) return json({ error: 'q required' }, 400);
+  const max = url.searchParams.get('maxResults') || '5';
+  const data = await gmailGet(env, '/threads?q=' + encodeURIComponent(q) + '&maxResults=' + max);
+  return json({ threads: (data.threads || []).map(t => ({ id: t.id, snippet: t.snippet })), total: data.resultSizeEstimate || 0 });
+}
+
+// GET /api/gmail/thread/:id  — returns message metadata (senders, subjects, Message-IDs)
+async function handleGetGmailThread(env, threadId) {
+  const data = await gmailGet(env, '/threads/' + threadId + '?format=METADATA&metadataHeaders=From,To,Subject,Message-ID,Date,Reply-To');
+  const messages = (data.messages || []).map(m => {
+    const h = {};
+    (m.payload?.headers || []).forEach(x => { h[x.name] = x.value; });
+    return { id: m.id, from: h['From'], to: h['To'], replyTo: h['Reply-To'], subject: h['Subject'], messageId: h['Message-ID'], date: h['Date'], labelIds: m.labelIds || [] };
+  });
+  return json({ threadId, messages });
+}
+
+// POST /api/gmail/draft
+// Body: { to, subject, body, thread_id?, search? }
+// If thread_id omitted, uses search to find the thread.
+async function handleGmailDraft(request, env) {
+  const { to, subject, body: draftBody, thread_id, search } = await request.json();
+  if (!to || !subject || !draftBody) return json({ error: 'to, subject, body required' }, 400);
+
+  let threadId = thread_id;
+  if (!threadId) {
+    if (!search) return json({ error: 'thread_id or search required' }, 400);
+    const sr = await gmailGet(env, '/threads?q=' + encodeURIComponent(search) + '&maxResults=1');
+    const first = (sr.threads || [])[0];
+    if (!first) return json({ error: 'No thread found for: ' + search }, 404);
+    threadId = first.id;
+  }
+
+  // Get last message's Message-ID header for proper Gmail threading
+  const thread = await gmailGet(env, '/threads/' + threadId + '?format=METADATA&metadataHeaders=Message-ID');
+  const msgs = thread.messages || [];
+  let gmailMsgId = null;
+  if (msgs.length) {
+    const last = msgs[msgs.length - 1];
+    const midH = (last.payload?.headers || []).find(h => h.name === 'Message-ID');
+    if (midH) gmailMsgId = midH.value;
+  }
+
+  const html = '<div>' + draftBody.replace(/\n/g, '<br>') + '</div>' + SIG_HTML;
+  const raw = base64url(buildMime(to, subject, html, gmailMsgId));
+  const created = await gmailPost(env, '/drafts', { message: { raw, threadId } });
+  if (created.error) return json({ error: created.error }, 500);
+  return json({ ok: true, draft_id: created.id, message_id: created.message?.id, thread_id: threadId });
+}
+
+// POST /api/gmail/label
+// Body: { thread_id, add: ['label-name'], remove: ['label-name'] }
+async function handleGmailLabel(request, env) {
+  const { thread_id, add = [], remove = [] } = await request.json();
+  if (!thread_id) return json({ error: 'thread_id required' }, 400);
+  const token = await getGmailToken(env);
+  const allLabels = await (await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', { headers: { 'Authorization': 'Bearer ' + token } })).json();
+  const labelMap = {};
+  (allLabels.labels || []).forEach(l => { labelMap[l.name] = l.id; });
+  async function resolveLabel(name) {
+    if (labelMap[name]) return labelMap[name];
+    const cr = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    return (await cr.json()).id || null;
+  }
+  const addIds    = (await Promise.all(add.map(resolveLabel))).filter(Boolean);
+  const removeIds = (await Promise.all(remove.map(resolveLabel))).filter(Boolean);
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/threads/' + thread_id + '/modify', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ addLabelIds: addIds, removeLabelIds: removeIds }) });
+  const d = await r.json();
+  if (d.error) return json({ error: d.error }, 500);
+  return json({ ok: true, thread_id: d.id });
+}
+
+// DELETE /api/gmail/draft/:draftId
+async function handleDeleteGmailDraft(env, draftId) {
+  const token = await getGmailToken(env);
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token } });
+  if (r.status === 204 || r.status === 200) return json({ ok: true });
+  return json({ error: 'delete failed', status: r.status }, 500);
 }
