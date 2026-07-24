@@ -3041,3 +3041,36 @@ function noBid_NexGen_5PB1203_Jul24() {
   Logger.log('NexGen 5PB1203 no-bid draft: ' + draftId);
   Logger.log('noBid_NexGen_5PB1203_Jul24 complete');
 }
+
+// ONE-TIME — Run msgChecking_Vivien_P2020_Jul24() to:
+//   Create MSG_CHECKING draft for Vivien/Rebound re: P2020NSE2KFC (item 1 of 4 in her RFQ).
+//   Vivien gave TP $100/ea. OEM EXCESS has 2800 qty. Line value >> $500 min.
+//   Forte skipped — row 3943 (Jun 29, TP=$55, US) is within 60 days.
+function msgChecking_Vivien_P2020_Jul24() {
+  var MSG_CHECKING = 'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.';
+  var threads = GmailApp.search('subject:"P2020NSE2KFC" from:vivien.teo@reboundeu.com newer_than:3d', 0, 1);
+  if (!threads.length) {
+    threads = GmailApp.search('"P2020NSE2KFC" from:vivien.teo@reboundeu.com newer_than:3d', 0, 1);
+  }
+  if (!threads.length) { Logger.log('ERROR: Vivien P2020NSE2KFC thread not found'); return; }
+  var thread = threads[0];
+  var msgs = thread.getMessages();
+  Logger.log('Found Vivien P2020 thread: ' + thread.getId() + ' (' + msgs.length + ' messages)');
+  // Delete any existing wrong drafts
+  var allDrafts = GmailApp.getDrafts();
+  for (var d = 0; d < allDrafts.length; d++) {
+    try {
+      if (allDrafts[d].getMessage().getThread().getId() === thread.getId()) {
+        allDrafts[d].deleteDraft();
+        Logger.log('Deleted existing draft from Vivien P2020 thread');
+      }
+    } catch(e) {}
+  }
+  var origMsg = msgs[0];
+  var html = buildDraftHTML(MSG_CHECKING, origMsg);
+  var draftId = createThreadedDraft('vivien.teo@reboundeu.com',
+    'Re: FW: (SM)22/7/2026 P2020NSE2KFC',
+    html, msgs[msgs.length - 1].getId(), thread.getId(), null);
+  Logger.log('Vivien P2020 MSG_CHECKING draft: ' + draftId);
+  Logger.log('msgChecking_Vivien_P2020_Jul24 complete');
+}
