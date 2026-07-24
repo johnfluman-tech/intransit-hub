@@ -1030,6 +1030,13 @@ function fastScanInbox() {
   var BLOCKED_DOMAINS = getBlockedDomains();
   var blockFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
 
+  // Pre-warm PENDING_LABEL via GmailApp so getLabelId_ always hits the in-memory cache.
+  // Without this: if gmailREST_('/labels') fails, getLabelId_(PENDING_LABEL) returns null,
+  // filter(Boolean) in gmailModifyThread_ silently drops it, and threads get
+  // oem-rfq-incoming-processed but NOT PENDING_LABEL — permanently orphaned.
+  var _plObj = GmailApp.getUserLabelByName(PENDING_LABEL) || GmailApp.createLabel(PENDING_LABEL);
+  _gmailLabelCache_[PENDING_LABEL] = _plObj.getId();
+
   // All label lookups via REST (cached in Script Properties — zero premium gmail quota cost)
   var rfqLabelId     = getLabelId_('oem-rfq-incoming-processed');
   var tpLabelId      = getLabelId_('oem-tp-processed');

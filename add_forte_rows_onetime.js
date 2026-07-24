@@ -2930,3 +2930,51 @@ function fixGlobotechRFQ_Jul24() {
   thread.addLabel(rfqLabel);
   Logger.log('fixGlobotechRFQ_Jul24 complete');
 }
+
+// ONE-TIME — Run fixLCMXO640C_Jul24() to:
+//   Create request_tp_500 drafts for two LCMXO640C-5TN100C threads that got no_action.
+//   Bug: AI saw John's Jun 26 reply (in a DIFFERENT thread) and applied no_action to
+//   fresh Jul 24 buyer submissions from Shenzhen Anmao Haoke (Coco). Part IS in OEM EXCESS.
+//   Thread IDs:
+//     netCOMPONENTS: 19f925afd13dfc33
+//     IC Source:     19f925e893804885
+function fixLCMXO640C_Jul24() {
+  var TP_500 = 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.';
+  var threadIds = ['19f925afd13dfc33', '19f925e893804885'];
+  var subjects  = [
+    'Re: RFQ from netCOMPONENTS Member (Shenzhen Anmao Haoke Elec. | LCMXO640C-5TN100C)',
+    'Re: IC Source RFQ on LCMXO640C-5TN100C from Shenzhen Anmao Haoke Electronics Co Ltd'
+  ];
+
+  for (var i = 0; i < threadIds.length; i++) {
+    var thread = GmailApp.getThreadById(threadIds[i]);
+    if (!thread) { Logger.log('Thread not found: ' + threadIds[i]); continue; }
+    var msgs = thread.getMessages();
+    var firstMsg = msgs[0];
+
+    // Get buyer email from Reply-To (works for both netCOMPONENTS and IC Source)
+    var replyTo = firstMsg.getReplyTo();
+    var buyerEmail = replyTo || firstMsg.getFrom();
+    // Strip display name if present (e.g. "Coco <coco@example.com>")
+    var emailMatch = buyerEmail.match(/<([^>]+)>/);
+    if (emailMatch) buyerEmail = emailMatch[1];
+    Logger.log('Thread ' + threadIds[i] + ' buyer email: ' + buyerEmail);
+
+    // Delete any existing drafts for this thread
+    var allDrafts = GmailApp.getDrafts();
+    for (var d = 0; d < allDrafts.length; d++) {
+      try {
+        if (allDrafts[d].getMessage().getThread().getId() === thread.getId()) {
+          allDrafts[d].deleteDraft();
+          Logger.log('Deleted existing draft from thread ' + threadIds[i]);
+        }
+      } catch(e2) {}
+    }
+
+    var html = buildDraftHTML(TP_500, firstMsg);
+    var draftId = createThreadedDraft(buyerEmail, subjects[i], html,
+      msgs[msgs.length - 1].getId(), thread.getId(), null);
+    Logger.log('LCMXO640C request_tp_500 draft created: ' + draftId + ' → ' + buyerEmail);
+  }
+  Logger.log('fixLCMXO640C_Jul24 complete');
+}
