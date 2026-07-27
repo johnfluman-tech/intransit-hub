@@ -46,6 +46,18 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
+    if (url.pathname === '/api/version') return json({ v: 'gmail-v1' });
+    if (url.pathname === '/api/gmail-token-test') {
+      try {
+        const r = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `client_id=${encodeURIComponent(env.GMAIL_CLIENT_ID)}&client_secret=${encodeURIComponent(env.GMAIL_CLIENT_SECRET)}&refresh_token=${encodeURIComponent(env.GMAIL_REFRESH_TOKEN)}&grant_type=refresh_token`
+        });
+        const text = await r.text();
+        return new Response(JSON.stringify({ status: r.status, body: text }), { headers: { 'Content-Type': 'application/json', ...CORS } });
+      } catch(e) { return new Response(JSON.stringify({ error: String(e) }), { headers: { 'Content-Type': 'application/json', ...CORS } }); }
+    }
 
     const auth = request.headers.get('Authorization') || '';
     if (auth !== `Bearer ${env.HUB_SECRET}`) return json({ error: 'Unauthorized' }, 401);
@@ -121,11 +133,15 @@ export default {
       if (p === '/api/smart-reply'   && m === 'POST') return handleSmartReply(request, env);
 
       // Gmail API endpoints
+      if (p === '/api/gmail/whoami'  && m === 'GET')  { const d = await gmailGet(env, '/profile'); return json(d); }
       if (p === '/api/gmail/search'  && m === 'GET')  return handleGmailSearch(url, env);
       if (p === '/api/gmail/draft'   && m === 'POST') return handleGmailDraft(request, env);
+      if (p === '/api/gmail/drafts'  && m === 'GET')  return handleListGmailDrafts(url, env);
       if (p === '/api/gmail/label'   && m === 'POST') return handleGmailLabel(request, env);
       const gmailThreadM = p.match(/^\/api\/gmail\/thread\/([^/]+)$/);
       if (gmailThreadM && m === 'GET') return handleGetGmailThread(env, gmailThreadM[1]);
+      const gmailMsgM = p.match(/^\/api\/gmail\/message\/([^/]+)$/);
+      if (gmailMsgM && m === 'GET') return handleGetGmailMessage(env, gmailMsgM[1]);
       const gmailDraftDelM = p.match(/^\/api\/gmail\/draft\/([^/]+)$/);
       if (gmailDraftDelM && m === 'DELETE') return handleDeleteGmailDraft(env, gmailDraftDelM[1]);
 
@@ -984,6 +1000,19 @@ async function handleEmailAgent(request, env) {
     }
   }
 
+  // Code-level guard: request_tp_* should never fire when own physical stock exists
+  // (in_stock rows with no Warehouse# in notes). Haiku sometimes returns request_tp instead
+  // of own_stock for these. Force to own_stock so Apps Script builds a proper quote draft.
+  if (['request_tp_500','request_tp_2000'].includes(decision.action) && Array.isArray(in_stock_results)) {
+    const ownStockRows = in_stock_results.filter(function(r) { return !/Warehouse#/i.test(r.notes || ''); });
+    if (ownStockRows.length > 0) {
+      decision._corrected_from    = decision.action;
+      decision._correction_reason = 'request_tp chosen but own physical stock rows exist — corrected to own_stock';
+      decision.action     = 'own_stock';
+      decision.draft_body = null; // Apps Script builds the quote using in_stock_results
+    }
+  }
+
   // Code-level guard: own_stock requires in_stock_results to have rows. If Haiku chose
   // own_stock but in_stock_results is empty, fall back to OEM rules.
   if (decision.action === 'own_stock' && (!Array.isArray(in_stock_results) || in_stock_results.length === 0)) {
@@ -1013,6 +1042,18 @@ async function handleEmailAgent(request, env) {
     decision.action     = has2kMin ? 'request_tp_2000' : 'request_tp_500';
     decision.draft_body = DRAFT_TEMPLATES[decision.action];
     decision.forte_entry = null;
+  }
+
+  // Code-level guard: request_tp_500 must be request_tp_2000 if any OEM row notes say $2,000 MIN.
+  // Haiku sometimes misses this even with the explicit prompt rule — this is the safety net.
+  if (decision.action === 'request_tp_500') {
+    const has2kMin = (oem_results || []).some(function(r) { return /\$2,000 MIN|2000 MIN/i.test(r.notes || ''); });
+    if (has2kMin) {
+      decision._corrected_from    = 'request_tp_500';
+      decision._correction_reason = 'OEM notes contain $2,000 MIN — upgraded to request_tp_2000';
+      decision.action     = 'request_tp_2000';
+      decision.draft_body = DRAFT_TEMPLATES.request_tp_2000;
+    }
   }
 
   // Auto-set oem_delete_row from lookup data so Apps Script just calls deleteOemRow(row)
@@ -1886,22 +1927,46 @@ function buildMime(to, subject, htmlBody, gmailMsgId) {
   return lines.join('\r\n') + '\r\n\r\n' + htmlBody;
 }
 
-// GET /api/gmail/search?q=...&maxResults=5
+// GET /api/gmail/search?q=...&maxResults=50
 async function handleGmailSearch(url, env) {
   const q = url.searchParams.get('q');
   if (!q) return json({ error: 'q required' }, 400);
-  const max = url.searchParams.get('maxResults') || '5';
+  const max = url.searchParams.get('maxResults') || url.searchParams.get('max') || '50';
   const data = await gmailGet(env, '/threads?q=' + encodeURIComponent(q) + '&maxResults=' + max);
-  return json({ threads: (data.threads || []).map(t => ({ id: t.id, snippet: t.snippet })), total: data.resultSizeEstimate || 0 });
+  if (data.error) return json({ error: data.error }, 500);
+  return json({ threads: (data.threads || []).map(t => ({ id: t.id, snippet: t.snippet || '' })), total: data.resultSizeEstimate || 0 });
+}
+
+// GET /api/gmail/message/:id  — returns full decoded text body of a single message
+async function handleGetGmailMessage(env, msgId) {
+  const data = await gmailGet(env, '/messages/' + msgId + '?format=full');
+  if (data.error) return json({ error: data.error }, 500);
+  function decodePart(part) {
+    if (!part) return '';
+    if (part.body && part.body.data) {
+      try {
+        const b64 = part.body.data.replace(/-/g, '+').replace(/_/g, '/');
+        const bin = atob(b64);
+        return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+      } catch(e) { return ''; }
+    }
+    if (part.parts) return part.parts.map(decodePart).join('\n');
+    return '';
+  }
+  const body = decodePart(data.payload);
+  const headers = {};
+  (data.payload?.headers || []).forEach(h => { headers[h.name] = h.value; });
+  return json({ id: msgId, subject: headers['Subject'], from: headers['From'], date: headers['Date'], body });
 }
 
 // GET /api/gmail/thread/:id  — returns message metadata (senders, subjects, Message-IDs)
 async function handleGetGmailThread(env, threadId) {
-  const data = await gmailGet(env, '/threads/' + threadId + '?format=METADATA&metadataHeaders=From,To,Subject,Message-ID,Date,Reply-To');
+  const qs = 'format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=Date&metadataHeaders=Reply-To&metadataHeaders=In-Reply-To';
+  const data = await gmailGet(env, '/threads/' + threadId + '?' + qs);
   const messages = (data.messages || []).map(m => {
     const h = {};
     (m.payload?.headers || []).forEach(x => { h[x.name] = x.value; });
-    return { id: m.id, from: h['From'], to: h['To'], replyTo: h['Reply-To'], subject: h['Subject'], messageId: h['Message-ID'], date: h['Date'], labelIds: m.labelIds || [] };
+    return { id: m.id, from: h['From'], to: h['To'], replyTo: h['Reply-To'], subject: h['Subject'], messageId: h['Message-ID'], date: h['Date'], labelIds: m.labelIds || [], snippet: m.snippet || '' };
   });
   return json({ threadId, messages });
 }
@@ -1967,4 +2032,13 @@ async function handleDeleteGmailDraft(env, draftId) {
   const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token } });
   if (r.status === 204 || r.status === 200) return json({ ok: true });
   return json({ error: 'delete failed', status: r.status }, 500);
+}
+
+// GET /api/gmail/drafts?maxResults=50&q=...
+async function handleListGmailDrafts(url, env) {
+  const max = url.searchParams.get('maxResults') || '50';
+  const q = url.searchParams.get('q') || '';
+  const qs = 'maxResults=' + max + (q ? '&q=' + encodeURIComponent(q) : '');
+  const data = await gmailGet(env, '/drafts?' + qs);
+  return json({ drafts: (data.drafts || []), total: data.resultSizeEstimate || 0 });
 }

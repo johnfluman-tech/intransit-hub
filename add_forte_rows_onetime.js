@@ -3074,3 +3074,67 @@ function msgChecking_Vivien_P2020_Jul24() {
   Logger.log('Vivien P2020 MSG_CHECKING draft: ' + draftId);
   Logger.log('msgChecking_Vivien_P2020_Jul24 complete');
 }
+
+
+// ── David no-stk Jul 25 2026 ──────────────────────────────────
+// XC7A100T-1CSG324C #4159 "Cant Share" — treated as no-stk.
+// OEM EXCESS row 134436 (88,110 qty, AMD/XILINX). Forte row 4159 (10k qty, $22, CN, Jul 24).
+// Draft r-2389177236764711124 created. Run once AFTER sending draft.
+function davidNoStk_XC7A100T_Jul25_oneTime() {
+  var forte = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var cell = forte.getRange(4159, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - 7/25/2026');
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4159 (XC7A100T-1CSG324C) NO STK 7/25/2026');
+  var result = deletePart('XC7A100T-1CSG324C', 'David Cant Share Jul25');
+  Logger.log('deletePart XC7A100T-1CSG324C → ' + result);
+}
+
+// ── David no-stk Jul 27 2026 ──────────────────────────────────────────────
+// TPSM53602RDAR #4165 "No stk". Draft r-4867931034280177833.
+// Run once AFTER sending draft.
+function davidNoStk_TPSM53602RDAR_Jul27_oneTime() {
+  var forte = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var cell = forte.getRange(4165, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - 7/27/2026');
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4165 (TPSM53602RDAR) NO STK 7/27/2026');
+  var result = deletePart('TPSM53602RDAR', 'David No Stk Jul27');
+  Logger.log('deletePart TPSM53602RDAR → ' + result);
+}
+
+// SS-52400-002 #3897 "No stock". Draft r2752614192755668097.
+// Run once AFTER sending draft.
+function davidNoStk_SS52400002_Jul27_oneTime() {
+  var forte = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var cell = forte.getRange(3897, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - 7/27/2026');
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 3897 (SS-52400-002) NO STK 7/27/2026');
+  var result = deletePart('SS-52400-002', 'David No Stk Jul27');
+  Logger.log('deletePart SS-52400-002 → ' + result);
+}
+
+// FAN3988IL6X-F113 #3995 "Cant share". Draft r937416321355505019.
+// Run once AFTER sending draft.
+function davidNoStk_FAN3988IL6XF113_Jul27_oneTime() {
+  var forte = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var cell = forte.getRange(3995, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - 7/27/2026');
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 3995 (FAN3988IL6X-F113) NO STK 7/27/2026');
+  var result = deletePart('FAN3988IL6X-F113', 'David Cant Share Jul27');
+  Logger.log('deletePart FAN3988IL6X-F113 → ' + result);
+}
