@@ -3138,3 +3138,78 @@ function davidNoStk_FAN3988IL6XF113_Jul27_oneTime() {
   var result = deletePart('FAN3988IL6X-F113', 'David Cant Share Jul27');
   Logger.log('deletePart FAN3988IL6X-F113 → ' + result);
 }
+
+// ── STM32F407VGT6 Han Taehoon (4 Star Electronics) — Jul 27 2026 ──────────
+// Han replied TP $2.00ea, qty "entire stk". OEM row 125091 (5728 qty).
+// MSG_CHECKING draft r-3809489007267612363. Run AFTER sending draft.
+function addForte_STM32F407VGT6_HanTaehoon_Jul27_oneTime() {
+  addToForteSheet('STM32F407VGT6', 5728, 2.00, 'US', '');
+  Logger.log('Added Forte: STM32F407VGT6, 5728 qty, $2.00 TP, US (Han Taehoon / 4 Star Electronics)');
+}
+
+// ── V3021SO8B Cote Caceres (A2 Global) — Jul 27 2026 ─────────────────────
+// Cote wants 500 pcs, TP $9. OEM row 132733 (5000 qty). US.
+// MSG_CHECKING draft r-6124318633614887874. Run AFTER sending draft.
+function addForte_V3021SO8B_Cote_Jul27_oneTime() {
+  addToForteSheet('V3021SO8B', 500, 9.00, 'US', '');
+  Logger.log('Added Forte: V3021SO8B, 500 qty, $9.00 TP, US (Cote Caceres / A2 Global Electronics)');
+}
+
+// ── David no-stk Jul 27 2026 — MSS5131-472MLC #4113 ─────────────────────
+// "Cant share". Draft r-4645057724332516527. Run AFTER sending draft.
+function davidNoStk_MSS5131472MLC_Jul27_oneTime() {
+  var forte = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var cell = forte.getRange(4113, 11);
+  cell.clearDataValidations();
+  cell.setValue('NO STK - 7/27/2026');
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row 4113 (MSS5131-472MLC) NO STK 7/27/2026');
+  var result = deletePart('MSS5131-472MLC', 'David Cant Share Jul27');
+  Logger.log('deletePart MSS5131-472MLC -> ' + result);
+}
+
+// ── 553SCMGI8 JICE ZHU (Standard International HK) — Jul 27 2026 ─────────
+// netCOMPONENTS RFQ, 1455 qty, TP $10. OEM row 44846 (1455 qty). CN.
+// MSG_CHECKING draft r4348453649121593184. Run AFTER sending draft.
+function addForte_553SCMGI8_JICEZHU_Jul27_oneTime() {
+  addToForteSheet('553SCMGI8', 1455, 10.00, 'CN', '');
+  Logger.log('Added Forte: 553SCMGI8, 1455 qty, $10.00 TP, CN (JICE ZHU / Standard International HK)');
+}
+
+// ── David no-stk Jul 27-28 2026 batch ────────────────────────────────────
+function davidNoStk_FEMDME004GA8A39_Jul28_oneTime() {
+  var f = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var c = f.getRange(4167,11); c.clearDataValidations(); c.setValue('NO STK - 7/28/2026');
+  c.setBackground('#000000'); c.setFontColor('#FFFFFF'); c.setFontWeight('bold');
+  Logger.log('Stamped 4167 FEMDME004G-A8A39'); Logger.log(deletePart('FEMDME004G-A8A39','David No Stk Jul28'));
+}
+function davidNoStk_71161490_Jul28_oneTime() {
+  var f = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var c = f.getRange(4173,11); c.clearDataValidations(); c.setValue('NO STK - 7/28/2026');
+  c.setBackground('#000000'); c.setFontColor('#FFFFFF'); c.setFontWeight('bold');
+  Logger.log('Stamped 4173 7116-1490'); Logger.log(deletePart('7116-1490','David No Stk Jul28'));
+}
+function davidNoStk_LIS2DW12TR_Jul28_oneTime() {
+  var f = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var c = f.getRange(4168,11); c.clearDataValidations(); c.setValue('NO STK - 7/28/2026');
+  c.setBackground('#000000'); c.setFontColor('#FFFFFF'); c.setFontWeight('bold');
+  Logger.log('Stamped 4168 LIS2DW12TR'); Logger.log(deletePart('LIS2DW12TR','David Cant Share Jul28'));
+}
+function davidNoStk_STM32H742VIT6_Jul28_oneTime() {
+  var f = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
+  var c = f.getRange(4147,11); c.clearDataValidations(); c.setValue('NO STK - 7/28/2026');
+  c.setBackground('#000000'); c.setFontColor('#FFFFFF'); c.setFontWeight('bold');
+  Logger.log('Stamped 4147 STM32H742VIT6'); Logger.log(deletePart('STM32H742VIT6','David No Stk Jul28'));
+}
+
+// ── Forte entries after sending MSG_CHECKING drafts ───────────────────────
+function addForte_NSVBAS21AHT1G_Florian_Jul28_oneTime() {
+  addToForteSheet('NSVBAS21AHT1G', 33000, 3.00, 'DE', '');
+  Logger.log('Forte: NSVBAS21AHT1G 33000qty $3 DE (Florian Peinecke / PEF Components)');
+}
+function addForte_PDT012A0X3SRZ_Nikka_Jul28_oneTime() {
+  addToForteSheet('PDT012A0X3-SRZ', 600, 17.00, 'GB', '');
+  Logger.log('Forte: PDT012A0X3-SRZ 600qty $17 GB (Nikka Gaffud / Rebound EU)');
+}
