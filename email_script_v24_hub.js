@@ -1070,7 +1070,8 @@ function fastScanInbox() {
     ' newer_than:3d -from:fortetechno.com ' + blockFilter +
     ' (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for"' +
     ' OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts' +
-    ' OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend)';
+    ' OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend' +
+    ' OR quotation OR "looking for" OR "please quote" OR "please check" OR "can you quote" OR "provide the price")';
   var agentCount = 0;
   gmailSearchREST(agentQ, 50).forEach(function(tid) {
     var meta = gmailGetThreadMeta_(tid);

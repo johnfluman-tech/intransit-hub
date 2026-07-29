@@ -3214,65 +3214,6 @@ function addForte_PDT012A0X3SRZ_Nikka_Jul28_oneTime() {
   Logger.log('Forte: PDT012A0X3-SRZ 600qty $17 GB (Nikka Gaffud / Rebound EU)');
 }
 
-// ── David no-stks Jul 28 2026 (batch 2) ──────────────────────────────────────
-function davidNoStk_TS3L501ERUAR_Jul28_oneTime() {
-  var f = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
-  var c = f.getRange(4178,11); c.clearDataValidations(); c.setValue('NO STK - 7/28/2026');
-  c.setBackground('#000000'); c.setFontColor('#FFFFFF'); c.setFontWeight('bold');
-  Logger.log('Stamped 4178 TS3L501ERUAR'); Logger.log(deletePart('TS3L501ERUAR','David No Stk Jul28'));
-  var thread = GmailApp.getThreadById('19faa145e7bef04e');
-  var lastMsg = thread.getMessages()[thread.getMessageCount()-1];
-  lastMsg.createDraftReply('', { htmlBody: buildSimpleHTML('Ok, removed from listing.') });
-  Logger.log('Draft created: TS3L501ERUAR reply to David');
-}
-function davidNoStk_CSD95410RRB_Jul28_oneTime() {
-  var f = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
-  var c = f.getRange(4176,11); c.clearDataValidations(); c.setValue('NO STK - 7/28/2026');
-  c.setBackground('#000000'); c.setFontColor('#FFFFFF'); c.setFontWeight('bold');
-  Logger.log('Stamped 4176 CSD95410RRB'); Logger.log(deletePart('CSD95410RRB','David No Stk Jul28'));
-  var thread = GmailApp.getThreadById('19fa95568560a7ee');
-  var lastMsg = thread.getMessages()[thread.getMessageCount()-1];
-  lastMsg.createDraftReply('', { htmlBody: buildSimpleHTML('Ok, removed from listing.') });
-  Logger.log('Draft created: CSD95410RRB reply to David');
-}
-function davidNoStk_MT46V32M16P_Jul28_oneTime() {
-  var f = SpreadsheetApp.openById('1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4').getSheets()[0];
-  var c = f.getRange(4011,11); c.clearDataValidations(); c.setValue('NO STK - 7/28/2026');
-  c.setBackground('#000000'); c.setFontColor('#FFFFFF'); c.setFontWeight('bold');
-  Logger.log('Stamped 4011 MT46V32M16P-5BIT.J'); Logger.log(deletePart('MT46V32M16P-5BIT.J','David No Stk Jul28'));
-  var thread = GmailApp.getThreadById('19fa92d4a888a19f');
-  var lastMsg = thread.getMessages()[thread.getMessageCount()-1];
-  lastMsg.createDraftReply('', { htmlBody: buildSimpleHTML('Ok, removed from listing.') });
-  Logger.log('Draft created: MT46V32M16P-5BIT.J reply to David');
-}
-
-// ── Request TP drafts — missed by automation (bare MPN subjects / query gap) ─
-function draftRequestTP_Karen_STM32F030C8T6TR_Jul28_oneTime() {
-  var thread = GmailApp.getThreadById('19fac02a0987afd3');
-  var lastMsg = thread.getMessages()[thread.getMessageCount()-1];
-  var tp500 = 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.';
-  lastMsg.createDraftReply('', { htmlBody: buildSimpleHTML(tp500) });
-  var lbl = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
-  thread.addLabel(lbl);
-  Logger.log('Draft + label: STM32F030C8T6TR Karen request_tp_500');
-}
-function draftRequestTP_TonyG_82651000_Jul28_oneTime() {
-  var thread = GmailApp.getThreadById('19faa7dc2f245774');
-  var lastMsg = thread.getMessages()[thread.getMessageCount()-1];
-  var tp500 = 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.';
-  lastMsg.createDraftReply('', { htmlBody: buildSimpleHTML(tp500) });
-  var lbl = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
-  thread.addLabel(lbl);
-  Logger.log('Draft + label: 82651000 TonyG request_tp_500');
-}
-function draftRequestTP_JasonDunn_V3021SO8B_Jul28_oneTime() {
-  var thread = GmailApp.getThreadById('19fa9009ccbbf4d6');
-  var msgs = thread.getMessages();
-  var lastMsg = msgs[msgs.length-1];
-  var tp500 = 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.';
-  var htmlBody = buildSimpleHTML(tp500);
-  var draftId = createThreadedDraft('jdunn@svtsupplychain.com', 'Re: RFQ from netCOMPONENTS Member (SVT | V3021SO8B)', htmlBody, lastMsg.getId(), thread.getId(), null);
-  var lbl = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
-  thread.addLabel(lbl);
-  Logger.log('Draft + label: V3021SO8B Jason Dunn SVT request_tp_500 | draftId=' + draftId);
-}
+// Jul 28 batch 2 David no-stks + RFQ drafts handled directly via worker Gmail API.
+// OEM deletions + Forte stamps queued via /api/command-queue (remove_oem_mpn IDs 60-62).
+// Drafts created: TS3L501ERUAR, CSD95410RRB, MT46V32M16P-5BIT.J (David), STM32F030C8T6TR, 82651000, V3021SO8B.
