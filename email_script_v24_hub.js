@@ -1285,6 +1285,22 @@ function processCommandQueue() {
           updateForteSheet(mpn);
           hubLog('inventory', 'Hub command: removed ' + mpn + ' from OEM EXCESS (result: ' + result + ')', { mpn: mpn, result: result });
 
+        } else if (cmd.type === 'add_forte_entry') {
+          var mpn = (data.mpn || '').trim();
+          var qty = data.qty;
+          var tp  = data.tp || '';
+          var country = (data.country || '').trim();
+          if (!mpn) throw new Error('add_forte_entry: mpn required');
+          if (!qty)  throw new Error('add_forte_entry: qty required — cardinal rule');
+          var existing = checkForteForMPN(mpn, 60);
+          var hasRecent = existing.some(function(r){ return r.recent && r.status.toLowerCase() !== 'closed'; });
+          if (hasRecent) {
+            hubLog('run', 'add_forte_entry: 60-day skip for ' + mpn, {});
+          } else {
+            addToForteSheet(mpn, qty, tp, country, '');
+            hubLog('inventory', 'add_forte_entry: ' + mpn + ' qty=' + qty + ' tp=' + tp + ' ' + country, { mpn: mpn, qty: qty, tp: tp, country: country });
+          }
+
         } else if (cmd.type === 'delete_draft') {
           var draftId = (data.draft_id || '').trim();
           if (!draftId) throw new Error('No draft_id provided');

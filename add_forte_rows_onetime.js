@@ -3218,8 +3218,4 @@ function addForte_PDT012A0X3SRZ_Nikka_Jul28_oneTime() {
 // OEM deletions + Forte stamps queued via /api/command-queue (remove_oem_mpn IDs 60-62).
 // Drafts created: TS3L501ERUAR, CSD95410RRB, MT46V32M16P-5BIT.J (David), STM32F030C8T6TR, 82651000, V3021SO8B.
 
-// ── V3021SO8B — Jason Dunn / SVT Supply Chain — TP reply $3.75 x 5000 US ──
-function addForte_V3021SO8B_JasonDunn_Jul28_oneTime() {
-  addToForteSheet('V3021SO8B', 5000, 3.75, 'US', '');
-  Logger.log('Forte: V3021SO8B 5000qty $3.75 US (Jason Dunn / SVT Supply Chain)');
-}
+// V3021SO8B Forte handled via command-queue ID 63 (add_forte_entry) — no manual run needed.
