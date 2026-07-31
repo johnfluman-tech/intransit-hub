@@ -696,8 +696,9 @@ If the THREAD CONTENT starts with a line like:
 …this was extracted from the HTML table by the Apps Script parser and is 100% accurate. Use it directly:
 - TgtPrice=<number> → buyer gave TP equal to that number (positive = valid TP, treat as msg_checking or bill_handle as applicable)
 - TgtPrice=blank → buyer gave NO TP → check oem_results notes FIRST: if any row's notes contain "$2,000 MIN" or "2000 MIN" → request_tp_2000. Otherwise → request_tp_500.
+- TgtPrice ABSENT (field not present in [PARSED_RFQ] at all, e.g. "[PARSED_RFQ: QtyReq=1000]") → the original netCOMPONENTS table had no TP column. Read the thread messages normally to determine whether the buyer has since given a TP (e.g. in their reply to our TP request). Do NOT assume "no TP" — look at the thread content.
 - QtyReq=<number> → buyer requested that quantity
-Do NOT try to re-extract TgtPrice or QtyReq from the messy plain text below — the Apps Script already did it correctly. The plain text from netCOMPONENTS collapses table columns together (e.g. "XFL4030-472MECCOIL1.00273810001.00") making values unreliable to parse. Trust [PARSED_RFQ] unconditionally.
+Do NOT try to re-extract TgtPrice or QtyReq from the messy plain text below — the Apps Script already did it correctly. The plain text from netCOMPONENTS collapses table columns together (e.g. "XFL4030-472MECCOIL1.00273810001.00") making values unreliable to parse. Trust [PARSED_RFQ] unconditionally for any field it DOES contain.
 
 ## DECISION RULES (in priority order)
 SIMILAR MPN OVERRIDE: If the message starts with [SIMILAR_MPN: ...], inventory has a close variant but NOT the exact MPN the buyer requested. Use action ask_similar_mpn immediately — do NOT apply TP checks, min line checks, or any other rule. Replace [INVENTORY_MPN] in the draft with the MPN shown in the [SIMILAR_MPN] note. forte_entry: null.
@@ -1118,14 +1119,16 @@ async function handleEmailAgent(request, env) {
   // should each get their own response, not be suppressed as duplicates.
   if (decision.mpn && thread_id && !['no_action','no_bid','remove_oem','forward_deb'].includes(decision.action)) {
     try {
+      // Only suppress if the SAME action repeated within 30 min (e.g. IC Source sending dupe RFQs).
+      // Do NOT suppress when the action changes (e.g. request_tp_500 → msg_checking after buyer replies).
       const { results: recentDec } = await env.DB.prepare(
         `SELECT id FROM agent_decisions
-         WHERE thread_id = ? AND mpn = ? AND action NOT IN ('no_action','no_bid','remove_oem','forward_deb')
+         WHERE thread_id = ? AND mpn = ? AND action = ?
          AND created_at > datetime('now', '-30 minutes') LIMIT 1`
-      ).bind(thread_id, decision.mpn).all();
+      ).bind(thread_id, decision.mpn, decision.action).all();
       if (recentDec && recentDec.length > 0) {
         decision.action      = 'no_action';
-        decision.reasoning   = 'Duplicate suppressed — same MPN actioned within 30 minutes';
+        decision.reasoning   = 'Duplicate suppressed — same action repeated within 30 minutes';
         decision.draft_body  = null;
         decision.forte_entry = null;
       }
@@ -1253,7 +1256,7 @@ async function handlePostIssue(request, env) {
 const AUDIT_PROMPT = `You are a STRICT AUDITOR reviewing an AI email agent decision for Intransit Technologies (OEM excess electronic component distributor). Your job is to FIND MISTAKES — not confirm correctness. Be adversarial and precise.
 
 PARSED DATA (authoritative — trust over plain text):
-If thread_content starts with "[PARSED_RFQ: QtyReq=..., TgtPrice=...]" this was extracted from the HTML table by the Apps Script parser and is 100% accurate. TgtPrice=<positive number> means buyer DID give TP. TgtPrice=blank means buyer gave NO TP. Do NOT try to re-extract from the garbled plain text — trust [PARSED_RFQ] unconditionally when present.
+If thread_content starts with "[PARSED_RFQ: QtyReq=..., TgtPrice=...]" this was extracted from the HTML table by the Apps Script parser and is 100% accurate. TgtPrice=<positive number> means buyer DID give TP. TgtPrice=blank means buyer gave NO TP. TgtPrice ABSENT (field not in [PARSED_RFQ] at all) means the netcomp table had no TP — read the thread messages to find buyer's TP if given in a later reply. Do NOT try to re-extract QtyReq from the garbled plain text — trust [PARSED_RFQ] unconditionally for any field it contains.
 
 KEY RULES TO VERIFY:
 1. ACTION: own_stock if in_stock rows exist with notes NOT containing "Warehouse#" (own inventory). add_to_stan if ALL in_stock rows have "Warehouse#" in notes (external warehouse — Warehouse#3, Warehouse#4, etc.) and stan_results not QUOTED. stan_quoted if ALL in_stock rows are "Warehouse#" and stan_results has QUOTED entry. msg_checking if OEM + buyer TP + at least one non-BILL-EXT row. request_tp_500 if OEM + NO buyer TP — buyers commonly say "no target" on first email; we always ask anyway. bill_handle ONLY if ALL OEM rows are BILL EXT AND buyer gave an explicit dollar TP. no_bid if nothing in any inventory.

@@ -946,7 +946,14 @@ function processThread(thread) {
 
   var parsedRFQ = extractNetcompRFQ(messages);
   if (parsedRFQ) {
-    content = '[PARSED_RFQ: QtyReq=' + parsedRFQ.qtyReq + ', TgtPrice=' + (parsedRFQ.tgtPrice !== null ? parsedRFQ.tgtPrice : '') + ']\n' + content;
+    // Only include TgtPrice when the netcomp table actually had one.
+    // If TgtPrice is null (blank in table), omit it so the worker reads
+    // the buyer's TP from later messages (e.g. their reply to our TP request)
+    // rather than treating a missing table value as "no TP given."
+    var rLine = '[PARSED_RFQ: QtyReq=' + parsedRFQ.qtyReq;
+    if (parsedRFQ.tgtPrice !== null) rLine += ', TgtPrice=' + parsedRFQ.tgtPrice;
+    rLine += ']';
+    content = rLine + '\n' + content;
   }
 
   var mpnHint = extractMPNFromSubject(subject) || extractMPN(subject);
