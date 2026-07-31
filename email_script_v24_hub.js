@@ -615,14 +615,15 @@ function checkDavidNoStockEmails() {
   // auto-applies it to every David email regardless of processing status.
   var seenIds = {};
   var allIds = [];
-  var q1 = 'from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed newer_than:7d';
+  var q1 = 'from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed newer_than:14d';
   var q2 = 'in:inbox from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed';
-  gmailSearchREST(q1, 20).concat(gmailSearchREST(q2, 20)).forEach(function(tid) {
+  gmailSearchREST(q1, 50).concat(gmailSearchREST(q2, 50)).forEach(function(tid) {
     if (!seenIds[tid]) { seenIds[tid] = true; allIds.push(tid); }
   });
   hubLog('run', 'checkDavidNoStockEmails: ' + allIds.length + ' thread(s)');
   if (!allIds.length) return;
-  var noStkKeywords = ['no stk', 'no stock', 'stk sold', 'stock sold', 'cant find', 'cant share', 'cannot find', 'removed', 'no inventory'];
+  var noStkKeywords = ['no stk', 'no stock', 'stk sold', 'stock sold', 'cant find', 'cant share', 'cannot find', 'removed', 'no inventory',
+                       'sold lying commie', 'soly lying commie', 'lying commie', 'sold out', 'all sold', 'no longer have'];
   allIds.forEach(function(tid) {
     try {
       var thread = GmailApp.getThreadById(tid);
