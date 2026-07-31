@@ -3219,3 +3219,83 @@ function addForte_PDT012A0X3SRZ_Nikka_Jul28_oneTime() {
 // Drafts created: TS3L501ERUAR, CSD95410RRB, MT46V32M16P-5BIT.J (David), STM32F030C8T6TR, 82651000, V3021SO8B.
 
 // V3021SO8B Forte handled via command-queue ID 63 (add_forte_entry) — no manual run needed.
+
+// ── COMPREHENSIVE BACKFILL — Run stampForteNoStk_AllMissed_Jul30() ─────────────
+// Stamps Forte col K "NO STK - [date]" for ALL David no-stk emails where the sheet
+// was never updated. Covers Jul 13–Jul 28 2026.
+// Safe to re-run: skips rows already stamped "NO STK" or "CLOSED".
+// OEM deletion for recent ones handled by command-queue IDs 88–97.
+// Does NOT call deletePart — earlier entries are already deleted from OEM by prior scripts.
+function stampForteNoStk_AllMissed_Jul30() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var data = sheet.getDataRange().getValues();
+
+  // MPN → date of David's no-stock email (used only for the "NO STK - date" label)
+  var removals = {
+    // ── Jul 28 2026 ── (oneTime functions exist but were not run)
+    'FEMDME004G-A8A39':           '7/28/2026',
+    '7116-1490':                  '7/28/2026',
+    'LIS2DW12TR':                 '7/28/2026',
+    'STM32H742VIT6':              '7/28/2026',
+    // ── Jul 27 2026 ── (oneTime functions exist but were not run)
+    'TPSM53602RDAR':              '7/27/2026',
+    'SS-52400-002':               '7/27/2026',
+    'FAN3988IL6X-F113':           '7/27/2026',
+    'MSS5131-472MLC':             '7/27/2026',
+    // ── Jul 25 2026 ── (oneTime function exists but was not run)
+    'XC7A100T-1CSG324C':          '7/25/2026',
+    // ── Jul 24 2026 ── (Forte row 4163 — second buyer entry; row 4138 handled by Jul22 function)
+    'EPM7032LC44-15T':            '7/24/2026',
+    // ── Jul 23 2026 ── (oneTime functions exist but may not have been run)
+    'XCF08PVOG48C':               '7/23/2026',
+    'TPS563200DDCR':              '7/23/2026',
+    'WG82574IT':                  '7/23/2026',
+    'WG82574ITSLBAC':             '7/23/2026',
+    'SMTPFLSM-M3-0ET':            '7/23/2026',
+    '1410187-3':                  '7/23/2026',
+    // ── Jul 21 2026 ── (93-735030-29P has NO existing function)
+    '93-735030-29P':              '7/21/2026',
+    // ── Jul 17 2026 ── (oneTime functions exist but may not have been run)
+    'RAA2100404GLGMD0':           '7/17/2026',
+    'ADM232AARNZ-REEL7':          '7/17/2026',
+    // ── Jul 16 2026 ── (NO existing oneTime functions for these)
+    'ADUM1200ARZ-RL7':            '7/16/2026',
+    'XFL4030-472MEC':             '7/16/2026',
+    'DS-D076H030':                '7/16/2026',
+    'DH82029PCH SLKM8':           '7/16/2026',
+    'DH82029PCH':                 '7/16/2026',
+    'MT48LC4M16A2B4-6AIT:J':      '7/16/2026',
+    // ── Jul 15 2026 ── (NO existing oneTime functions for these)
+    'IPI024N06N3G':               '7/15/2026',
+    'RF3827TR7':                  '7/15/2026',
+    'BMS13-78T10C01G008':         '7/15/2026',
+    // ── Jul 13 2026 ── (NO existing function for CA91C142D-33IE)
+    'CA91C142D-33IE':             '7/13/2026',
+  };
+
+  var updated = 0, skipped = 0, missed = 0;
+  for (var i = 1; i < data.length; i++) {
+    var mpn = String(data[i][1]).trim();
+    var status = String(data[i][10] || '').trim().toUpperCase();
+    var noStkDate = removals[mpn] || removals[mpn.toUpperCase()];
+    if (!noStkDate) continue;
+    if (status.indexOf('NO STK') >= 0 || status === 'CLOSED') {
+      skipped++;
+      continue;
+    }
+    missed++;
+    var newStatus = 'NO STK - ' + noStkDate;
+    var cell = sheet.getRange(i + 1, 11);
+    cell.clearDataValidations();
+    cell.setValue(newStatus);
+    cell.setBackground('#000000');
+    cell.setFontColor('#FFFFFF');
+    cell.setFontWeight('bold');
+    Logger.log('Stamped Forte row ' + (i + 1) + ': ' + mpn + ' → ' + newStatus);
+    updated++;
+  }
+  SpreadsheetApp.flush();
+  Logger.log('stampForteNoStk_AllMissed_Jul30 DONE — stamped: ' + updated + ', skipped (already done): ' + skipped + ', total matched: ' + (updated + skipped));
+  if (missed === 0 && updated === 0) Logger.log('WARNING: 0 rows matched — check MPN spelling or sheet ID');
+}
