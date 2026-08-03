@@ -1326,32 +1326,15 @@ function buildHubCard_(statusText, isError) {
 
 function addonProcessNext(e) {
   try {
-    // Step 1: fast scan — just labels threads PENDING, no AI call (<10s)
-    fastScanInbox();
-    // Step 2: delete any leftover one-time addon triggers to prevent buildup
-    ScriptApp.getProjectTriggers().forEach(function(t) {
-      if (t.getHandlerFunction() === 'processAddonTriggered') ScriptApp.deleteTrigger(t);
-    });
-    // Step 3: fire AI processing in 15s outside the 30s add-on callback limit
-    ScriptApp.newTrigger('processAddonTriggered').timeBased().after(15000).create();
+    fastScanInbox(); // Labels new threads PENDING — no AI call, stays under 30s
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(
-        buildHubCard_('Triggered! Check your Gmail drafts in ~30 seconds.')
-      )).build();
+      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+      .build();
   } catch(err) {
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(
-        buildHubCard_('Error: ' + err.toString())
-      )).build();
+      .setNavigation(CardService.newNavigation().updateCard(buildHubCard_('Error: ' + err.toString())))
+      .build();
   }
-}
-
-// One-time trigger handler — self-cleans then processes pending threads
-function processAddonTriggered() {
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'processAddonTriggered') ScriptApp.deleteTrigger(t);
-  });
-  processPendingThreads();
 }
 
 // ── Fix queue — execute draft fixes queued remotely ───────────
@@ -1575,7 +1558,7 @@ function setupTriggers() {
   // processPendingThreads calls Claude API on a slower 5-min schedule.
   // This prevents runEmailScan from exhausting the 6-hr daily execution quota.
   ScriptApp.newTrigger('fastScanInbox').timeBased().everyMinutes(1).create();
-  ScriptApp.newTrigger('processPendingThreads').timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger('processPendingThreads').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('checkDavidNoStockEmails').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
@@ -1643,6 +1626,17 @@ function buildHomepageCard() {
       .setHeader(CardService.newCardHeader()
         .setTitle('Intransit Assistant')
         .setSubtitle(drafts.length === 0 ? 'No drafts' : drafts.length + ' draft(s) ready to review'));
+
+    // Process Next Email button — always at top
+    var processSection = CardService.newCardSection();
+    processSection.addWidget(
+      CardService.newTextButton()
+        .setText('Process Next Email')
+        .setBackgroundColor('#1a3c6d')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setOnClickAction(CardService.newAction().setFunctionName('addonProcessNext'))
+    );
+    builder.addSection(processSection);
 
     if (drafts.length === 0) {
       builder.addSection(CardService.newCardSection()
