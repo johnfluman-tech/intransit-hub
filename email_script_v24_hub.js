@@ -1179,6 +1179,12 @@ function searchForteSheet(mpn) {
 }
 
 function doGet(e) {
+  // Sidebar page — served as HtmlService so google.script.run works
+  if ((e.parameter.page || '') === 'sidebar') {
+    return HtmlService.createHtmlOutput(getSidebarHTML_())
+      .setTitle('Intransit Hub')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
   var SECRET = 'baSDJ#444FE&8';
   if (e.parameter.key!==SECRET) return ContentService.createTextOutput(JSON.stringify({error:'Unauthorized'})).setMimeType(ContentService.MimeType.JSON);
   var mpn=(e.parameter.mpn||'').trim();
@@ -1190,6 +1196,108 @@ function doGet(e) {
     stan_sheet: searchStanSheet(mpn),
     forte_sheet: searchForteSheet(mpn)
   })).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── Sidebar: "Process Next Email" button (called via google.script.run) ──
+function processNextEmailManual() {
+  var out = {success:true,nothing:false,action:null,subject:null,from_email:null,draft_preview:null,forte_entry:null,message:''};
+  var noStkKw = ['no stk','no stock','stk sold','stock sold','cant find','cant share','cannot find',
+                 'removed','no inventory','sold lying commie','soly lying commie','lying commie',
+                 'sold out','all sold','no longer have'];
+
+  // ── 1. David no-stk first ──
+  var davidIds = gmailSearchREST('in:inbox from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed', 5);
+  for (var di = 0; di < davidIds.length; di++) {
+    try {
+      var dt = GmailApp.getThreadById(davidIds[di]);
+      if (!dt) continue;
+      var dm = dt.getMessages()[dt.getMessageCount() - 1];
+      var dsub = dm.getSubject();
+      var dbody = dm.getPlainBody().toLowerCase().substring(0, 300);
+      var isNoStk = noStkKw.some(function(kw){ return dsub.toLowerCase().indexOf(kw) >= 0 || dbody.indexOf(kw) >= 0; });
+      if (!isNoStk) { gmailModifyThread_(davidIds[di], ['oem-rfq-incoming-processed'], []); continue; }
+      var decision = processThread(dt);
+      gmailModifyThread_(davidIds[di], [INCOMING_LABEL, 'oem-rfq-incoming-processed'], []);
+      gmailArchiveThread_(davidIds[di]);
+      out.action = (decision && decision.action) || 'david_nostock';
+      out.subject = dsub;
+      out.from_email = DAVID_EMAIL;
+      out.draft_preview = (decision && decision.draft_body) || 'Ok, removed from listing.';
+      out.message = 'David no-stk processed — archived';
+      return out;
+    } catch(e2) { continue; }
+  }
+
+  // ── 2. Process threads queued by fastScanInbox ──
+  var pending = gmailSearchREST('label:' + PENDING_LABEL, 5);
+  if (!pending.length) { fastScanInbox(); pending = gmailSearchREST('label:' + PENDING_LABEL, 5); }
+  if (pending.length) {
+    var tid = pending[0];
+    try {
+      var t2 = GmailApp.getThreadById(tid);
+      if (!t2) { gmailModifyThread_(tid, [], [PENDING_LABEL]); }
+      else {
+        var msgs2 = t2.getMessages();
+        var lastFrom = (msgs2[msgs2.length - 1].getFrom() || '').toLowerCase();
+        if (lastFrom.indexOf(JOHN_EMAIL) >= 0 || lastFrom.indexOf('intransittech.com') >= 0) {
+          gmailModifyThread_(tid, [], [PENDING_LABEL]);
+          out.nothing = true; out.message = 'Skipped (John was last sender) — tap again.'; return out;
+        }
+        var decision2 = processThread(t2);
+        gmailModifyThread_(tid, [], [PENDING_LABEL]);
+        out.action = (decision2 && decision2.action) || 'no_action';
+        out.subject = t2.getFirstMessageSubject();
+        out.from_email = msgs2[0].getFrom();
+        out.draft_preview = (decision2 && decision2.draft_body) ? decision2.draft_body.substring(0, 280) : null;
+        out.forte_entry = (decision2 && decision2.forte_entry) ? decision2.forte_entry : null;
+        out.message = out.action + (decision2 && decision2.mpn ? ' — ' + decision2.mpn : '');
+        return out;
+      }
+    } catch(pe) {
+      gmailModifyThread_(tid, [], [PENDING_LABEL]);
+      out.action = 'error'; out.message = pe.toString().substring(0, 200); return out;
+    }
+  }
+  out.nothing = true; out.message = 'Inbox clear — nothing to process'; return out;
+}
+
+function getSidebarHTML_() {
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' +
+    '*{box-sizing:border-box}body{font-family:Arial,sans-serif;padding:16px;background:#f5f5f5;margin:0}' +
+    'h2{color:#1a3c6d;font-size:16px;margin:0 0 14px;border-bottom:2px solid #1a3c6d;padding-bottom:8px}' +
+    '.btn{background:#1a3c6d;color:#fff;border:none;padding:12px;border-radius:5px;cursor:pointer;width:100%;font-size:14px;font-weight:bold;transition:all .2s}' +
+    '.btn:hover:not(:disabled){background:#2255a0}.btn:disabled{background:#aaa;cursor:not-allowed}' +
+    '.card{margin-top:14px;padding:12px 14px;background:#fff;border-radius:6px;border-left:4px solid #1a3c6d;display:none;box-shadow:0 1px 3px rgba(0,0,0,.1)}' +
+    '.card.err{border-left-color:#c00}' +
+    '.badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:bold;text-transform:uppercase;margin-bottom:8px;background:#1a3c6d;color:#fff}' +
+    '.badge.david_nostock{background:#7b1f1f}.badge.error{background:#c00}.badge.no_action{background:#888}.badge.nothing{background:#888}' +
+    '.subj{font-size:13px;font-weight:bold;margin:4px 0;word-break:break-word}' +
+    '.frm{color:#777;font-size:11px;margin-bottom:10px;word-break:break-all}' +
+    '.draft{background:#eef2ff;padding:9px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-word;border-left:3px solid #4a6fc7;margin:8px 0}' +
+    '.forte{background:#efffef;padding:7px 9px;border-radius:4px;font-size:12px;border-left:3px solid #2a8a2a;margin:6px 0}' +
+    '.msg{font-size:11px;color:#555;margin-top:8px;padding-top:8px;border-top:1px solid #eee}' +
+    '.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:middle;margin-right:6px}' +
+    '@keyframes sp{to{transform:rotate(360deg)}}</style></head><body>' +
+    '<h2>⚡ Intransit Hub</h2>' +
+    '<button class="btn" id="btn" onclick="go()">Process Next Email</button>' +
+    '<div class="card" id="card"></div>' +
+    '<script>' +
+    'function go(){var btn=document.getElementById("btn"),card=document.getElementById("card");' +
+    'btn.disabled=true;btn.innerHTML=\'<span class="spin"></span> Processing...\';card.style.display="none";' +
+    'google.script.run.withSuccessHandler(function(d){show(d,btn,card);}).withFailureHandler(function(e){showErr(e,btn,card);}).processNextEmailManual();}' +
+    'function show(d,btn,card){' +
+    'var a=d.action||(d.nothing?"nothing":"?");' +
+    'var html=\'<span class="badge \'+a+\'">\'+esc(d.nothing?"Inbox clear":a)+\'</span>\';' +
+    'if(d.subject)html+=\'<div class="subj">\'+esc(d.subject)+\'</div>\';' +
+    'if(d.from_email)html+=\'<div class="frm">\'+esc(d.from_email)+\'</div>\';' +
+    'if(d.draft_preview)html+=\'<div class="draft">\'+esc(d.draft_preview)+\'</div>\';' +
+    'if(d.forte_entry){var fe=d.forte_entry;html+=\'<div class="forte">\u{1F4CB} \'+esc(fe.mpn)+\' | \'+fe.qty+\' pcs | $\'+fe.target_price+\' | \'+esc(fe.country)+\'</div>\';}' +
+    'if(d.message)html+=\'<div class="msg">\'+esc(d.message)+\'</div>\';' +
+    'card.className="card";card.innerHTML=html;card.style.display="block";' +
+    'btn.disabled=false;btn.innerHTML="Process Next Email";}' +
+    'function showErr(e,btn,card){card.className="card err";card.innerHTML=\'<span class="badge error">Error</span><div class="msg">\'+esc(e.message||String(e))+\'</div>\';card.style.display="block";btn.disabled=false;btn.innerHTML="Process Next Email";}' +
+    'function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}' +
+    '<\/script></body></html>';
 }
 
 // ── Fix queue — execute draft fixes queued remotely ───────────
