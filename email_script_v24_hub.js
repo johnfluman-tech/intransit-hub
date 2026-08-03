@@ -1278,24 +1278,26 @@ function getSidebarHTML_() {
     '.msg{font-size:11px;color:#555;margin-top:8px;padding-top:8px;border-top:1px solid #eee}' +
     '.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:middle;margin-right:6px}' +
     '@keyframes sp{to{transform:rotate(360deg)}}</style></head><body>' +
-    '<h2>⚡ Intransit Hub</h2>' +
+    '<h2>Intransit Hub</h2>' +
     '<button class="btn" id="btn" onclick="go()">Process Next Email</button>' +
     '<div class="card" id="card"></div>' +
     '<script>' +
-    'function go(){var btn=document.getElementById("btn"),card=document.getElementById("card");' +
+    'var btn=document.getElementById("btn"),card=document.getElementById("card");' +
+    'function go(){' +
     'btn.disabled=true;btn.innerHTML=\'<span class="spin"></span> Processing...\';card.style.display="none";' +
-    'google.script.run.withSuccessHandler(function(d){show(d,btn,card);}).withFailureHandler(function(e){showErr(e,btn,card);}).processNextEmailManual();}' +
-    'function show(d,btn,card){' +
+    'google.script.run.withSuccessHandler(onDone).withFailureHandler(onErr).processNextEmailManual();}' +
+    'function onDone(d){try{' +
     'var a=d.action||(d.nothing?"nothing":"?");' +
     'var html=\'<span class="badge \'+a+\'">\'+esc(d.nothing?"Inbox clear":a)+\'</span>\';' +
     'if(d.subject)html+=\'<div class="subj">\'+esc(d.subject)+\'</div>\';' +
     'if(d.from_email)html+=\'<div class="frm">\'+esc(d.from_email)+\'</div>\';' +
     'if(d.draft_preview)html+=\'<div class="draft">\'+esc(d.draft_preview)+\'</div>\';' +
-    'if(d.forte_entry){var fe=d.forte_entry;html+=\'<div class="forte">\u{1F4CB} \'+esc(fe.mpn)+\' | \'+fe.qty+\' pcs | $\'+fe.target_price+\' | \'+esc(fe.country)+\'</div>\';}' +
+    'if(d.forte_entry){var fe=d.forte_entry;html+=\'<div class="forte">Forte: \'+esc(fe.mpn||"")+\' | \'+esc(String(fe.qty||""))+\' pcs | $\'+esc(String(fe.target_price||""))+\' | \'+esc(fe.country||"")+\'</div>\';}' +
     'if(d.message)html+=\'<div class="msg">\'+esc(d.message)+\'</div>\';' +
     'card.className="card";card.innerHTML=html;card.style.display="block";' +
-    'btn.disabled=false;btn.innerHTML="Process Next Email";}' +
-    'function showErr(e,btn,card){card.className="card err";card.innerHTML=\'<span class="badge error">Error</span><div class="msg">\'+esc(e.message||String(e))+\'</div>\';card.style.display="block";btn.disabled=false;btn.innerHTML="Process Next Email";}' +
+    '}catch(ex){card.className="card err";card.innerHTML=\'<span class="badge error">Display error</span><div class="msg">\'+esc(ex.message)+\'</div>\';card.style.display="block";}' +
+    'finally{btn.disabled=false;btn.innerHTML="Process Next Email";}}' +
+    'function onErr(ex){card.className="card err";card.innerHTML=\'<span class="badge error">Error</span><div class="msg">\'+esc(ex.message||String(ex))+\'</div>\';card.style.display="block";btn.disabled=false;btn.innerHTML="Process Next Email";}' +
     'function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}' +
     '<\/script></body></html>';
 }
