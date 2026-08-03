@@ -1326,13 +1326,37 @@ function buildHubCard_(statusText, isError) {
 
 function addonProcessNext(e) {
   try {
-    fastScanInbox(); // Labels new threads PENDING — no AI call, stays under 30s
+    var threadId = e && e.gmail && e.gmail.threadId;
+    var statusCard;
+    if (threadId) {
+      // Contextual: label THIS thread PENDING so the 1-min processPendingThreads trigger picks it up
+      gmailModifyThread_(threadId, [PENDING_LABEL], []);
+      statusCard = CardService.newCardBuilder()
+        .setHeader(CardService.newCardHeader().setTitle('Intransit Assistant').setSubtitle('Queued for AI processing'))
+        .addSection(CardService.newCardSection()
+          .addWidget(CardService.newTextButton()
+            .setText('Process Next Email')
+            .setBackgroundColor('#1a3c6d')
+            .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+            .setOnClickAction(CardService.newAction().setFunctionName('addonProcessNext')))
+          .addWidget(CardService.newTextParagraph()
+            .setText('This email is queued. Draft will appear in Drafts within ~1 minute.\nClose and reopen this panel to see results.')))
+        .build();
+    } else {
+      // Homepage: scan inbox for any new threads
+      fastScanInbox();
+      statusCard = buildHomepageCard();
+    }
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(buildHomepageCard()))
+      .setNavigation(CardService.newNavigation().updateCard(statusCard))
       .build();
   } catch(err) {
+    var errCard = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader().setTitle('Intransit Assistant').setSubtitle('Error'))
+      .addSection(CardService.newCardSection()
+        .addWidget(CardService.newTextParagraph().setText('Error: ' + err.toString()))).build();
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().updateCard(buildHubCard_('Error: ' + err.toString())))
+      .setNavigation(CardService.newNavigation().updateCard(errCard))
       .build();
   }
 }
