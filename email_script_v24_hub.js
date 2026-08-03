@@ -1302,6 +1302,52 @@ function getSidebarHTML_() {
     '<\/script></body></html>';
 }
 
+// ── Gmail Add-on: sidebar card ────────────────────────────────
+function buildGmailHomepage(e) {
+  return buildHubCard_('Ready — tap the button to process the next email.');
+}
+
+function buildHubCard_(statusText, isError) {
+  var card = CardService.newCardBuilder();
+  card.setHeader(CardService.newCardHeader().setTitle('Intransit Hub'));
+  var section = CardService.newCardSection();
+  var btn = CardService.newTextButton()
+    .setText('Process Next Email')
+    .setBackgroundColor('#1a3c6d')
+    .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+    .setOnClickAction(CardService.newAction().setFunctionName('addonProcessNext'));
+  section.addWidget(btn);
+  if (statusText) {
+    section.addWidget(CardService.newTextParagraph().setText(statusText));
+  }
+  card.addSection(section);
+  return card.build();
+}
+
+function addonProcessNext(e) {
+  var result;
+  try { result = processNextEmailManual(); }
+  catch(err) { return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildHubCard_('Error: ' + err.toString(), true)))
+    .build(); }
+  var msg;
+  if (result.nothing) {
+    msg = 'Inbox clear — nothing to process.';
+  } else {
+    msg = '[' + (result.action || '?').toUpperCase() + ']\n' + (result.subject || '');
+    if (result.from_email) msg += '\n' + result.from_email;
+    if (result.draft_preview) msg += '\n\nDraft: ' + result.draft_preview.substring(0, 300);
+    if (result.forte_entry) {
+      var fe = result.forte_entry;
+      msg += '\nForte: ' + (fe.mpn||'') + ' | ' + (fe.qty||'') + ' pcs | $' + (fe.target_price||'') + ' | ' + (fe.country||'');
+    }
+    if (result.message) msg += '\n\n' + result.message;
+  }
+  return CardService.newActionResponseBuilder()
+    .setNavigation(CardService.newNavigation().updateCard(buildHubCard_(msg)))
+    .build();
+}
+
 // ── Fix queue — execute draft fixes queued remotely ───────────
 function processFixQueue() {
   try {
