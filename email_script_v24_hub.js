@@ -1325,27 +1325,33 @@ function buildHubCard_(statusText, isError) {
 }
 
 function addonProcessNext(e) {
-  var result;
-  try { result = processNextEmailManual(); }
-  catch(err) { return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHubCard_('Error: ' + err.toString(), true)))
-    .build(); }
-  var msg;
-  if (result.nothing) {
-    msg = 'Inbox clear — nothing to process.';
-  } else {
-    msg = '[' + (result.action || '?').toUpperCase() + ']\n' + (result.subject || '');
-    if (result.from_email) msg += '\n' + result.from_email;
-    if (result.draft_preview) msg += '\n\nDraft: ' + result.draft_preview.substring(0, 300);
-    if (result.forte_entry) {
-      var fe = result.forte_entry;
-      msg += '\nForte: ' + (fe.mpn||'') + ' | ' + (fe.qty||'') + ' pcs | $' + (fe.target_price||'') + ' | ' + (fe.country||'');
-    }
-    if (result.message) msg += '\n\n' + result.message;
+  try {
+    // Step 1: fast scan — just labels threads PENDING, no AI call (<10s)
+    fastScanInbox();
+    // Step 2: delete any leftover one-time addon triggers to prevent buildup
+    ScriptApp.getProjectTriggers().forEach(function(t) {
+      if (t.getHandlerFunction() === 'processAddonTriggered') ScriptApp.deleteTrigger(t);
+    });
+    // Step 3: fire AI processing in 15s outside the 30s add-on callback limit
+    ScriptApp.newTrigger('processAddonTriggered').timeBased().after(15000).create();
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().updateCard(
+        buildHubCard_('Triggered! Check your Gmail drafts in ~30 seconds.')
+      )).build();
+  } catch(err) {
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().updateCard(
+        buildHubCard_('Error: ' + err.toString())
+      )).build();
   }
-  return CardService.newActionResponseBuilder()
-    .setNavigation(CardService.newNavigation().updateCard(buildHubCard_(msg)))
-    .build();
+}
+
+// One-time trigger handler — self-cleans then processes pending threads
+function processAddonTriggered() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'processAddonTriggered') ScriptApp.deleteTrigger(t);
+  });
+  processPendingThreads();
 }
 
 // ── Fix queue — execute draft fixes queued remotely ───────────
