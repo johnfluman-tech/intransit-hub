@@ -1915,6 +1915,13 @@ function buildContextualCard(e) {
         .setTitle('Intransit Assistant')
         .setSubtitle(label));
 
+    builder.addSection(CardService.newCardSection()
+      .addWidget(CardService.newTextButton()
+        .setText('Process Next Email')
+        .setBackgroundColor('#1a3c6d')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setOnClickAction(CardService.newAction().setFunctionName('addonProcessNext'))));
+
     if (matchDraftId) {
       var fbField = 'fb_' + matchDraftId.replace(/[^a-zA-Z0-9]/g, '_');
 
