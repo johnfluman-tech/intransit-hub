@@ -615,8 +615,9 @@ function checkDavidNoStockEmails() {
   // auto-applies it to every David email regardless of processing status.
   var seenIds = {};
   var allIds = [];
-  var q1 = 'from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed newer_than:14d';
-  var q2 = 'in:inbox from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed';
+  var davidQ = '(from:' + DAVID_EMAIL + ' OR from:david@fortecomp.com)';
+  var q1 = davidQ + ' -label:oem-rfq-incoming-processed newer_than:14d';
+  var q2 = 'in:inbox ' + davidQ + ' -label:oem-rfq-incoming-processed';
   gmailSearchREST(q1, 50).concat(gmailSearchREST(q2, 50)).forEach(function(tid) {
     if (!seenIds[tid]) { seenIds[tid] = true; allIds.push(tid); }
   });
@@ -673,7 +674,7 @@ function checkDavidNoStockEmails() {
 function checkForteNoStockReplies() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) return;
-  var query = 'label:oem-tp-processed in:inbox from:fortetechno.com -label:forte-nostock-processed';
+  var query = 'label:oem-tp-processed in:inbox (from:fortetechno.com OR from:fortecomp.com) -label:forte-nostock-processed';
   var threadIds = gmailSearchREST(query, 20);
   hubLog('run', 'checkForteNoStockReplies: ' + threadIds.length + ' thread(s)');
   if (!threadIds.length) return;
@@ -688,7 +689,8 @@ function checkForteNoStockReplies() {
     var subject = thread.getFirstMessageSubject().replace(/^(Re:\s*)+/i, '').trim();
     var forteMsg = null;
     for (var i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].getFrom().toLowerCase().indexOf('fortetechno.com') >= 0) {
+      var _fromLc = messages[i].getFrom().toLowerCase();
+      if (_fromLc.indexOf('fortetechno.com') >= 0 || _fromLc.indexOf('fortecomp.com') >= 0) {
         forteMsg = messages[i]; break;
       }
     }
@@ -702,7 +704,7 @@ function checkForteNoStockReplies() {
     var buyerEmail = null;
     for (var j = 0; j < messages.length; j++) {
       var from = messages[j].getFrom().toLowerCase();
-      if (from.indexOf('intransittech.com') < 0 && from.indexOf('fortetechno.com') < 0) {
+      if (from.indexOf('intransittech.com') < 0 && from.indexOf('fortetechno.com') < 0 && from.indexOf('fortecomp.com') < 0) {
         var rt = messages[j].getReplyTo();
         buyerEmail = extractBuyerEmail((rt && rt.indexOf('@') >= 0) ? rt : messages[j].getFrom());
         break;
@@ -990,7 +992,7 @@ function runEmailScan() {
   try { checkForteNoStockReplies(); } catch(e) { hubLog('error', 'checkForteNoStockReplies crashed: ' + e, {}); }
 
   var rfqLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
-  var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:david@fortetechno.com -from:steve@fortetechno.com -label:oem-rfq-incoming-processed ' + blockFilter;
+  var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:david@fortetechno.com -from:steve@fortetechno.com -from:fortecomp.com -label:oem-rfq-incoming-processed ' + blockFilter;
   GmailApp.search(rfqQ, 0, 10).forEach(function(t) {
     t.addLabel(rfqLabel);
     var msgs = t.getMessages();
@@ -1057,7 +1059,7 @@ function fastScanInbox() {
   var agentLabelId   = getLabelId_(AGENT_LABEL);
   var pendingLabelId = getLabelId_(PENDING_LABEL);
 
-  var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com OR to:rfq@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -label:oem-rfq-incoming-processed ' + blockFilter;
+  var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com OR to:rfq@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -label:oem-rfq-incoming-processed ' + blockFilter;
   var rfqCount = 0;
   gmailSearchREST(rfqQ, 50).forEach(function(tid) {
     var meta = gmailGetThreadMeta_(tid);
@@ -1081,7 +1083,7 @@ function fastScanInbox() {
   // Bug 24 fix: require subject/sender keyword so consumer notification emails
   // (receipts, order confirmations, restaurant alerts) are not sent to the AI worker.
   var agentQ = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed -label:' + PENDING_LABEL +
-    ' newer_than:3d -from:fortetechno.com ' + blockFilter +
+    ' newer_than:3d -from:fortetechno.com -from:fortecomp.com ' + blockFilter +
     ' (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for"' +
     ' OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts' +
     ' OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend' +
@@ -1090,7 +1092,7 @@ function fastScanInbox() {
   gmailSearchREST(agentQ, 50).forEach(function(tid) {
     var meta = gmailGetThreadMeta_(tid);
     var firstSender = (meta.senders[0] || '').toLowerCase();
-    if (firstSender.indexOf('intransittech.com') >= 0 || firstSender.indexOf('fortetechno.com') >= 0) {
+    if (firstSender.indexOf('intransittech.com') >= 0 || firstSender.indexOf('fortetechno.com') >= 0 || firstSender.indexOf('fortecomp.com') >= 0) {
       gmailModifyThread_(tid, [AGENT_LABEL], []);
       return;
     }
