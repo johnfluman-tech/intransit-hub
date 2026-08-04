@@ -2540,7 +2540,9 @@ function checkDavidNoStockEmails() {
   var davidQ = '(from:' + DAVID_EMAIL + ' OR from:david@fortecomp.com)';
   var q1 = davidQ + ' -label:oem-rfq-incoming-processed newer_than:14d';
   var q2 = 'in:inbox ' + davidQ + ' -label:oem-rfq-incoming-processed';
-  gmailSearchREST(q1, 50).concat(gmailSearchREST(q2, 50)).forEach(function(tid) {
+  // Use GmailApp.search (reliable, properly authorized) instead of REST API which silently fails
+  GmailApp.search(q1, 0, 50).concat(GmailApp.search(q2, 0, 50)).forEach(function(t) {
+    var tid = t.getId();
     if (!seenIds[tid]) { seenIds[tid] = true; allIds.push(tid); }
   });
   hubLog('run', 'checkDavidNoStockEmails: ' + allIds.length + ' thread(s)');
@@ -2717,27 +2719,26 @@ function cleanSendNowTriggers() {
 
 
 function createThreadedDraft(toEmail, subject, htmlBody, replyToGmailMsgId, threadId, ccEmail) {
-  var rfcId = getRFC2822MessageId(replyToGmailMsgId);
-  var lines = ['From: John Fluman <' + JOHN_EMAIL + '>', 'To: ' + toEmail];
-  if (ccEmail) lines.push('Cc: ' + ccEmail);
-  lines.push('Subject: ' + subject);
-  if (rfcId) { lines.push('In-Reply-To: ' + rfcId); lines.push('References: ' + rfcId); }
-  lines.push('MIME-Version: 1.0');
-  lines.push('Content-Type: text/html; charset=UTF-8');
-  lines.push('');
-  lines.push(htmlBody);
-  var encoded = Utilities.base64EncodeWebSafe(lines.join('\r\n'));
-  var url = 'https://gmail.googleapis.com/gmail/v1/users/me/drafts';
-  var resp = UrlFetchApp.fetch(url, {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken(), 'Content-Type': 'application/json' },
-    payload: JSON.stringify({ message: { raw: encoded, threadId: threadId } }),
-    muteHttpExceptions: true
-  });
-  var result = JSON.parse(resp.getContentText());
-  if (result.error) { Logger.log('API draft error: ' + JSON.stringify(result.error)); return null; }
-  Logger.log('Draft created | To: ' + toEmail + ' | ' + subject);
-  return result.id;
+  try {
+    var thread = GmailApp.getThreadById(threadId);
+    if (!thread) { Logger.log('createThreadedDraft: thread not found ' + threadId); return null; }
+    var msgs = thread.getMessages();
+    // Find the specific message to reply to, default to last message
+    var replyMsg = msgs[msgs.length - 1];
+    if (replyToGmailMsgId) {
+      for (var i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].getId() === replyToGmailMsgId) { replyMsg = msgs[i]; break; }
+      }
+    }
+    var opts = { htmlBody: htmlBody, name: 'John Fluman' };
+    if (ccEmail) opts.cc = ccEmail;
+    var draft = replyMsg.createDraftReply('', opts);
+    Logger.log('Draft created | To: ' + toEmail + ' | ' + subject);
+    return draft.getId();
+  } catch(e) {
+    Logger.log('createThreadedDraft error: ' + e);
+    return null;
+  }
 }
 
 
@@ -3481,7 +3482,10 @@ function getSignatureHTML() {
 
 
 function gmailArchiveThread_(threadId) {
-  gmailREST_('/threads/' + threadId + '/modify', 'post', { removeLabelIds: ['INBOX'] });
+  try {
+    var thread = GmailApp.getThreadById(threadId);
+    if (thread) thread.moveToArchive();
+  } catch(e) { Logger.log('gmailArchiveThread_ error: ' + e); }
 }
 
 
@@ -3498,10 +3502,23 @@ function gmailGetThreadMeta_(threadId) {
 
 
 function gmailModifyThread_(threadId, addLabels, removeLabels) {
-  var add = (addLabels || []).map(getLabelId_).filter(Boolean);
-  var rem = (removeLabels || []).map(getLabelId_).filter(Boolean);
-  if (!add.length && !rem.length) return;
-  gmailREST_('/threads/' + threadId + '/modify', 'post', { addLabelIds: add, removeLabelIds: rem });
+  // Use GmailApp label methods — reliable, no REST scope required
+  try {
+    var thread = GmailApp.getThreadById(threadId);
+    if (!thread) return;
+    (addLabels || []).forEach(function(name) {
+      try {
+        var lbl = GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
+        thread.addLabel(lbl);
+      } catch(e) { Logger.log('gmailModifyThread_ addLabel error ' + name + ': ' + e); }
+    });
+    (removeLabels || []).forEach(function(name) {
+      try {
+        var lbl = GmailApp.getUserLabelByName(name);
+        if (lbl) thread.removeLabel(lbl);
+      } catch(e) { Logger.log('gmailModifyThread_ removeLabel error ' + name + ': ' + e); }
+    });
+  } catch(e) { Logger.log('gmailModifyThread_ error: ' + e); }
 }
 
 
@@ -3518,7 +3535,9 @@ function gmailREST_(path, method, body) {
   };
   if (body) { opts.contentType = 'application/json'; opts.payload = JSON.stringify(body); }
   var resp = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me' + path, opts);
-  return JSON.parse(resp.getContentText());
+  var data = JSON.parse(resp.getContentText());
+  if (data.error) { hubLog('error', 'gmailREST_ ' + (method||'GET') + ' ' + path + ': ' + data.error.message, {}); }
+  return data;
 }
 
 
@@ -4365,4 +4384,22 @@ function updateForteSheet(mpn, customDate) {
     }
   }
   Logger.log('Forte NO STK ' + mpn + ': updated=' + updated);
+}
+
+
+// ONE-TIME: Aug 4 2026 — create "Ok, removed from listing." draft to David for MPF200TS-FCG484I
+// OEM row already deleted, Forte row 4192 already stamped. Just needs the reply draft.
+function davidNoStk_MPF200TS_Aug4_oneTime() {
+  var thread = GmailApp.getThreadById('19fcd908d455fc3a');
+  if (!thread) { Logger.log('Thread not found'); return; }
+  var lastMsg = thread.getMessages()[thread.getMessageCount() - 1];
+  var sig = getSignatureHTML();
+  var html = 'Ok, removed from listing.' + sig;
+  var draft = lastMsg.createDraftReply('', { htmlBody: html, name: 'John Fluman' });
+  Logger.log('Draft created: ' + draft.getId());
+  // Label + archive the thread
+  var lbl = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
+  thread.addLabel(lbl);
+  thread.moveToArchive();
+  Logger.log('davidNoStk_MPF200TS_Aug4_oneTime: done');
 }
