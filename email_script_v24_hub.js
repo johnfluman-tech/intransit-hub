@@ -968,6 +968,12 @@ function processThread(thread) {
     current_labels:  thread.getLabels().map(function(l){ return l.getName(); }),
     prior_quotes:    priorQuotes
   };
+  // Send MPN hint to worker as fallback if Haiku extraction fails.
+  // Only send if it looks like a real MPN (letters + digits, no pure-quantity tokens).
+  if (mpnHint && /[A-Za-z]/.test(mpnHint) && /[0-9]/.test(mpnHint) && mpnHint.length >= 5
+      && !/^\d+(?:pcs?|pc|k|m|units?)?$/i.test(mpnHint)) {
+    payload.mpn = mpnHint;
+  }
   var decision = callWorker(payload);
   if (decision) executeDecision(decision, thread);
   return decision;
@@ -3953,6 +3959,7 @@ function extractMPN(subject) {
     for (var i = 0; i < tokens.length; i++) {
       var token = tokens[i].replace(/[,;:?()[\]]/g, '');
       if (!token || token.length < 3 || stopwords.indexOf(token.toLowerCase()) >= 0 || /^#\d+$/.test(token)) continue;
+      if (/^\d+(?:pcs?|pc|k|m|units?)?$/i.test(token)) continue; // skip quantity tokens like "15pcs", "100k"
       return token;
     }
     return null;
@@ -3977,6 +3984,9 @@ function extractMPNFromSubject(subject) {
   if (nc) return nc[1].trim().replace(/\s{2,}/g, ' ');
   var ic = subject.match(/RFQ[:\-\s]+([A-Z0-9][A-Z0-9\-\/\.]{4,})/i);
   if (ic) return ic[1].trim();
+  // "RFQ for Xpcs of MPN" — e.g. "RFQ for 15pcs of XCF08PVOG48C"
+  var ofMpn = subject.match(/\bof\s+([A-Z][A-Z0-9\-\/\.]{4,})\s*$/i);
+  if (ofMpn && /[0-9]/.test(ofMpn[1])) return ofMpn[1].trim();
   return null;
 }
 
