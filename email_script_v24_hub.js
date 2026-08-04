@@ -3235,6 +3235,10 @@ function fastScanInbox() {
     if (meta.senders.length && meta.senders[meta.senders.length-1].indexOf(JOHN_EMAIL) >= 0) return;
     var buyerCount = meta.senders.filter(function(s){ return s.indexOf(JOHN_EMAIL) < 0 && s.indexOf('intransittech') < 0; }).length;
     if (buyerCount < 2) return;
+    // Must have at least one John message — confirms we already sent a TP request.
+    // Prevents threads with only the original buyer RFQ from being mis-routed as TP replies.
+    var hasJohnMsg = meta.senders.some(function(s){ return s.indexOf(JOHN_EMAIL) >= 0 || s.indexOf('intransittech') >= 0; });
+    if (!hasJohnMsg) return;
     gmailModifyThread_(tid, ['oem-tp-processed', PENDING_LABEL], []);
     tpCount++;
   });
