@@ -3815,10 +3815,24 @@ function processFixQueue() {
           }
 
           // Create the replacement draft
-          var firstMsg = thread.getMessages()[0];
-          var htmlBody = buildDraftHTML(fix.draft_body, firstMsg);
+          var threadMsgs = thread.getMessages();
+          var firstMsg = threadMsgs[0];
+          var lastMsg  = threadMsgs[threadMsgs.length - 1];
+          var replyMsg = fix.reply_to_msg_id
+            ? (function() {
+                for (var mi = threadMsgs.length - 1; mi >= 0; mi--) {
+                  if (threadMsgs[mi].getId() === fix.reply_to_msg_id) return threadMsgs[mi];
+                }
+                return lastMsg;
+              })()
+            : lastMsg;
+          // Use pre-built HTML if provided; otherwise build from plain draft_body
+          var htmlBody = fix.html || (fix.draft_body != null
+            ? buildDraftHTML(String(fix.draft_body), firstMsg)
+            : null);
+          if (!htmlBody) throw new Error('fix-queue #' + fix.id + ': no html or draft_body');
           var draftId = createThreadedDraft(
-            fix.to_email, fix.subject, htmlBody, firstMsg.getId(), fix.thread_id, null
+            fix.to || fix.to_email, fix.subject, htmlBody, replyMsg.getId(), fix.thread_id, null
           );
           if (!draftId) throw new Error('createThreadedDraft returned null');
 
