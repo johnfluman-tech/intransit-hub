@@ -1185,12 +1185,15 @@ async function handleGetFixQueue(url, env) {
 }
 
 async function handlePostFixQueue(request, env) {
-  const { type, thread_id, to_email, subject, draft_body } = await request.json();
+  const body = await request.json();
+  const { type, thread_id, subject } = body;
+  const to_email = body.to_email || body.to || null;       // accept 'to' as alias
+  const draft_body = body.draft_body || body.html || null; // accept 'html' as alias
   if (!type || !thread_id) return json({ error: 'type and thread_id are required' }, 400);
   const { meta } = await env.DB.prepare(
     `INSERT INTO fix_queue (type, thread_id, to_email, subject, draft_body)
      VALUES (?, ?, ?, ?, ?)`
-  ).bind(type, thread_id, to_email || null, subject || null, draft_body || null).run();
+  ).bind(type, thread_id, to_email, subject || null, draft_body).run();
   return json({ ok: true, id: meta.last_row_id });
 }
 
