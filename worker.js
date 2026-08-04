@@ -112,6 +112,10 @@ export default {
       const fixId = p.match(/^\/api\/fix-queue\/(\d+)$/);
       if (fixId && m === 'PATCH') return handlePatchFixQueue(request, env, parseInt(fixId[1]));
 
+      if (p === '/api/stock-prices' && m === 'GET')    return handleGetStockPrice(url, env);
+      if (p === '/api/stock-prices' && m === 'POST')   return handlePostStockPrice(request, env);
+      if (p === '/api/stock-prices' && m === 'DELETE') return handleDeleteStockPrice(url, env);
+
       if (p === '/api/command-queue' && m === 'GET')  return handleGetCommandQueue(url, env);
       if (p === '/api/command-queue' && m === 'POST') return handlePostCommandQueue(request, env);
       const cmdId = p.match(/^\/api\/command-queue\/(\d+)$/);
@@ -1062,6 +1066,28 @@ async function handleEmailAgent(request, env) {
     decision.oem_delete_row = oem_results[0].row || null;
   }
 
+  // ── Stock price substitution for own_stock ───────────────────────────────
+  // Looks up a price stored via the sidebar "Stock Price" tool.
+  // If found: substitutes $[FILL IN] in draft_body, or builds draft_body when
+  // the code guard forced own_stock with null draft_body.
+  if (decision.action === 'own_stock') {
+    const mpnKey = (decision.mpn || requestMpn || '').replace(/\s+/g, '').toUpperCase();
+    if (mpnKey) {
+      const priceRow = await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(mpnKey).first();
+      const storedPrice = priceRow != null ? priceRow.price : null;
+      if (!decision.draft_body) {
+        // Code guard set draft_body to null — build it now using in_stock data
+        const ownRows = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
+        const dc = (ownRows[0] && ownRows[0].dc) ? ownRows[0].dc : '';
+        const totalQty = ownRows.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
+        const priceStr = storedPrice != null ? `$${Number(storedPrice).toFixed(2)} each` : '$[FILL IN]';
+        decision.draft_body = `This is our stock\n\nMPN: ${mpnKey}${dc ? '\nDC: ' + dc : ''}\nQTY available: ${totalQty || '?'}\nPrice: ${priceStr}\n\nThere is a $100 minimum on stock items`;
+      } else if (storedPrice != null && decision.draft_body.includes('[FILL IN]')) {
+        decision.draft_body = decision.draft_body.replace(/\$\[FILL IN\]/g, `$${Number(storedPrice).toFixed(2)} each`);
+      }
+    }
+  }
+
   // ── Inline Sonnet audit (moved from Apps Script auditAndCorrect) ──────────
   const AUDITABLE_ACTIONS = ['msg_checking','request_tp_500','request_tp_2000','request_qty','bill_handle','own_stock','stan_quoted','add_to_stan'];
   const hasInv = (oem_results && oem_results.length > 0) || (in_stock_results && in_stock_results.length > 0);
@@ -1203,6 +1229,31 @@ async function handlePatchFixQueue(request, env, id) {
   await env.DB.prepare(
     `UPDATE fix_queue SET status = ?, error = ?, updated_at = datetime('now') WHERE id = ?`
   ).bind(status, error || null, id).run();
+  return json({ ok: true });
+}
+
+async function handleGetStockPrice(url, env) {
+  const mpn = (url.searchParams.get('mpn') || '').replace(/\s+/g, '').toUpperCase();
+  if (!mpn) return json({ error: 'mpn required' }, 400);
+  const row = await env.DB.prepare('SELECT mpn, price, notes, updated_at FROM stock_prices WHERE mpn = ?').bind(mpn).first();
+  return json({ mpn, price: row ? row.price : null, notes: row ? row.notes : null, updated_at: row ? row.updated_at : null });
+}
+
+async function handlePostStockPrice(request, env) {
+  const { mpn, price, notes } = await request.json();
+  if (!mpn || price == null) return json({ error: 'mpn and price required' }, 400);
+  const cleanMpn = mpn.replace(/\s+/g, '').toUpperCase();
+  await env.DB.prepare(
+    `INSERT INTO stock_prices (mpn, price, notes, updated_at) VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(mpn) DO UPDATE SET price=excluded.price, notes=excluded.notes, updated_at=datetime('now')`
+  ).bind(cleanMpn, parseFloat(price), notes || null).run();
+  return json({ ok: true, mpn: cleanMpn, price: parseFloat(price) });
+}
+
+async function handleDeleteStockPrice(url, env) {
+  const mpn = (url.searchParams.get('mpn') || '').replace(/\s+/g, '').toUpperCase();
+  if (!mpn) return json({ error: 'mpn required' }, 400);
+  await env.DB.prepare('DELETE FROM stock_prices WHERE mpn = ?').bind(mpn).run();
   return json({ ok: true });
 }
 

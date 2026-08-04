@@ -1034,6 +1034,58 @@ function addonRemoveOEM(e) {
 }
 
 
+function addonSaveStockPrice(e) {
+  try {
+    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
+    var mpn = ((formInputs.stockPriceMpn || {}).stringInputs || {}).value;
+    mpn = (mpn && mpn[0] ? mpn[0].trim().toUpperCase() : '');
+    var priceStr = ((formInputs.stockPriceValue || {}).stringInputs || {}).value;
+    priceStr = (priceStr && priceStr[0] ? priceStr[0].trim() : '');
+    if (!mpn || !priceStr || isNaN(parseFloat(priceStr))) {
+      return CardService.newActionResponseBuilder()
+        .setNotification(CardService.newNotification().setText('⚠️ Enter a valid MPN and price.'))
+        .build();
+    }
+    var price = parseFloat(priceStr);
+    UrlFetchApp.fetch(HUB_URL + '/api/stock-prices', {
+      method: 'post', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      payload: JSON.stringify({ mpn: mpn, price: price }),
+      muteHttpExceptions: true
+    });
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification()
+        .setText('✅ Price saved: ' + mpn + ' = $' + price.toFixed(2) + ' each'))
+      .build();
+  } catch(err) {
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('❌ ' + err.toString()))
+      .build();
+  }
+}
+
+
+function addonClearStockPrice(e) {
+  try {
+    var params = (e.commonEventObject && e.commonEventObject.parameters) || {};
+    var mpn = (params.mpn || '').toUpperCase();
+    if (!mpn) throw new Error('No MPN');
+    UrlFetchApp.fetch(HUB_URL + '/api/stock-prices?mpn=' + encodeURIComponent(mpn), {
+      method: 'delete',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      muteHttpExceptions: true
+    });
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('✅ Price cleared for ' + mpn))
+      .build();
+  } catch(err) {
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('❌ ' + err.toString()))
+      .build();
+  }
+}
+
+
 function addonRemoveStock(e) {
   try {
     var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
@@ -2150,6 +2202,48 @@ function buildContextualCard(e) {
         .setParameters({ threadId: gmailThreadId, subject: subject, fromH: fromH })));
     builder.addSection(smartSection);
 
+    // ── Stock Price ─────────────────────────────────────────────────────────
+    // Remembers a per-MPN sell price so own_stock drafts auto-fill the price.
+    var spMpn = invMpnHint;
+    var spCurrent = null;
+    if (spMpn) {
+      try {
+        var spResp = UrlFetchApp.fetch(HUB_URL + '/api/stock-prices?mpn=' + encodeURIComponent(spMpn), {
+          headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+        });
+        spCurrent = JSON.parse(spResp.getContentText()).price;
+      } catch(esp) {}
+    }
+    var priceSection = CardService.newCardSection()
+      .setHeader('💰 Stock Price' + (spCurrent != null ? ' — $' + parseFloat(spCurrent).toFixed(2) + ' each' : ' — not set'));
+    priceSection.addWidget(CardService.newTextInput()
+      .setFieldName('stockPriceMpn')
+      .setTitle('MPN')
+      .setValue(spMpn)
+      .setHint('Pre-filled from subject — change if needed'));
+    priceSection.addWidget(CardService.newTextInput()
+      .setFieldName('stockPriceValue')
+      .setTitle('Price per unit ($)')
+      .setValue(spCurrent != null ? String(parseFloat(spCurrent).toFixed(2)) : '')
+      .setHint('e.g. 4.50 — saved until you clear it'));
+    priceSection.addWidget(CardService.newTextButton()
+      .setText('💾 Save Price')
+      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+      .setBackgroundColor('#1a7340')
+      .setOnClickAction(CardService.newAction()
+        .setFunctionName('addonSaveStockPrice')
+        .setParameters({})));
+    if (spCurrent != null) {
+      priceSection.addWidget(CardService.newTextButton()
+        .setText('✕ Clear Saved Price')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#7b1fa2')
+        .setOnClickAction(CardService.newAction()
+          .setFunctionName('addonClearStockPrice')
+          .setParameters({ mpn: spMpn })));
+    }
+    builder.addSection(priceSection);
+
     // ── Block Domain ────────────────────────────────────────────────────────
     var blockSection = CardService.newCardSection().setHeader('🚫 Block Domain');
     // Auto-fill sender domain — but never for passthrough relays like netcomponents.com / icsource.com
@@ -2191,7 +2285,8 @@ function buildDraftHTML(replyText, originalMessage) {
   var quoted = '<br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">On ' + origDate + ', ' + origFrom + ' wrote:<br></div>'
     + '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">'
     + origBody + '</blockquote></div>';
-  return '<div dir="ltr">' + replyText + sig + quoted + '</div>';
+  var htmlText = replyText.replace(/\n/g, '<br>');
+  return '<div dir="ltr">' + htmlText + sig + quoted + '</div>';
 }
 
 
@@ -2452,7 +2547,7 @@ function buildHubCard_(statusText, isError) {
 
 
 function buildSimpleHTML(bodyText) {
-  return '<div dir="ltr">' + bodyText + getSignatureHTML() + '</div>';
+  return '<div dir="ltr">' + bodyText.replace(/\n/g, '<br>') + getSignatureHTML() + '</div>';
 }
 
 
