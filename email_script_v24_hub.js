@@ -1920,48 +1920,26 @@ function buildContextualCard(e) {
     var gmailThreadId = e.gmail && e.gmail.threadId;
     if (!gmailThreadId) return buildHomepageCard();
 
-    var token = ScriptApp.getOAuthToken();
-
-    // Get thread subject, sender, and scan for any DRAFT message — all one fetch
-    var threadResp = UrlFetchApp.fetch(
-      'https://gmail.googleapis.com/gmail/v1/users/me/threads/' + gmailThreadId +
-      '?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To',
-      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-    );
-    var threadData = JSON.parse(threadResp.getContentText());
-    var msgs = threadData.messages || [];
-    var subject = '', fromH = '', matchToH = '', draftMsgId = null;
-    if (msgs.length > 0) {
-      (msgs[0].payload && msgs[0].payload.headers || []).forEach(function(h) {
-        if (h.name === 'Subject') subject = h.value;
-        if (h.name === 'From') fromH = h.value;
-      });
+    // Use GmailApp service instead of REST — avoids premium UrlFetch quota entirely
+    var gmailThread = GmailApp.getThreadById(gmailThreadId);
+    var subject = '', fromH = '', matchToH = '', matchDraftId = null;
+    if (gmailThread) {
+      subject = gmailThread.getFirstMessageSubject();
+      var threadMsgs = gmailThread.getMessages();
+      if (threadMsgs.length > 0) fromH = threadMsgs[0].getFrom();
     }
-    // Find any draft message in this thread (DRAFT labelId)
-    msgs.forEach(function(msg) {
-      if (draftMsgId) return;
-      if ((msg.labelIds || []).indexOf('DRAFT') >= 0) {
-        draftMsgId = msg.id;
-        (msg.payload && msg.payload.headers || []).forEach(function(h) {
-          if (h.name === 'To') matchToH = h.value;
-        });
-      }
-    });
 
-    // Convert message ID → draft resource ID (needed to send/delete via API) — 1 fetch
-    var matchDraftId = null;
-    if (draftMsgId) {
+    // Find draft for this thread — GmailApp.getDrafts() uses Gmail service quota, not UrlFetch
+    var allDrafts = GmailApp.getDrafts();
+    for (var di = 0; di < allDrafts.length; di++) {
       try {
-        var draftListResp = UrlFetchApp.fetch(
-          'https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=100',
-          { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-        );
-        (JSON.parse(draftListResp.getContentText()).drafts || []).forEach(function(stub) {
-          if (!matchDraftId && stub.message && stub.message.threadId === gmailThreadId) {
-            matchDraftId = stub.id;
-          }
-        });
-      } catch(e3) { Logger.log('Draft list error: ' + e3); }
+        var dm = allDrafts[di].getMessage();
+        if (dm.getThread().getId() === gmailThreadId) {
+          matchDraftId = allDrafts[di].getId();
+          matchToH = dm.getTo();
+          break;
+        }
+      } catch(de) { Logger.log('Draft scan error: ' + de); }
     }
 
     var label = (subject || 'Email').replace(/^Re:\s*/i, '').substring(0, 55);
