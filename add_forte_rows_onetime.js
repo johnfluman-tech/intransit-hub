@@ -3299,3 +3299,15 @@ function stampForteNoStk_AllMissed_Jul30() {
   Logger.log('stampForteNoStk_AllMissed_Jul30 DONE — stamped: ' + updated + ', skipped (already done): ' + skipped + ', total matched: ' + (updated + skipped));
   if (missed === 0 && updated === 0) Logger.log('WARNING: 0 rows matched — check MPN spelling or sheet ID');
 }
+
+// ── Add Forte entry: BAV116T-7 — William Harrison/Advanced Silicon, US, 8/5/2026 ──
+// MSG_CHECKING draft queued via fix-queue (ID 28). Forte entry missed (0 prior entries).
+// TP=$0.10, qty=40000, OEM EXCESS qty=165,986. EPM1270T144C5N skipped (Forte entry 48 days old).
+function addForte_BAV116T7_Aug5() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow(['8/5/2026', 'BAV116T-7', 40000, 0.10, '', 'US',
+    '=C' + nextRow + '*D' + nextRow, '', '', '', 'Open']);
+  Logger.log('Added Forte row ' + nextRow + ': BAV116T-7, qty 40000, TP $0.10, US (William Harrison / Advanced Silicon)');
+}
