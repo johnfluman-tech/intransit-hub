@@ -1922,95 +1922,47 @@ function buildContextualCard(e) {
 
     var token = ScriptApp.getOAuthToken();
 
-    // Get thread subject + sender
+    // Get thread subject, sender, and scan for any DRAFT message — all one fetch
     var threadResp = UrlFetchApp.fetch(
       'https://gmail.googleapis.com/gmail/v1/users/me/threads/' + gmailThreadId +
-      '?format=metadata&metadataHeaders=Subject&metadataHeaders=From',
+      '?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To',
       { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
     );
     var threadData = JSON.parse(threadResp.getContentText());
     var msgs = threadData.messages || [];
-    var subject = '', fromH = '';
+    var subject = '', fromH = '', matchToH = '', draftMsgId = null;
     if (msgs.length > 0) {
       (msgs[0].payload && msgs[0].payload.headers || []).forEach(function(h) {
         if (h.name === 'Subject') subject = h.value;
         if (h.name === 'From') fromH = h.value;
       });
     }
-
-    // Look up D1 advice for this thread
-    var d1Advice = null;
-    try {
-      var d1Resp = UrlFetchApp.fetch(HUB_URL + '/api/drafts?status=pending&limit=100', {
-        headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
-      });
-      var d1Rows = JSON.parse(d1Resp.getContentText()).rows || [];
-      var d1Match = d1Rows.filter(function(r) { return r.thread_id === gmailThreadId; })[0];
-      if (d1Match) {
-        var content = d1Match.draft_content || '';
-        var advIdx = content.indexOf('[ADVICE_STORED]:');
-        if (advIdx >= 0) {
-          var after = content.substring(advIdx + '[ADVICE_STORED]:'.length);
-          var gIdx = after.indexOf('\n\n[GMAIL_DRAFT:');
-          d1Advice = (gIdx >= 0 ? after.substring(0, gIdx) : after).trim();
-        }
-      }
-    } catch(e2) { Logger.log('buildContextualCard D1 error: ' + e2); }
-
-    // Find a Gmail draft for this thread — paginate up to 500 drafts
-    var matchDraftId = null, matchToH = '';
-    try {
-      var allStubs = [], pageToken = null;
-      do {
-        var pageUrl = 'https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=100' +
-                      (pageToken ? '&pageToken=' + pageToken : '');
-        var listResp = UrlFetchApp.fetch(pageUrl,
-          { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
-        var listData = JSON.parse(listResp.getContentText());
-        var page = listData.drafts || [];
-        allStubs = allStubs.concat(page);
-        pageToken = listData.nextPageToken || null;
-      } while (pageToken && allStubs.length < 500 && !matchDraftId);
-
-      if (allStubs.length > 0) {
-        var reqs = allStubs.map(function(s) {
-          return {
-            url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + s.id + '?format=metadata&metadataHeaders=To',
-            headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true
-          };
+    // Find any draft message in this thread (DRAFT labelId)
+    msgs.forEach(function(msg) {
+      if (draftMsgId) return;
+      if ((msg.labelIds || []).indexOf('DRAFT') >= 0) {
+        draftMsgId = msg.id;
+        (msg.payload && msg.payload.headers || []).forEach(function(h) {
+          if (h.name === 'To') matchToH = h.value;
         });
-        var baseSubject = subject.replace(/^(Re:\s*)+/i, '').trim().toLowerCase();
-        var subjectFallback = null, subjectFallbackTo = '';
-        UrlFetchApp.fetchAll(reqs).forEach(function(r, i) {
-          if (r.getResponseCode() !== 200 || matchDraftId) return;
-          var d = JSON.parse(r.getContentText());
-          var headers = (d.message && d.message.payload && d.message.payload.headers) || [];
-          var draftTo = '', draftSubject = '';
-          headers.forEach(function(h) {
-            if (h.name === 'To') draftTo = h.value;
-            if (h.name === 'Subject') draftSubject = h.value;
-          });
-          // Primary match: same threadId
-          if (d.message && d.message.threadId === gmailThreadId) {
-            matchDraftId = allStubs[i].id;
-            matchToH = draftTo;
-          }
-          // Fallback: subject matches (catches MCP-created drafts not tied to thread)
-          if (!subjectFallback && baseSubject && draftSubject) {
-            var ds = draftSubject.replace(/^(Re:\s*)+/i, '').trim().toLowerCase();
-            if (ds === baseSubject) {
-              subjectFallback = allStubs[i].id;
-              subjectFallbackTo = draftTo;
-            }
+      }
+    });
+
+    // Convert message ID → draft resource ID (needed to send/delete via API) — 1 fetch
+    var matchDraftId = null;
+    if (draftMsgId) {
+      try {
+        var draftListResp = UrlFetchApp.fetch(
+          'https://gmail.googleapis.com/gmail/v1/users/me/drafts?maxResults=100',
+          { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+        );
+        (JSON.parse(draftListResp.getContentText()).drafts || []).forEach(function(stub) {
+          if (!matchDraftId && stub.message && stub.message.threadId === gmailThreadId) {
+            matchDraftId = stub.id;
           }
         });
-        // Use subject fallback only if threadId match wasn't found
-        if (!matchDraftId && subjectFallback) {
-          matchDraftId = subjectFallback;
-          matchToH = subjectFallbackTo;
-        }
-      }
-    } catch(e3) { Logger.log('buildContextualCard draft search error: ' + e3); }
+      } catch(e3) { Logger.log('Draft list error: ' + e3); }
+    }
 
     var label = (subject || 'Email').replace(/^Re:\s*/i, '').substring(0, 55);
     var builder = CardService.newCardBuilder()
@@ -2023,10 +1975,6 @@ function buildContextualCard(e) {
 
       var infoSection = CardService.newCardSection().setHeader('📝 Draft ready');
       infoSection.addWidget(CardService.newTextParagraph().setText('To: ' + (matchToH || 'unknown')));
-      if (d1Advice) {
-        var short = d1Advice.length > 250 ? d1Advice.substring(0, 247) + '...' : d1Advice;
-        infoSection.addWidget(CardService.newTextParagraph().setText('💡 ' + short));
-      }
       infoSection.addWidget(CardService.newTextButton()
         .setText('✅ Send')
         .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
@@ -2075,10 +2023,6 @@ function buildContextualCard(e) {
     } else {
       var noSection = CardService.newCardSection().setHeader('📥 No draft — create one now');
       noSection.addWidget(CardService.newTextParagraph().setText('From: ' + (fromH || 'unknown')));
-      if (d1Advice) {
-        noSection.addWidget(CardService.newTextParagraph()
-          .setText('⚠️ Previously processed — draft may have been sent or deleted.'));
-      }
       noSection.addWidget(CardService.newTextInput()
         .setFieldName('draftInstruction')
         .setTitle('Tell me what to draft')
