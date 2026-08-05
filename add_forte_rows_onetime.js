@@ -3323,6 +3323,17 @@ function deleteOemExcessNoStk_Aug5() {
   Logger.log('deleteOemExcessNoStk_Aug5 DONE — processed ' + rowsToDelete.length + ' rows');
 }
 
+// ── Delete OEM EXCESS row: XGL4030-152MEC — David no stk 8/5/2026 ──
+// Row 134048 (1573 qty). Forte row 4230 already exists. Fix-queue #48 queued reply.
+function deleteOemExcessNoStk_XGL4030_Aug5() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  sheet.getRange(134048, 5).setValue('NO STK 8/5/2026');
+  sheet.deleteRow(134048);
+  SpreadsheetApp.flush();
+  Logger.log('Deleted OEM EXCESS row 134048: XGL4030-152MEC');
+}
+
 // ── Add Forte entry: BAV116T-7 — William Harrison/Advanced Silicon, US, 8/5/2026 ──
 // MSG_CHECKING draft queued via fix-queue (ID 28). Forte entry missed (0 prior entries).
 // TP=$0.10, qty=40000, OEM EXCESS qty=165,986. EPM1270T144C5N skipped (Forte entry 48 days old).
