@@ -3300,6 +3300,29 @@ function stampForteNoStk_AllMissed_Jul30() {
   if (missed === 0 && updated === 0) Logger.log('WARNING: 0 rows matched — check MPN spelling or sheet ID');
 }
 
+// ── Delete David no-stk rows from OEM EXCESS — 8/5/2026 ──
+// 11 parts David reported no stk / parts sold. Stamp col E then delete in descending row order.
+// Row numbers verified via web app lookup by MPN.
+function deleteOemExcessNoStk_Aug5() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var today = '8/5/2026';
+  // Rows sorted descending so deletes don't shift lower-numbered rows
+  var rowsToDelete = [129829, 126312, 125228, 125227, 125226, 125225, 125224, 125187,
+                      112764, 83633, 70313, 69761, 69728, 69727, 45617, 39016];
+  rowsToDelete.forEach(function(r) {
+    try {
+      sheet.getRange(r, 5).setValue('NO STK ' + today);
+      sheet.deleteRow(r);
+      Logger.log('Deleted OEM EXCESS row ' + r);
+    } catch(e) {
+      Logger.log('Error on row ' + r + ': ' + e);
+    }
+  });
+  SpreadsheetApp.flush();
+  Logger.log('deleteOemExcessNoStk_Aug5 DONE — processed ' + rowsToDelete.length + ' rows');
+}
+
 // ── Add Forte entry: BAV116T-7 — William Harrison/Advanced Silicon, US, 8/5/2026 ──
 // MSG_CHECKING draft queued via fix-queue (ID 28). Forte entry missed (0 prior entries).
 // TP=$0.10, qty=40000, OEM EXCESS qty=165,986. EPM1270T144C5N skipped (Forte entry 48 days old).
