@@ -3140,12 +3140,12 @@ function extractMPN(subject) {
 
 function extractMPNFromSubject(subject) {
   if (!subject) return null;
-  var nc = subject.match(/\|\s*([A-Z0-9][A-Z0-9\-\/\.\s]{2,40})\s*\)?$/i);
+  var nc = subject.match(/\|\s*([A-Z0-9][A-Z0-9\-\/\.#\+\s]{2,40})\s*\)?$/i);
   if (nc) return nc[1].trim().replace(/\s{2,}/g, ' ');
-  var ic = subject.match(/RFQ[:\-\s]+([A-Z0-9][A-Z0-9\-\/\.]{4,})/i);
+  var ic = subject.match(/RFQ[:\-\s]+([A-Z0-9][A-Z0-9\-\/\.#\+]{4,})/i);
   if (ic) return ic[1].trim();
   // "RFQ for Xpcs of MPN" — e.g. "RFQ for 15pcs of XCF08PVOG48C"
-  var ofMpn = subject.match(/\bof\s+([A-Z][A-Z0-9\-\/\.]{4,})\s*$/i);
+  var ofMpn = subject.match(/\bof\s+([A-Z][A-Z0-9\-\/\.#\+]{4,})\s*$/i);
   if (ofMpn && /[0-9]/.test(ofMpn[1])) return ofMpn[1].trim();
   return null;
 }
