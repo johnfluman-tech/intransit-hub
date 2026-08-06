@@ -3682,12 +3682,27 @@ function processCommandQueue() {
         } else if (cmd.type === 'remove_oem_mpn') {
           var mpn = (data.mpn || '').trim();
           if (!mpn) throw new Error('No MPN provided');
-          var result = deletePart(mpn, 'Hub command: remove_oem_mpn');
-          if (result === 'NOT_FOUND') throw new Error('MPN not found in OEM EXCESS: ' + mpn);
-          if (result === 'MULTIPLE') throw new Error('Multiple exact matches for ' + mpn + ' — review email sent to John');
-          if (result === 'FUZZY_REVIEW') throw new Error('Ambiguous match for ' + mpn + ' — review email sent to John');
-          updateForteSheet(mpn);
-          hubLog('inventory', 'Hub command: removed ' + mpn + ' from OEM EXCESS (result: ' + result + ')', { mpn: mpn, result: result });
+          // Delete ALL matching rows directly — no review emails, handles multiple lots
+          var oemSS = SpreadsheetApp.openById(SPREADSHEET_ID);
+          var oemSheet = oemSS.getSheetByName(MAIN_SHEET_NAME);
+          var oemData = oemSheet.getDataRange().getValues();
+          var noStkStamp = 'NO STK ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+          var normTarget = normalize(mpn);
+          var toDelete = [];
+          for (var oi = oemData.length - 1; oi >= 1; oi--) {
+            if (normalize(String(oemData[oi][0] || '')) === normTarget) toDelete.push(oi + 1);
+          }
+          if (!toDelete.length) {
+            hubLog('inventory', 'remove_oem_mpn: not found (already removed?) ' + mpn, { mpn: mpn });
+          } else {
+            toDelete.forEach(function(row) {
+              oemSheet.getRange(row, 5).setValue(noStkStamp);
+              oemSheet.deleteRow(row);
+            });
+            SpreadsheetApp.flush();
+            updateForteSheet(mpn);
+            hubLog('inventory', 'remove_oem_mpn: deleted ' + toDelete.length + ' row(s) for ' + mpn, { mpn: mpn, rows: toDelete.length });
+          }
 
         } else if (cmd.type === 'add_forte_entry') {
           var mpn = (data.mpn || '').trim();
