@@ -3334,6 +3334,18 @@ function addStan_XC6SLX16_BonnieChan_Aug6() {
   Logger.log('Stan sheet: added XC6SLX16-2CSG324C | CN | qty=212 | no TP (Bonnie Chan, Shenzhen Hengchenxin Tech)');
 }
 
+// ── Delete OEM EXCESS rows: MT29F4G08ABADAWP-IT:D (row 105975) + 8L02-05-00 (row 61132) — David no stk/cant share 8/6/2026 ──
+function deleteOemExcessNoStk_Aug6() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  [105975, 61132].forEach(function(r) {
+    sheet.getRange(r, 5).setValue('NO STK 8/6/2026');
+    sheet.deleteRow(r);
+    Logger.log('Deleted OEM EXCESS row ' + r);
+  });
+  SpreadsheetApp.flush();
+}
+
 // ── Delete OEM EXCESS row: XGL4030-152MEC — David no stk 8/5/2026 ──
 // Row 134048 (1573 qty). Forte row 4230 already exists. Fix-queue #48 queued reply.
 function deleteOemExcessNoStk_XGL4030_Aug5() {
