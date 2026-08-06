@@ -3323,6 +3323,17 @@ function deleteOemExcessNoStk_Aug5() {
   Logger.log('deleteOemExcessNoStk_Aug5 DONE — processed ' + rowsToDelete.length + ' rows');
 }
 
+// ── Add Stan sheet row: XC6SLX16-2CSG324C — Bonnie Chan, Shenzhen Hengchenxin Tech, CN ──
+// W3_CHECKING draft queued (fix-queue #49). Qty 212, no TP given.
+// Stan sheet already has a USA entry (row 361, Aug 4) from different buyer — appending CN row directly.
+function addStan_XC6SLX16_BonnieChan_Aug6() {
+  var STAN_SHEET_ID = '1pGRDpkqftQNoEYna53MxRJfUY8jEf5_w32FNa56OUIM';
+  var sheet = SpreadsheetApp.openById(STAN_SHEET_ID).getSheets()[0];
+  sheet.appendRow(['', '', '', '8/6/2026', 'XC6SLX16-2CSG324C', 'CN', 212, '']);
+  SpreadsheetApp.flush();
+  Logger.log('Stan sheet: added XC6SLX16-2CSG324C | CN | qty=212 | no TP (Bonnie Chan, Shenzhen Hengchenxin Tech)');
+}
+
 // ── Delete OEM EXCESS row: XGL4030-152MEC — David no stk 8/5/2026 ──
 // Row 134048 (1573 qty). Forte row 4230 already exists. Fix-queue #48 queued reply.
 function deleteOemExcessNoStk_XGL4030_Aug5() {
