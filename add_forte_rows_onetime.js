@@ -3357,6 +3357,105 @@ function deleteOemExcessNoStk_XGL4030_Aug5() {
   Logger.log('Deleted OEM EXCESS row 134048: XGL4030-152MEC');
 }
 
+// ── Bulk: Update Forte NO STK + delete OEM EXCESS + draft replies — all David no-stk 8/6/2026 ──
+// 43 MPNs: Jul 22 – Aug 6. Only stamps Forte entries still "Open" (preserves existing NO STK dates).
+// Also deletes any remaining OEM EXCESS rows and creates 3 pending "Ok, removed" draft replies.
+function processAllDavidNoStk_Aug6() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var OEM_SHEET_ID   = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var STATUS_COL = 10; // col K (0-indexed)
+  var noStkStatus = 'NO STK - 8/6/2026';
+
+  function norm(m) { return String(m).replace(/[-\s,\/\.:\+#]/g, '').toUpperCase(); }
+
+  var mpns = [
+    // Aug 6
+    'MT29F4G08ABADAWP-IT:D','STM32F103RCT6TR','8L02-05-00',
+    // Aug 5
+    'TPSM82822SILR','BAT54BRW-7-F','FDB045AN08A0','MAX14662ETI+','SISS05DN-T1-GE3',
+    'XGL4030-152MEC','MAX14662','TPS61029DRCR','14212R-500','492-90-045',
+    '22320-200','T50SDP6HB6P','BAV116T-7','PMEG4010BEA,115','BCM5222KQMG',
+    // Aug 4
+    'TPS82150SILR','NLAS4599DFT2G',
+    // Aug 3
+    'STM32G071G8U6TR',
+    // Jul 29
+    'STM32L031G6U6TR','PI3106-00-HVMZ','XC7A35T-1CSG325I',
+    // Jul 31
+    'HSMS-282C-TR1G',
+    // Jul 30
+    'MT60B1G16HD-64B:H','BU-67301B0T0R-E02','LTM4627EVPBF','HFS002TFM9X186N','GRM188C61E226ME01D',
+    // Jul 28
+    'FEMDME004G-A8A39','MT46V32M16P-5BIT.J',
+    // Jul 27
+    'STM32H742VIT6','TPSM53602RDAR',
+    // Jul 24
+    'MIC5219-3.3YML-TR',
+    // Jul 23
+    'ADUM1100ARZ-RL7','1410187-3','WG82574IT','XCF08PVOG48C',
+    // Jul 22
+    'TPS563200DDCR','EPM7032LC44-15T','553SCMGI8'
+  ];
+
+  var normSet = {};
+  mpns.forEach(function(m) { normSet[norm(m)] = true; });
+
+  // ── 1. Forte: stamp "NO STK - 8/6/2026" only on Open entries ──
+  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var forteData = forteSheet.getDataRange().getValues();
+  var forteUpdated = 0;
+  for (var i = 1; i < forteData.length; i++) {
+    var mpn = String(forteData[i][1]).trim();
+    var status = String(forteData[i][STATUS_COL]).trim().toUpperCase();
+    if (normSet[norm(mpn)] && status !== 'CLOSED' && !status.startsWith('NO STK')) {
+      var cell = forteSheet.getRange(i + 1, STATUS_COL + 1);
+      cell.clearDataValidations();
+      cell.setValue(noStkStatus);
+      cell.setBackground('#000000');
+      cell.setFontColor('#FFFFFF');
+      cell.setFontWeight('bold');
+      forteUpdated++;
+    }
+  }
+  SpreadsheetApp.flush();
+  Logger.log('Forte: updated ' + forteUpdated + ' entries to NO STK');
+
+  // ── 2. OEM EXCESS: delete any remaining rows for these MPNs ──
+  var oemSheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  var oemData = oemSheet.getDataRange().getValues();
+  var toDelete = [];
+  for (var oi = oemData.length - 1; oi >= 1; oi--) {
+    if (normSet[norm(String(oemData[oi][0]))]) toDelete.push(oi + 1);
+  }
+  toDelete.forEach(function(row) {
+    oemSheet.getRange(row, 5).setValue('NO STK 8/6/2026');
+    oemSheet.deleteRow(row);
+  });
+  if (toDelete.length) SpreadsheetApp.flush();
+  Logger.log('OEM EXCESS: deleted ' + toDelete.length + ' remaining rows');
+
+  // ── 3. Draft "Ok, removed from listing." for 3 threads with no reply yet ──
+  var sigHtml = '<br><br><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">Regards,</span></b></div><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">John Fluman</span></b></div><div><b><span style="color:rgb(31,73,125);font-family:Arial,sans-serif;font-size:8pt">Intransit Technologies</span></b></div><div><a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a></div><div><i><span style="color:gray;font-family:Arial,sans-serif;font-size:7.5pt">An ISO 9001 Certified Company</span></i></div><div><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:8pt">Toll (877) 677-5868 x101 - Local (949) 481-7935 x101</span></div><br><div><span style="color:rgb(166,166,166);font-family:Calibri,sans-serif;font-size:8pt">The information contained in this communication and its attachment(s) is intended only for the use of the individual to whom it is addressed and may contain information that is privileged, confidential, or exempt from disclosure. If the reader of this message is not the intended recipient, you are hereby notified that any dissemination, distribution, or copying of this communication is strictly prohibited. If you have received this communication in error, please notify <a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a> and delete the communication without retaining any copies. Thank you.</span></div>';
+  var pending = [
+    { threadId: '19fcf9d74627621b', mpn: 'TPS82150SILR' },
+    { threadId: '19fc81252940eda1', mpn: 'STM32G071G8U6TR' },
+    { threadId: '19fae1a189b23e60', mpn: 'STM32L031G6U6TR' }
+  ];
+  var draftsCreated = 0;
+  pending.forEach(function(item) {
+    try {
+      var thread = GmailApp.getThreadById(item.threadId);
+      if (!thread) { Logger.log('Thread not found: ' + item.threadId + ' (' + item.mpn + ')'); return; }
+      var msgs = thread.getMessages();
+      msgs[msgs.length - 1].createDraftReply('', { htmlBody: 'Ok, removed from listing.' + sigHtml });
+      draftsCreated++;
+      Logger.log('Draft created: ' + item.mpn + ' (' + item.threadId + ')');
+    } catch(e) { Logger.log('Draft error ' + item.mpn + ': ' + e); }
+  });
+
+  Logger.log('processAllDavidNoStk_Aug6 DONE — Forte: ' + forteUpdated + ', OEM rows: ' + toDelete.length + ', Drafts: ' + draftsCreated);
+}
+
 // ── Add Forte entry: BAV116T-7 — William Harrison/Advanced Silicon, US, 8/5/2026 ──
 // MSG_CHECKING draft queued via fix-queue (ID 28). Forte entry missed (0 prior entries).
 // TP=$0.10, qty=40000, OEM EXCESS qty=165,986. EPM1270T144C5N skipped (Forte entry 48 days old).
