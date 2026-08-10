@@ -401,7 +401,7 @@ async function handleGetApps(env) {
 }
 
 async function handleFixDraft(request, env) {
-  const { draft_body, feedback, subject, to_email, thread_id } = await request.json();
+  const { draft_body, feedback, subject, to_email, thread_id, thread_content } = await request.json();
   if (!feedback) return json({ error: 'feedback is required' }, 400);
 
   const systemPrompt = `You are an email assistant for John Fluman at Intransit Technologies (electronic components distributor specializing in OEM excess inventory).
@@ -414,18 +414,24 @@ NEED_TP_500: "We need a target price to proceed. Please note there is a $500 min
 NEED_TP_2000: "We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away."
 BILL: "Bill will help with this request"
 W3_CHECKING: "Warehouse is checking details and I will update ASAP"
+OK_REMOVE: "Ok, removed from listing."
+OK_NOTED: "Ok, noted."
 
 RULES:
-- If the fix involves "checking on it" → use MSG_CHECKING word for word
+- If the fix involves "checking on it" for an OEM EXCESS part → use MSG_CHECKING word for word
 - If the fix involves "need TP" → use NEED_TP_500 or NEED_TP_2000 word for word
 - If the fix involves routing to Bill → use BILL word for word
 - If the fix involves a Warehouse#3 / Warehouse#4 / any external Warehouse#N part checking reply → use W3_CHECKING word for word
+- If the thread is a David/Steve no-stock reply (subject contains "No stk", "No stock", "NO STOCK", "Cant share", etc., or sender is david@fortetechno.com / david@fortecomp.com / steve@fortetechno.com) → use OK_REMOVE word for word
+- If someone (like Bill) tagged John to remove a part from NetComp or a listing → use OK_REMOVE word for word
+- If acknowledging an internal note with no required action → use OK_NOTED word for word
 - Do NOT include a signature (it is added automatically)
 - Return ONLY valid JSON: {"corrected_body": "...", "advice": "..."}
   corrected_body = the fixed email text (plain text, no HTML)
   advice = one sentence explaining what was wrong and what was corrected (for John's reference in the sidebar)`;
 
-  const userMsg = `Current draft body:\n"${draft_body || '(empty)'}"\n\nFeedback (what was wrong):\n"${feedback}"\n\nSubject: ${subject || '(unknown)'}\nTo: ${to_email || '(unknown)'}\n\nRewrite the draft to fix the issue. Return JSON only.`;
+  const threadSection = thread_content ? `\n\nThread context:\n${thread_content.substring(0, 5000)}` : '';
+  const userMsg = `Current draft body:\n"${draft_body || '(empty)'}"\n\nFeedback (what was wrong):\n"${feedback}"\n\nSubject: ${subject || '(unknown)'}\nTo: ${to_email || '(unknown)'}${threadSection}\n\nRewrite the draft to fix the issue. Return JSON only.`;
 
   const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
