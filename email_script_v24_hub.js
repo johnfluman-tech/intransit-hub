@@ -3796,6 +3796,20 @@ function processCommandQueue() {
 
           sendPleasePostViaREST(token, oemBlob, inBlob, DATAMASTER_BCC);
           hubLog('inventory', 'Sent NetCOMPONENTS report (OEM_EXCESS + IN STOCK) to ' + DATAMASTER_BCC, {});
+
+        } else if (cmd.type === 'read_sheet_rows') {
+          var sheetId   = (data.sheet_id   || '').trim();
+          var rangeName = (data.range      || '').trim();
+          var sheetName = (data.sheet_name || '').trim();
+          if (!sheetId)   throw new Error('read_sheet_rows: no sheet_id');
+          if (!rangeName) throw new Error('read_sheet_rows: no range');
+          var rss   = SpreadsheetApp.openById(sheetId);
+          var rsheet = sheetName ? rss.getSheetByName(sheetName) : rss.getSheets()[0];
+          if (!rsheet)    throw new Error('read_sheet_rows: sheet "' + sheetName + '" not found');
+          var values = rsheet.getRange(rangeName).getValues();
+          hubLog('sheet_data', 'read_sheet_rows: ' + rangeName + ' (' + sheetId + ')', { sheet_id: sheetId, range: rangeName, rows: values });
+          Logger.log('read_sheet_rows: ' + values.length + ' rows returned for ' + rangeName);
+
         } else {
           throw new Error('Unknown command type: ' + cmd.type);
         }
