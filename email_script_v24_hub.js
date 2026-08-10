@@ -2274,6 +2274,13 @@ function buildHomepageCard() {
         .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
         .setOnClickAction(CardService.newAction().setFunctionName('addonProcessNext'))
     );
+    processSection.addWidget(
+      CardService.newTextButton()
+        .setText('Fix Claude Drafts')
+        .setBackgroundColor('#1565c0')
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setOnClickAction(CardService.newAction().setFunctionName('addonFixClaudeDrafts'))
+    );
     builder.addSection(processSection);
 
     if (drafts.length === 0) {
@@ -2446,6 +2453,58 @@ function buildHomepageCard() {
       .addSection(CardService.newCardSection()
         .addWidget(CardService.newTextParagraph().setText(err.toString())))
       .build();
+  }
+}
+
+
+// Card action: schedules background fix via trigger, returns immediately to avoid 30s timeout
+function addonFixClaudeDrafts() {
+  try {
+    // Delete any existing pending fix triggers first
+    ScriptApp.getProjectTriggers().forEach(function(t) {
+      if (t.getHandlerFunction() === 'runClaudeDraftFix_') ScriptApp.deleteTrigger(t);
+    });
+    // Schedule background run
+    ScriptApp.newTrigger('runClaudeDraftFix').timeBased().after(3000).create();
+
+    var card = CardService.newCardBuilder()
+      .setHeader(CardService.newCardHeader()
+        .setTitle('Fix Claude Drafts')
+        .setSubtitle('Processing in background...'))
+      .addSection(CardService.newCardSection()
+        .addWidget(CardService.newTextParagraph()
+          .setText('Scanning and fixing "claude" drafts now. Check your Gmail drafts in ~30 seconds. Results are logged in Apps Script execution log.')));
+
+    return CardService.newActionResponseBuilder()
+      .setNavigation(CardService.newNavigation().pushCard(card.build()))
+      .build();
+  } catch(err) {
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('Error: ' + err.toString()))
+      .build();
+  }
+}
+
+// Background trigger handler — runs findAndFixClaudeDrafts with full 6-min Apps Script limit
+function runClaudeDraftFix() {
+  // Clean up this trigger
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'runClaudeDraftFix') ScriptApp.deleteTrigger(t);
+  });
+  try {
+    var results = findAndFixClaudeDrafts();
+    Logger.log('Fix Claude Drafts: found ' + results.length + ' draft(s)');
+    results.forEach(function(r) {
+      try {
+        applyClaudeDraftFix(r.draft_id, r.thread_id, r.to_email, r.subject, r.corrected_body);
+        Logger.log('Fixed: ' + r.subject + ' → ' + r.corrected_body.substring(0, 80));
+      } catch(e) {
+        Logger.log('Error fixing "' + r.subject + '": ' + e.toString());
+      }
+    });
+    Logger.log('Fix Claude Drafts: complete');
+  } catch(e) {
+    Logger.log('runClaudeDraftFix_ error: ' + e.toString());
   }
 }
 
@@ -3447,6 +3506,110 @@ function getRFC2822MessageId(gmailMsgId) {
 }
 
 
+// ── Sidebar: "Fix Claude Drafts" — finds drafts where body starts with "claude" ──
+function findAndFixClaudeDrafts() {
+  var results = [];
+  var data = gmailREST_('/drafts?maxResults=50');
+  var drafts = (data.drafts || []);
+
+  for (var i = 0; i < drafts.length; i++) {
+    var d = drafts[i];
+    var msgId = d.message && d.message.id;
+    if (!msgId) continue;
+    try {
+      var msg = GmailApp.getMessageById(msgId);
+      if (!msg) continue;
+      var body = (msg.getPlainBody() || '').trim();
+      if (!/^claude\b/i.test(body)) continue;
+
+      var thread    = msg.getThread();
+      var threadId  = thread.getId();
+      var messages  = thread.getMessages();
+      var rawSubj   = thread.getFirstMessageSubject();
+      var subject   = 'Re: ' + rawSubj.replace(/^Re:\s*/i, '');
+      var toEmail   = msg.getTo();
+
+      // If To header is empty fall back to last non-John sender
+      if (!toEmail) {
+        for (var mi = messages.length - 1; mi >= 0; mi--) {
+          var fe = extractBuyerEmail(messages[mi].getFrom());
+          if (fe && fe.indexOf('intransittech.com') === -1) { toEmail = fe; break; }
+        }
+      }
+
+      // Build thread content for context
+      var parts = ['Subject: ' + rawSubj];
+      messages.forEach(function(m, idx) {
+        var mb = (m.getPlainBody() || '').split('\n')
+          .filter(function(ln) { return ln.charAt(0) !== '>'; })
+          .join('\n').trim().substring(0, 1500);
+        parts.push('--- Msg ' + (idx + 1) + ' | From: ' + m.getFrom() + ' ---');
+        parts.push(mb);
+      });
+      var threadContent = parts.join('\n').substring(0, 5000);
+
+      var fixResp = UrlFetchApp.fetch(HUB_URL + '/api/fix-draft', {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          draft_body: 'claude',
+          feedback: 'Draft body says "claude" as a placeholder. Determine the correct reply based on the thread context.',
+          subject: subject,
+          to_email: toEmail,
+          thread_content: threadContent
+        }),
+        headers: { Authorization: 'Bearer ' + HUB_SECRET },
+        muteHttpExceptions: true
+      });
+      var fix = {};
+      try { fix = JSON.parse(fixResp.getContentText()); } catch(e) {}
+
+      results.push({
+        draft_id:       d.id,
+        thread_id:      threadId,
+        subject:        subject,
+        to_email:       toEmail,
+        corrected_body: fix.corrected_body || '(could not determine)',
+        advice:         fix.advice || ''
+      });
+    } catch(e) {
+      hubLog('error', 'findAndFixClaudeDrafts: ' + e, {});
+    }
+  }
+  return results;
+}
+
+
+function applyClaudeDraftFix(draftId, threadId, toEmail, subject, correctedBody) {
+  if (!correctedBody || correctedBody === '(could not determine)') {
+    throw new Error('No valid corrected body — draft left unchanged');
+  }
+  if (!toEmail) throw new Error('No recipient — draft left unchanged');
+
+  // Create new draft FIRST, then delete old one so we never lose the draft
+  var resp = UrlFetchApp.fetch(HUB_URL + '/api/gmail/draft', {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      to:        toEmail,
+      subject:   subject,
+      body:      correctedBody,
+      thread_id: threadId
+    }),
+    headers: { Authorization: 'Bearer ' + HUB_SECRET },
+    muteHttpExceptions: true
+  });
+  var result = {};
+  try { result = JSON.parse(resp.getContentText()); } catch(e) {}
+  if (!result.ok) throw new Error('Draft creation failed: ' + JSON.stringify(result));
+
+  // Only delete the old draft once the new one is confirmed created
+  gmailREST_('/drafts/' + draftId, 'DELETE');
+
+  return { ok: true, draft_id: result.draft_id };
+}
+
+
 function getSidebarHTML_() {
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' +
     '*{box-sizing:border-box}body{font-family:Arial,sans-serif;padding:16px;background:#f5f5f5;margin:0}' +
@@ -3467,8 +3630,18 @@ function getSidebarHTML_() {
     '<h2>Intransit Hub</h2>' +
     '<button class="btn" id="btn" onclick="go()">Process Next Email</button>' +
     '<div class="card" id="card"></div>' +
+
+    '<div style="margin-top:20px;padding-top:14px;border-top:2px solid #1a3c6d">' +
+    '<h2 style="margin:0 0 10px">Fix Claude Drafts</h2>' +
+    '<button class="btn" id="clbtn" onclick="checkDrafts()">Check Claude Drafts</button>' +
+    '<div class="card" id="clcard"></div>' +
+    '</div>' +
+
     '<script>' +
     'var btn=document.getElementById("btn"),card=document.getElementById("card");' +
+    'var clbtn=document.getElementById("clbtn"),clcard=document.getElementById("clcard");' +
+
+    // ── Process Next Email ──
     'function go(){' +
     'btn.disabled=true;btn.innerHTML=\'<span class="spin"></span> Processing...\';card.style.display="none";' +
     'google.script.run.withSuccessHandler(onDone).withFailureHandler(onErr).processNextEmailManual();}' +
@@ -3484,6 +3657,39 @@ function getSidebarHTML_() {
     '}catch(ex){card.className="card err";card.innerHTML=\'<span class="badge error">Display error</span><div class="msg">\'+esc(ex.message)+\'</div>\';card.style.display="block";}' +
     'finally{btn.disabled=false;btn.innerHTML="Process Next Email";}}' +
     'function onErr(ex){card.className="card err";card.innerHTML=\'<span class="badge error">Error</span><div class="msg">\'+esc(ex.message||String(ex))+\'</div>\';card.style.display="block";btn.disabled=false;btn.innerHTML="Process Next Email";}' +
+
+    // ── Fix Claude Drafts ──
+    'var _cdResults=[];' +
+    'function checkDrafts(){' +
+    'clbtn.disabled=true;clbtn.innerHTML=\'<span class="spin"></span> Checking...\';clcard.style.display="none";' +
+    'google.script.run.withSuccessHandler(onDraftsDone).withFailureHandler(onDraftsErr).findAndFixClaudeDrafts();}' +
+
+    'function onDraftsDone(results){' +
+    'clbtn.disabled=false;clbtn.innerHTML="Check Claude Drafts";' +
+    '_cdResults=results||[];' +
+    'if(!_cdResults.length){' +
+    'clcard.className="card";clcard.innerHTML=\'<span class="badge no_action">No Claude Drafts</span><div class="msg">All drafts look good.</div>\';clcard.style.display="block";return;}' +
+    'var html=\'<span class="badge">\'+_cdResults.length+\' Draft(s) Found</span>\';' +
+    '_cdResults.forEach(function(r,i){' +
+    'html+=\'<div style="margin-top:12px;padding:10px;background:#f8f8f8;border-radius:4px;border-left:3px solid #4a6fc7">\';' +
+    'html+=\'<div class="subj">\'+esc(r.subject)+\'</div>\';' +
+    'html+=\'<div class="frm">To: \'+esc(r.to_email)+\'</div>\';' +
+    'html+=\'<div class="draft">→ \'+esc(r.corrected_body)+\'</div>\';' +
+    'if(r.advice)html+=\'<div class="msg">\'+esc(r.advice)+\'</div>\';' +
+    'html+=\'<button class="btn" style="margin-top:8px" id="fixbtn\'+i+\'" onclick="applyFix(\'+i+\')">Apply Fix</button>\';' +
+    'html+=\'</div>\';});' +
+    'clcard.className="card";clcard.innerHTML=html;clcard.style.display="block";}' +
+
+    'function onDraftsErr(ex){clcard.className="card err";clcard.innerHTML=\'<span class="badge error">Error</span><div class="msg">\'+esc(ex.message||String(ex))+\'</div>\';clcard.style.display="block";clbtn.disabled=false;clbtn.innerHTML="Check Claude Drafts";}' +
+
+    'function applyFix(i){' +
+    'var r=_cdResults[i];var fb=document.getElementById("fixbtn"+i);' +
+    'fb.disabled=true;fb.innerHTML=\'<span class="spin"></span> Applying...\';' +
+    'google.script.run' +
+    '.withSuccessHandler(function(){fb.innerHTML="✓ Fixed";fb.style.background="#2a8a2a";})' +
+    '.withFailureHandler(function(e){fb.disabled=false;fb.innerHTML="Retry";alert("Error: "+(e.message||String(e)));})' +
+    '.applyClaudeDraftFix(r.draft_id,r.thread_id,r.to_email,r.subject,r.corrected_body);}' +
+
     'function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}' +
     '<\/script></body></html>';
 }
@@ -3556,7 +3762,9 @@ function gmailREST_(path, method, body) {
   };
   if (body) { opts.contentType = 'application/json'; opts.payload = JSON.stringify(body); }
   var resp = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me' + path, opts);
-  var data = JSON.parse(resp.getContentText());
+  var text = resp.getContentText();
+  if (!text || !text.trim()) return {};   // 204 No Content (e.g. DELETE) returns empty body
+  var data = JSON.parse(text);
   if (data.error) { hubLog('error', 'gmailREST_ ' + (method||'GET') + ' ' + path + ': ' + data.error.message, {}); }
   return data;
 }
@@ -3735,6 +3943,33 @@ function processCommandQueue() {
           if (!found) throw new Error('Draft not found: ' + draftId);
           hubLog('drafts', 'Deleted draft ' + draftId, { draft_id: draftId });
 
+        } else if (cmd.type === 'delete_thread_drafts') {
+          var threadId = (data.thread_id || '').trim();
+          if (!threadId) throw new Error('No thread_id provided');
+          var allDrafts = GmailApp.getDrafts();
+          var delCount = 0;
+          allDrafts.forEach(function(draft) {
+            try {
+              if (draft.getMessage().getThread().getId() === threadId) {
+                draft.deleteDraft();
+                delCount++;
+              }
+            } catch(e) {}
+          });
+          hubLog('drafts', 'delete_thread_drafts: deleted ' + delCount + ' draft(s) in thread ' + threadId, { thread_id: threadId, count: delCount });
+
+        } else if (cmd.type === 'delete_forte_row') {
+          var rowNum = parseInt(data.row, 10);
+          var expectedMpn = (data.mpn || '').trim();
+          if (!rowNum) throw new Error('No row number provided');
+          var fSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+          var actualMpn = String(fSheet.getRange(rowNum, 2).getValue()).trim();
+          if (expectedMpn && actualMpn.toUpperCase() !== expectedMpn.toUpperCase()) {
+            throw new Error('delete_forte_row safety check failed: row ' + rowNum + ' MPN is "' + actualMpn + '" not "' + expectedMpn + '"');
+          }
+          fSheet.deleteRow(rowNum);
+          hubLog('inventory', 'delete_forte_row: deleted row ' + rowNum + ' (' + actualMpn + ')', { row: rowNum, mpn: actualMpn });
+
         } else if (cmd.type === 'send_datamaster_email') {
           var token = ScriptApp.getOAuthToken();
           var fetchOpts = { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true };
@@ -3793,6 +4028,8 @@ function processCommandQueue() {
 
           sendPleasePostViaREST(token, oemBlob, inBlob, DATAMASTER_BCC);
           hubLog('inventory', 'Sent NetCOMPONENTS report (OEM_EXCESS + IN STOCK) to ' + DATAMASTER_BCC, {});
+        } else {
+          throw new Error('Unknown command type: ' + cmd.type);
         }
 
         UrlFetchApp.fetch(HUB_URL + '/api/command-queue/' + cmd.id, {
