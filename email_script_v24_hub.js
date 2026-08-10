@@ -2382,9 +2382,10 @@ function buildHomepageCard() {
 // Card action: schedules background fix via trigger, returns immediately to avoid 30s timeout
 function addonFixClaudeDrafts() {
   try {
-    // Delete any existing pending fix triggers first (no trailing underscore)
+    // Delete ALL runClaudeDraftFix triggers (with or without underscore suffix)
     ScriptApp.getProjectTriggers().forEach(function(t) {
-      if (t.getHandlerFunction() === 'runClaudeDraftFix') ScriptApp.deleteTrigger(t);
+      var fn = t.getHandlerFunction();
+      if (fn === 'runClaudeDraftFix' || fn === 'runClaudeDraftFix_') ScriptApp.deleteTrigger(t);
     });
     // Schedule background run
     ScriptApp.newTrigger('runClaudeDraftFix').timeBased().after(3000).create();
@@ -2409,9 +2410,10 @@ function addonFixClaudeDrafts() {
 
 // Background trigger handler — runs findAndFixClaudeDrafts with full 6-min Apps Script limit
 function runClaudeDraftFix() {
-  // Clean up this trigger
+  // Clean up this trigger (both old and new name variants)
   ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'runClaudeDraftFix') ScriptApp.deleteTrigger(t);
+    var fn = t.getHandlerFunction();
+    if (fn === 'runClaudeDraftFix' || fn === 'runClaudeDraftFix_') ScriptApp.deleteTrigger(t);
   });
   try {
     var results = findAndFixClaudeDrafts();
