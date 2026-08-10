@@ -1,0 +1,2519 @@
+﻿[
+    {
+        "ok":  true,
+        "tid":  "19fd74e13e7c66d1",
+        "data":  {
+                     "threadId":  "19fd74e13e7c66d1",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd74e13e7c66d1",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "STM32F103RCT6TR #4240   No stk",
+                                          "messageId":  "\u003c02cb01dd25a9$2eca6620$8c5f3260$@fortetechno.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:40:44 -0700",
+                                          "labelIds":  [
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd75f6bc3e6a5c",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32F103RCT6TR #4240 No stk",
+                                          "messageId":  "\u003cCANGx=E1EYxewoY7ebsg8+tM8z1J5PzL6KgfVKKg0m6YcKH=JjA@mail.gmail.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:59:42 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd736ef0b4a6c3",
+        "data":  {
+                     "threadId":  "19fd736ef0b4a6c3",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd736ef0b4a6c3",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "MT29F4G08ABADAWP-IT:D  $4183 No stk",
+                                          "messageId":  "\u003c018801dd25a5$a6c2d1c0$f4487540$@fortetechno.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:15:27 -0700",
+                                          "labelIds":  [
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd73f61e9dc83a",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: MT29F4G08ABADAWP-IT:D #4183 No stk",
+                                          "messageId":  "\u003cCANGx=E2aJsiOcEVvounjKoTUpb=XnG7m5BJdWia7Ow841zvndA@mail.gmail.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:24:43 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd3eecd66cb49f",
+        "data":  {
+                     "threadId":  "19fd3eecd66cb49f",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd3eecd66cb49f",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "14212R-500 #4208   No stk",
+                                          "messageId":  "\u003c002e01dd2525$73fad920$5bf08b60$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 14:57:44 -0700",
+                                          "labelIds":  [
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd46c94cbde9cb",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: 14212R-500 #4208   No stk",
+                                          "messageId":  "\u003cCANGx=E1YBLZ4wM65dY+jTZ6vMEfajWvx1ko3vqrdO3kdM9+Siw@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 17:15:13 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd33b4f8119df3",
+        "data":  {
+                     "threadId":  "19fd33b4f8119df3",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd33b4f8119df3",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "AD7658BSTZ   Sanmina India Offer",
+                                          "messageId":  "\u003c010101dd250a$119019a0$34b04ce0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:41:45 -0700",
+                                          "labelIds":  [
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Need the DC and COO Want to make an offer? On a partial? Hi David, We have the following MPN stock. Can you pls help to check do you have any requirement for this part. Product No MPN Excess On HandQty"
+                                      },
+                                      {
+                                          "id":  "19fd72be47bb937d",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: AD7658BSTZ   Sanmina India Offer",
+                                          "messageId":  "\u003cCANGx=E3zJTqxwqPwfKp90MWtoyudvsfKT_JQ0Q-W=qYeDSVScg@mail.gmail.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:03:25 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "I have not had a RFQ on these in 3 years - pass Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd32f9d764df69",
+        "data":  {
+                     "threadId":  "19fd32f9d764df69",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd32f9d764df69",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "TPS61029DRCR #4238 no stk",
+                                          "messageId":  "\u003c004c01dd2508$48a51f50$d9ef5df0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:28:59 -0700",
+                                          "labelIds":  [
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd4febbf9dc10f",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: TPS61029DRCR #4238 no stk",
+                                          "messageId":  "\u003cCANGx=E1kLtzO5mXvjnmF=Ori6CV1Eqd29PCHMyYZz+uwB+NjTw@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 19:54:51 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd32d7bb93e2e5",
+        "data":  {
+                     "threadId":  "19fd32d7bb93e2e5",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd32d7bb93e2e5",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "BAV116T-7 #4240  No stk",
+                                          "messageId":  "\u003c002901dd2507$f5a31f50$e0e95df0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:26:39 -0700",
+                                          "labelIds":  [
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd4fecebbe206d",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: BAV116T-7 #4240  No stk",
+                                          "messageId":  "\u003cCANGx=E05r5Y2_fswFeqrgJFBo95LXs6AjV9FOZfGC=AFtr8a5Q@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 19:54:56 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd2733e27c83ce",
+        "data":  {
+                     "threadId":  "19fd2733e27c83ce",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd2733e27c83ce",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "22320-200 #4236 no stk",
+                                          "messageId":  "\u003c05bf01dd24eb$8a55b490$9f011db0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 08:03:13 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd2ba3c6c7e6a0",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: 22320-200 #4236 no stk",
+                                          "messageId":  "\u003cCANGx=E0BVVZ5+xz0BJhw3yPNoZEAyLSZJHWODzVyLiNeU+9N6Q@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:20:47 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd271a0af84ebb",
+        "data":  {
+                     "threadId":  "19fd271a0af84ebb",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd271a0af84ebb",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "T50SDP6HB6P #4229  no stk",
+                                          "messageId":  "\u003c05aa01dd24eb$4a1ecd30$de5c6790$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 08:01:26 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd2ba15322e61a",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: T50SDP6HB6P #4229  no stk",
+                                          "messageId":  "\u003cCANGx=E3ONi4ptrwo7CWrLVk57WuR-k72-0VFjeKAUqv2gGc3vA@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:20:37 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd261edd220c15",
+        "data":  {
+                     "threadId":  "19fd261edd220c15",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd261edd220c15",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "STM32F103RCT6TR #4241  No stk",
+                                          "messageId":  "\u003c050c01dd24e8$e5f47a00$b1dd6e00$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 07:44:19 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd2b7eb9971819",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32F103RCT6TR #4241  No stk",
+                                          "messageId":  "\u003cCANGx=E3U-3wxRfz6ZCzy2GGD=56p+dWuQW=QR5OFTsDP6q_uWw@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:18:15 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd259b53d14cbf",
+        "data":  {
+                     "threadId":  "19fd259b53d14cbf",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd259b53d14cbf",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "FDB045AN08A0 #4235  no stk",
+                                          "messageId":  "\u003c04dc01dd24e7$a49f6de0$edde49a0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 07:35:20 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd2b9e4fd4a828",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: FDB045AN08A0 #4235  no stk",
+                                          "messageId":  "\u003cCANGx=E1p642LM1GNSvxDALFNZrUCWyKFx6j0NtLByeF3EZ60+Q@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:20:24 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd258b277ec5bb",
+        "data":  {
+                     "threadId":  "19fd258b277ec5bb",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd258b277ec5bb",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "BAT54BRW-7-F #4234 no stk",
+                                          "messageId":  "\u003c04d401dd24e7$7d6c2e70$78448b50$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 07:34:14 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd2b9be92d1f1a",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: BAT54BRW-7-F #4234 no stk",
+                                          "messageId":  "\u003cCANGx=E24-VsRU59G2QA--gTDxVrGCQp-ezLFAw-Djc2XY7_4XA@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:20:14 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd24fc43b0edd3",
+        "data":  {
+                     "threadId":  "19fd24fc43b0edd3",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd24fc43b0edd3",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "TPSM82822SILR #4227 no stk",
+                                          "messageId":  "\u003c049101dd24e6$208f6790$61ae36b0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 07:24:28 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd2b9765daf050",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: TPSM82822SILR #4227 no stk",
+                                          "messageId":  "\u003cCANGx=E3kY2hmWHv9XjiyTvU7N0TF31FOA1XjGwTHGyz2udskkQ@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:19:57 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd24ebf97af67c",
+        "data":  {
+                     "threadId":  "19fd24ebf97af67c",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd24ebf97af67c",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "MAX14662ETI+#4225  No stk",
+                                          "messageId":  "\u003c048901dd24e5$f8796940$e96c3bc0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 07:23:21 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd2b9325709c91",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: MAX14662ETI+#4225  No stk",
+                                          "messageId":  "\u003cCANGx=E24Ptu+HoFRyu-PAyGdrLgSY7fNi+3K+gm_yfHMNzNmZg@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:19:39 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd24db3c07491e",
+        "data":  {
+                     "threadId":  "19fd24db3c07491e",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd24db3c07491e",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "492-90-045 #4224 no stk",
+                                          "messageId":  "\u003c048101dd24e5$cfc94dd0$6f5be970$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 07:22:13 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd2b8d59b53e2a",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: 492-90-045 #4224 no stk",
+                                          "messageId":  "\u003cCANGx=E2SaGX9e6Zktc59QNtaaQBzHYUxjEZcYwCy-aGpeck7Dw@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:19:15 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd24ab506b213d",
+        "data":  {
+                     "threadId":  "19fd24ab506b213d",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd24ab506b213d",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "MAX14662 #4226 no stk",
+                                          "messageId":  "\u003c047101dd24e5$5aca6ff0$105f4fd0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 07:18:57 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd2b8a1d8b9929",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: MAX14662 #4226 no stk",
+                                          "messageId":  "\u003cCANGx=E2VBZc77V1_=b67jxo0vgzV+afFTAOoqaizDboc0G869A@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:19:02 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd2483a25c9146",
+        "data":  {
+                     "threadId":  "19fd2483a25c9146",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd2483a25c9146",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "XGL4030-152MEC #4320 no stk",
+                                          "messageId":  "\u003c045601dd24e4$f9dbadd0$ed930970$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 07:16:14 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd32b273ba7314",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: XGL4030-152MEC #4320 no stk",
+                                          "messageId":  "\u003cCANGx=E1sd3qt8YySoZdjYa5PF5KDh7ZrvXttkXL7GKBXPwwEuw@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:24:07 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd2115315d3aa2",
+        "data":  {
+                     "threadId":  "19fd2115315d3aa2",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd2115315d3aa2",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "SISS05DN-T1-GE3 #4084 No stk",
+                                          "messageId":  "\u003c024501dd24dc$98c70dd0$ca552970$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 06:16:14 -0700",
+                                          "labelIds":  [
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fd21fceeb24233",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: SISS05DN-T1-GE3 #4084 No stk",
+                                          "messageId":  "\u003cCANGx=E0umy8+GX8xw1k9iS_JJxJBrPbu4pn5=bMkVfPMtjfHbg@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 06:32:08 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fd205fcb5ac497",
+        "data":  {
+                     "threadId":  "19fd205fcb5ac497",
+                     "messages":  [
+                                      {
+                                          "id":  "19fd205fcb5ac497",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "Broker Cost RE: STM8AF6223PCAX #4217",
+                                          "messageId":  "\u003c01f701dd24da$de187c40$9a4974c0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 06:03:52 -0700",
+                                          "labelIds":  [
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Not good Our cost $1.40 Received 10/11/2021 7:32:24 PM on PO 004782 Newark: No stk $1.20 LT 31 wks Digi No stk Reel 2500 $1.32 Jin Xun Tong Qty 2500 $2.33 DC 21 Waytong: Qty 7k DC21 $1.79 YUFO"
+                                      },
+                                      {
+                                          "id":  "19fd7334ec6e20cc",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: Broker Cost RE: STM8AF6223PCAX #4217",
+                                          "messageId":  "\u003cCANGx=E1Hiq32sykprfDYeBomeoSFMJtXAzX6OjGMu-shdpFcmQ@mail.gmail.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:11:31 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "you didn\u0026#39;t update the sheet with any price info Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-"
+                                      },
+                                      {
+                                          "id":  "19fd7353dfd019d4",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: Broker Cost RE: STM8AF6223PCAX #4217",
+                                          "messageId":  "\u003c016a01dd25a5$649ee770$2ddcb650$@fortetechno.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:13:37 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Because you said it should not be on there. From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Thursday, August 6, 2026 6:12 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re:"
+                                      },
+                                      {
+                                          "id":  "19fd7389ea184386",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: Broker Cost RE: STM8AF6223PCAX #4217",
+                                          "messageId":  "\u003cCANGx=E2W-HF52t6ZLJkYtiwdG5fmRqFFawa7Mk7Tm_Ep3J+05Q@mail.gmail.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:17:19 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "10-4 yeap I have stock on these to sell first good point Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949)"
+                                      },
+                                      {
+                                          "id":  "19fd73b14061d2ea",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: Broker Cost RE: STM8AF6223PCAX #4217",
+                                          "messageId":  "\u003c01b401dd25a6$48babf60$da303e20$@fortetechno.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:19:59 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "And our pricing is not as good as it was in 2021 From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Thursday, August 6, 2026 6:17 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fcfaed4032e8c1",
+        "data":  {
+                     "threadId":  "19fcfaed4032e8c1",
+                     "messages":  [
+                                      {
+                                          "id":  "19fcfaed4032e8c1",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "142-0701-201  #4223",
+                                          "messageId":  "\u003c01a401dd247f$71834de0$5489e9a0$@fortetechno.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 19:09:26 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Just quote their TP Newark: No stk $5.96 Mouser: No stk $4.60 24322 Expected 10/16/2026 25000 Expected 11/20/2026 Quest: Qty 78 stk $2.25 Electronics Depot: Qty 113 $1.50 DC 17/18 Standard Data"
+                                      },
+                                      {
+                                          "id":  "19fd1fd6a62d50b5",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "142-0701-201 #4223",
+                                          "messageId":  "\u003c017401dd24d9$8f4c2c20$ade48460$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 05:54:30 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Our cost is $2.83 Qty 620 COO:US May want to quote around $3.83 to cover some shipping There are a couple of US brokers that have less qty but lower price. Newark: No stk $5.96 Mouser: No stk $4.60"
+                                      },
+                                      {
+                                          "id":  "19fd24c95c537020",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: 142-0701-201 #4223",
+                                          "messageId":  "\u003c047901dd24e5$a3e0c3b0$eba24b10$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 07:20:59 -0700",
+                                          "labelIds":  [
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Why did you close this? From: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Sent: Wednesday, August 5, 2026 5:55 AM To: john.fluman@intransittech.com Subject: 142-0701-201 #4223 Our cost is $2.83 Qty 620"
+                                      },
+                                      {
+                                          "id":  "19fd2d23bbf49335",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: 142-0701-201 #4223",
+                                          "messageId":  "\u003cCANGx=E1Z8EieoeDzw61Qksf-fPq8+mMbKzrvK1QJ2PA_Pb1ATw@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:47:00 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "my bad I just quoted it Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      },
+                                      {
+                                          "id":  "19fd2d64ce10ba36",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: 142-0701-201 #4223",
+                                          "messageId":  "\u003c06fd01dd24fa$a7a22bf0$f6e683d0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:51:25 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thanks From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Wednesday, August 5, 2026 9:47 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re: 142-0701-201 #4223 my bad I just quoted"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fcf9d74627621b",
+        "data":  {
+                     "threadId":  "19fcf9d74627621b",
+                     "messages":  [
+                                      {
+                                          "id":  "19fcf9d74627621b",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "TPS82150SILR  #4214",
+                                          "messageId":  "\u003c011b01dd247c$cb08d040$611a70c0$@fortetechno.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 18:50:28 -0700",
+                                          "labelIds":  [
+                                                           "UNREAD",
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "No stk Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fcf93cf186d80b",
+        "data":  {
+                     "threadId":  "19fcf93cf186d80b",
+                     "messages":  [
+                                      {
+                                          "id":  "19fcf93cf186d80b",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "SISS05DN-T1-GE3 # 4084",
+                                          "messageId":  "\u003c00c801dd247b$51f2b1e0$f5d815a0$@fortetechno.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 18:39:55 -0700",
+                                          "labelIds":  [
+                                                           "UNREAD",
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "No stk Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fcd4ff3471dbf9",
+        "data":  {
+                     "threadId":  "19fcd4ff3471dbf9",
+                     "messages":  [
+                                      {
+                                          "id":  "19fcd4ff3471dbf9",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "STM8AF6223PCAX  #4217",
+                                          "messageId":  "\u003c07db01dd2422$d78887c0$86999740$@fortetechno.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 08:06:34 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL",
+                                                           "INBOX"
+                                                       ],
+                                          "snippet":  "Purchased Qty 10k for $1.40 10/21 Qty 7490 in stock I don\u0026#39;t have a date code listed. So you sold some maybe DC is on there. Newark: No stk $1.20 LT 31 wks Digi No stk Reel 2500 $1.32 Asking China"
+                                      },
+                                      {
+                                          "id":  "19fcd8e5e385b364",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM8AF6223PCAX  #4217",
+                                          "messageId":  "\u003c090a01dd242c$5e37a950$1aa6fbf0$@fortetechno.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 09:14:46 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL",
+                                                           "INBOX"
+                                                       ],
+                                          "snippet":  "I checked and you sold these for $5.00 back in 2021 From: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Sent: Tuesday, August 4, 2026 8:07 AM To: john.fluman@intransittech.com Subject: STM8AF6223PCAX #4217"
+                                      },
+                                      {
+                                          "id":  "19fcd919087a5301",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM8AF6223PCAX  #4217",
+                                          "messageId":  "\u003cCANGx=E01uUjZnYLDNJYF8duH3+kRo6wpOZGFiPmVPRDFQ1npdQ@mail.gmail.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 09:18:17 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "SENT",
+                                                           "INBOX"
+                                                       ],
+                                          "snippet":  "sorry my bad this shouldn\u0026#39;t have shown up on your sheet Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949"
+                                      },
+                                      {
+                                          "id":  "19fcd92eb5defd5a",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM8AF6223PCAX #4217",
+                                          "messageId":  "\u003c094001dd242d$0f9febd0$2edfc370$@fortetechno.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 09:19:39 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL",
+                                                           "INBOX"
+                                                       ],
+                                          "snippet":  "Okay But you still have a RFQ for these? From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Tuesday, August 4, 2026 9:18 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re:"
+                                      },
+                                      {
+                                          "id":  "19fcd941a22b2bc8",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM8AF6223PCAX #4217",
+                                          "messageId":  "\u003cCANGx=E217ZDedwPGx2sgEf3R3g27SSoi=hhVCBTeztv9Ps7THg@mail.gmail.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 09:21:03 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL",
+                                                           "SENT",
+                                                           "INBOX"
+                                                       ],
+                                          "snippet":  "yes I\u0026#39;ve been quoting them out a lot at $6 but no sales since year 21 I\u0026#39;ll reduce to $5 again what do you think Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO"
+                                      },
+                                      {
+                                          "id":  "19fcd958d0eaacfe",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM8AF6223PCAX #4217",
+                                          "messageId":  "\u003c095601dd242d$766d3660$6347a320$@fortetechno.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 09:22:35 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL",
+                                                           "INBOX"
+                                                       ],
+                                          "snippet":  "Okay $5 I am getting some pricing tonight From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Tuesday, August 4, 2026 9:21 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re:"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fccd22c42232d4",
+        "data":  {
+                     "threadId":  "19fccd22c42232d4",
+                     "messages":  [
+                                      {
+                                          "id":  "19fccd22c42232d4",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "NLAS4599DFT2G #4193 Cant share and no stk",
+                                          "messageId":  "\u003c001a01dd240f$a6b8ef30$f42acd90$@fortetechno.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 05:49:12 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fccf45ab52a3f5",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: NLAS4599DFT2G #4193 Cant share and no stk",
+                                          "messageId":  "\u003cCANGx=E13Kn6i=V-QhxQ5YRVac64q4Qrad-L4W7-1vTzpwC5hcw@mail.gmail.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 06:26:30 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fc81252940eda1",
+        "data":  {
+                     "threadId":  "19fc81252940eda1",
+                     "messages":  [
+                                      {
+                                          "id":  "19fc81252940eda1",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "STM32G071G8U6TR  #4206",
+                                          "messageId":  "\u003c012001dd2356$20810970$61831c50$@fortetechno.com\u003e",
+                                          "date":  "Mon, 3 Aug 2026 07:41:10 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Cost $1.60 DC 23 COO? FOB China What should I counter? Verical: Qty 1445 stk $1.23 DC26 Digi: Qty 4558 stk $1.43 LT52 wks Mouser: No stk $1.27 LT52 wks Win Source: Qty 16k $ 1.14 23+ Qty 14.7k 1.22 26+"
+                                      },
+                                      {
+                                          "id":  "19fc896c3cb6e80f",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32G071G8U6TR  #4206",
+                                          "messageId":  "\u003cCANGx=E2RMeqxcLFSJVKViCpVKHsy9+4eNshGF_ALc7sN7NQRbA@mail.gmail.com\u003e",
+                                          "date":  "Mon, 3 Aug 2026 10:05:51 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "I would stock at .10 each Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      },
+                                      {
+                                          "id":  "19fc8a23dd5dd3a2",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM32G071G8U6TR #4206",
+                                          "messageId":  "\u003c008401dd236c$16b03630$4410a290$@fortetechno.com\u003e",
+                                          "date":  "Mon, 3 Aug 2026 10:18:22 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "What about to quote. From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Monday, August 3, 2026 10:06 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re: STM32G071G8U6TR #4206 I"
+                                      },
+                                      {
+                                          "id":  "19fc8ae5388e1042",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32G071G8U6TR #4206",
+                                          "messageId":  "\u003cCANGx=E3+e6zATuQi8WFmZ0Trbo=3LzUrJhOx-e3rd-jfphBjvA@mail.gmail.com\u003e",
+                                          "date":  "Mon, 3 Aug 2026 10:31:35 -0700",
+                                          "labelIds":  [
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Once they counter we can quote Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The"
+                                      },
+                                      {
+                                          "id":  "19fc957d4da674cf",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM32G071G8U6TR #4206",
+                                          "messageId":  "\u003c009801dd2387$cc717e50$65547af0$@fortetechno.com\u003e",
+                                          "date":  "Mon, 3 Aug 2026 13:36:44 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Countered at $1.50 FOB Sacramento From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Monday, August 3, 2026 10:32 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re:"
+                                      },
+                                      {
+                                          "id":  "19fc9a55bd24f92e",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM32G071G8U6TR #4206",
+                                          "messageId":  "\u003c001901dd2393$a0af9890$e20ec9b0$@fortetechno.com\u003e",
+                                          "date":  "Mon, 3 Aug 2026 15:01:24 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_166",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "He dropped it .10 Countered at $1.50 FOB Sacramento From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Monday, August 3, 2026 10:32 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject:"
+                                      },
+                                      {
+                                          "id":  "19fca219a1a71cd9",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32G071G8U6TR #4206",
+                                          "messageId":  "\u003cCANGx=E1gWHe91=b=Eh4i7ddQiZ82aEpZjmudauDASU5soe3QVw@mail.gmail.com\u003e",
+                                          "date":  "Mon, 3 Aug 2026 17:17:07 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "on the sheet says coming from CHINA - is that now CA for sure? Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local ("
+                                      },
+                                      {
+                                          "id":  "19fca243768a108f",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM32G071G8U6TR #4206",
+                                          "messageId":  "\u003c004f01dd23a6$facd6150$f06823f0$@fortetechno.com\u003e",
+                                          "date":  "Mon, 3 Aug 2026 17:19:56 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Hi David, Best cost for 50000 is STM32G071G8U6TR is $1.50 FOB Sacramento From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Monday, August 3, 2026 5:17 PM To: David Poggi \u0026lt;david@"
+                                      },
+                                      {
+                                          "id":  "19fca42e789c3ae4",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM32G071G8U6TR #4206",
+                                          "messageId":  "\u003c011101dd23ab$a9458bf0$fbd0a3d0$@fortetechno.com\u003e",
+                                          "date":  "Mon, 3 Aug 2026 17:53:26 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Now he says Stock is in Shanghai. We can move them over to here From: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Sent: Monday, August 3, 2026 5:20 PM To: john.fluman@intransittech.com Subject: RE:"
+                                      },
+                                      {
+                                          "id":  "19fce2a1f137226a",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32G071G8U6TR #4206",
+                                          "messageId":  "\u003cCANGx=E0BZMiQibJvoSFAYE42OOkGcQFzNamSuPam0VKzpkwwDw@mail.gmail.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 12:04:54 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "I\u0026#39;m asking for best so I can bid Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The"
+                                      },
+                                      {
+                                          "id":  "19fce484e25d1a7c",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32G071G8U6TR #4206",
+                                          "messageId":  "\u003cCAOp2-_OUqRGT42OiQ8RJaTYm0NWWQudmEvX1v+59O=oZq2S7bw@mail.gmail.com\u003e",
+                                          "date":  "Tue, 4 Aug 2026 12:37:40 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Okay David V. Poggi Jr Forte Technologies LLC 27130 Paseo Espada A1401 San Juan Capistrano Ca 92675 On Tue, Aug 4, 2026 at 12:05 PM John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; wrote: I\u0026#39;m"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fbe8576d0eb69f",
+        "data":  {
+                     "threadId":  "19fbe8576d0eb69f",
+                     "messages":  [
+                                      {
+                                          "id":  "19fbe8576d0eb69f",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c009201dd21e1$12f44720$38dcd560$@fortetechno.com\u003e",
+                                          "date":  "Sat, 1 Aug 2026 11:10:45 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Hi David Sorry, we can\u0026#39;t sell with your price $0.3, thank you! From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Friday, July 31, 2026 9:24 AM To: David Poggi \u0026lt;david@fortetechno.com"
+                                      },
+                                      {
+                                          "id":  "19fd2d07ad7e1bc5",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E0oDHd-1b+K8CcU_vMhhKJK7bUE3ozoVxwjfELF7tS8wA@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:45:05 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "they want to do at .55 can you try to get a lower price Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949)"
+                                      },
+                                      {
+                                          "id":  "19fd2d907dd5c9dc",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c074301dd24fb$11e7fb70$35b7f250$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 09:54:23 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "They wont budge I tried .15 and .30 From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Wednesday, August 5, 2026 9:45 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re: OEM"
+                                      },
+                                      {
+                                          "id":  "19fd31d76ae43b59",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E1oQbf+KthDsi-z09ubq+s9SDZLUSaKPVTEDhfmcERB1g@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:09:09 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Even 5 cents off would change the ball game a ton for us do you want to see if they would go down 8 cents or 5 cents Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO"
+                                      },
+                                      {
+                                          "id":  "19fd31f5f4adf082",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCAOp2-_MitgGLOPFJAc8Y1pp2tRcMWe8QRCxqO7jMiu5v2KLdzg@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:11:04 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "I will ask. David V. Poggi Jr Forte Technologies LLC 27130 Paseo Espada A1401 San Juan Capistrano Ca 92675 On Wed, Aug 5, 2026 at 11:09 AM John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; wrote: Even"
+                                      },
+                                      {
+                                          "id":  "19fd32015afb9656",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCAOp2-_N4hZ+s4o09kJmsUoM=bVqBD_-YY7i2S=GhwNBG7725mw@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:11:50 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Will 5 cents get the PO? And this will ship white horse? David V. Poggi Jr Forte Technologies LLC 27130 Paseo Espada A1401 San Juan Capistrano Ca 92675 On Wed, Aug 5, 2026 at 11:11 AM David Poggi \u0026lt;"
+                                      },
+                                      {
+                                          "id":  "19fd325264d1653f",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E3-s+NbH9aTu7r2d2o=d6pJDxdcj9XbkjuNrJREg7rHbQ@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:17:33 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "You said our cost is 48 cents right so at 55 cents we can probably still make money right because we\u0026#39;re going to use White Horse but I really want us to get a better deal going so yes try to ask"
+                                      },
+                                      {
+                                          "id":  "19fd32bae8cc2937",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c001101dd2507$af06f350$0d14d9f0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:24:41 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  ".56 From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Wednesday, August 5, 2026 11:18 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re: OEM Responds RE: STM32L031G6U6TR #4166"
+                                      },
+                                      {
+                                          "id":  "19fd3426ffccc6e9",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E2V69d+00q5yj3x2uYezA2m_39-d_3iFynEiWjR9_+fDA@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:49:32 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Oh I thought you said our cost was 48 cents if it\u0026#39;s 55 cents then yeah we got no chance on this deal Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified"
+                                      },
+                                      {
+                                          "id":  "19fd3449496a5a2d",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E2B-Ga-3OHRbV9VsS3_FFS-wfnrEqfyzVjJsUJ3A2wtzw@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:51:53 -0700",
+                                          "labelIds":  [
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Didn\u0026#39;t you confirm with them already that if we take all the stock they have is it 762 or 765k anyway if we take all of it I think they said 48 cents can you see if they\u0026#39;ll do like 40 cents and"
+                                      },
+                                      {
+                                          "id":  "19fd34625e0a6a5b",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCAOp2-_PUshGFdcjJbe92Vzx17NJYmWevkuJaxUg_3kqDZvOtng@mail.gmail.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 11:53:24 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Ok, I will ask. And see what they say David V. Poggi Jr Forte Technologies LLC 27130 Paseo Espada A1401 San Juan Capistrano Ca 92675 On Wed, Aug 5, 2026 at 11:52 AM John Fluman \u0026lt;john.fluman@"
+                                      },
+                                      {
+                                          "id":  "19fd4455c04d55cf",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c035e01dd2532$a9f940e0$fdebc2a0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 5 Aug 2026 16:32:21 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Asking for .40 From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Wednesday, August 5, 2026 11:52 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re: OEM Responds RE:"
+                                      },
+                                      {
+                                          "id":  "19fd73cf235356a6",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: OEM Responds RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c020e01dd25a6$914f6000$b3ee2000$@fortetechno.com\u003e",
+                                          "date":  "Thu, 6 Aug 2026 06:22:01 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "They did not get back with me on our offer. From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Wednesday, August 5, 2026 11:52 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re:"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fb8437a29670b3",
+        "data":  {
+                     "threadId":  "19fb8437a29670b3",
+                     "messages":  [
+                                      {
+                                          "id":  "19fb8437a29670b3",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\"\u0027John Fluman\u0027\" \u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "HSMS-282C-TR1G #4191  No stk",
+                                          "messageId":  "\u003c00dc01dd20ec$a0751020$e15f3060$@fortetechno.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 06:00:55 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fb84c5c8e9be76",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: HSMS-282C-TR1G #4191  No stk",
+                                          "messageId":  "\u003cCANGx=E2Tj=YXjKAa_JtNmxW5EQ7LrcFR6RpFDMsOz8wV9J=Pig@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 06:10:39 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fb5fdf5247b25b",
+        "data":  {
+                     "threadId":  "19fb5fdf5247b25b",
+                     "messages":  [
+                                      {
+                                          "id":  "19fb5fdf5247b25b",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\"\u0027John Fluman\u0027\" \u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "MT60B1G16HD-64B:H #4103  Sold Lying Commie No stk",
+                                          "messageId":  "\u003c015f01dd2093$e4e09df0$aea1d9d0$@fortetechno.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 19:25:45 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fb83cbd091f0b9",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: MT60B1G16HD-64B:H #4103  Sold Lying Commie No stk",
+                                          "messageId":  "\u003cCANGx=E2GgsBCzZ=Wx+2Bb+aDwF3m7fMFTr8LJXNFpHhHxWPWGg@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 05:53:35 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fb5fdb9bf23f0f",
+        "data":  {
+                     "threadId":  "19fb5fdb9bf23f0f",
+                     "messages":  [
+                                      {
+                                          "id":  "19fb5fdb9bf23f0f",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\"\u0027John Fluman\u0027\" \u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "GRM188C61E226ME01D #4144  Sold Lying Commie  No stk",
+                                          "messageId":  "\u003c015501dd2093$db904750$92b0d5f0$@fortetechno.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 19:25:29 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fb83cf19b6693f",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: GRM188C61E226ME01D #4144  Sold Lying Commie  No stk",
+                                          "messageId":  "\u003cCANGx=E2qgzGuvo_3pUgvL1a_eWJjVfk3VrTYUe8HEZ374=z9Aw@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 05:53:47 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fb5fd70db16ed9",
+        "data":  {
+                     "threadId":  "19fb5fd70db16ed9",
+                     "messages":  [
+                                      {
+                                          "id":  "19fb5fd70db16ed9",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\"\u0027John Fluman\u0027\" \u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "HFS002TFM9X186N #4156 No stk",
+                                          "messageId":  "\u003c014f01dd2093$d0928ed0$71b7ac70$@fortetechno.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 19:25:11 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Soly lying commie Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fb83d189e8d6dd",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: HFS002TFM9X186N #4156 No stk",
+                                          "messageId":  "\u003cCANGx=E2+5b-bh1TeYpf6BGBS04TnBMt0W+HpLaVg7TB7NUxWpw@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 05:53:57 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fb33b76556aa3b",
+        "data":  {
+                     "threadId":  "19fb33b76556aa3b",
+                     "messages":  [
+                                      {
+                                          "id":  "19fb33b76556aa3b",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "LTM4627EVPBF #3860  No stk",
+                                          "messageId":  "\u003c078701dd2028$176468e0$462d3aa0$@fortetechno.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 06:34:04 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fb355261a6d640",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: LTM4627EVPBF #3860 No stk",
+                                          "messageId":  "\u003cCANGx=E2rTFSnV6Yf5TOX+y7Zrek1VJttXdEOwT0fpD5DtMf2HQ@mail.gmail.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 07:02:09 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fb33a33dd6c89f",
+        "data":  {
+                     "threadId":  "19fb33a33dd6c89f",
+                     "messages":  [
+                                      {
+                                          "id":  "19fb33a33dd6c89f",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "BU-67301B0T0R-E02 #4009  No stk",
+                                          "messageId":  "\u003c077901dd2027$e5c94850$b15bd8f0$@fortetechno.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 06:32:41 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fb35510f9e022e",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: BU-67301B0T0R-E02 #4009 No stk",
+                                          "messageId":  "\u003cCANGx=E0JX7mo_NCcytQZCRALo8tPuiR8n2jd5PyQvRc=3jtgUg@mail.gmail.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 07:02:03 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fae3c2c12e5979",
+        "data":  {
+                     "threadId":  "19fae3c2c12e5979",
+                     "messages":  [
+                                      {
+                                          "id":  "19fae3c2c12e5979",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "XC7A35T-1CSG325I #4182 no stk",
+                                          "messageId":  "\u003c02f301dd1f64$e336c130$a9a44390$@fortetechno.com\u003e",
+                                          "date":  "Wed, 29 Jul 2026 07:16:45 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fb33f92484318f",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: XC7A35T-1CSG325I #4182",
+                                          "messageId":  "\u003cCANGx=E2DwDE1MDO-BM7Jt+dePaS68qVqhVamVq2kDvSm0ReUAg@mail.gmail.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 06:38:35 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fae26566172fe3",
+        "data":  {
+                     "threadId":  "19fae26566172fe3",
+                     "messages":  [
+                                      {
+                                          "id":  "19fae26566172fe3",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "PI3106-00-HVMZ #4169 no stk",
+                                          "messageId":  "\u003c022f01dd1f61$8dedbec0$a9c93c40$@fortetechno.com\u003e",
+                                          "date":  "Wed, 29 Jul 2026 06:52:53 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fb354f6a9d93a5",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: PI3106-00-HVMZ #4169 no stk",
+                                          "messageId":  "\u003cCANGx=E0tV_xJwZKXMtPAjViaQYQsW1=zUABGmJZJd_9r2b+5uA@mail.gmail.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 07:01:57 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fae1a189b23e60",
+        "data":  {
+                     "threadId":  "19fae1a189b23e60",
+                     "messages":  [
+                                      {
+                                          "id":  "19fae1a189b23e60",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c018701dd1f5f$afd46770$0f7d3650$@fortetechno.com\u003e",
+                                          "date":  "Wed, 29 Jul 2026 06:39:31 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Quote and will have to send to white horse .56 DC 23 COO: China Mouser: No stk .979 4011 Expected 8/26 6000 Expected 1/18/2027 Digi Qty 81 stk $1.43 LT:40 wks Future Qty 9000 stk .83 Shanghai HuiJun :"
+                                      },
+                                      {
+                                          "id":  "19fafaf47c0b0606",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c009001dd1f9d$83330b70$89992250$@fortetechno.com\u003e",
+                                          "date":  "Wed, 29 Jul 2026 14:02:05 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Quote and will have to send to white horse .56 DC 23 COO: China Mouser: No stk .979 4011 Expected 8/26 6000 Expected 1/18/2027 Digi Qty 81 stk $1.43 LT:40 wks Future Qty 9000 stk .83 Shanghai HuiJun :"
+                                      },
+                                      {
+                                          "id":  "19fb3b5df5c9e466",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E3a4js=XPm2oeZ6m=w1CvuBz2Ap0PpnPyYQWwP=gkeT_Q@mail.gmail.com\u003e",
+                                          "date":  "Thu, 30 Jul 2026 08:47:48 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "10-4 Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information contained in this"
+                                      },
+                                      {
+                                          "id":  "19fb863792988b0d",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E0PNzkbHRmOqUK=b-U4GUeKa-343pn5g77ctHDYkQxW=Q@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 06:35:54 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "I have someone maybe at .60 can you offer .30 and see what they say not for stk though Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877)"
+                                      },
+                                      {
+                                          "id":  "19fb86732268d7dd",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c01e501dd20f2$14390ac0$3cab2040$@fortetechno.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 06:39:57 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "I offered .15 due to COO China and they said too cheap. Are we going to send them to White Horse to avoid tariff. I can ask for .30 From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Friday,"
+                                      },
+                                      {
+                                          "id":  "19fb86a9d907bba7",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c01f701dd20f2$999dc110$ccd94330$@fortetechno.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 06:43:41 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "So if I offer .30 with COO China . 60 will be difficult or we are not bringing it in. From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Friday, July 31, 2026 6:36 AM To: David Poggi \u0026lt;"
+                                      },
+                                      {
+                                          "id":  "19fb86b3a4c5a1fa",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E2Z_RgJq6im4jCRpCm3BX48_j81GeaaYkC6SkA4zs6rTA@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 06:44:22 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "just ignore it then - no need to destroy our relationship with them Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 -"
+                                      },
+                                      {
+                                          "id":  "19fb8c87a5acfc2b",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E2Ap8X4E3rQ47rjSvmXKc1o5sxc=Pq6w1NyawaPUec9Vw@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 08:26:14 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "They did says they\u0026#39;d take full QTY- so if you want to throw a number out there I\u0026#39;d stk at .15 or if they can do .30 we can quote and win probably Regards, John Fluman Intransit Technologies"
+                                      },
+                                      {
+                                          "id":  "19fb8cadb2f4ab9f",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCAOp2-_MwBBSJ6Cz7tO0oiCDGkjnxsaCyEadMgseX6D3z8_+YHQ@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 08:28:37 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Okay 200000 units David V. Poggi Jr Forte Technologies LLC 27130 Paseo Espada A1401 San Juan Capistrano Ca 92675 On Fri, Jul 31, 2026 at 8:26 AM John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; wrote:"
+                                      },
+                                      {
+                                          "id":  "19fb8cb4f9595ac4",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E0yRWqBEU99W44j3-XeZ4od2Ti+i9apx8OJ66AOPbrg+w@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 08:29:19 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "you said 765k Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information contained in"
+                                      },
+                                      {
+                                          "id":  "19fb8d95cb9c4b6a",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E2FpzL3VRaDmrq9ZvpKRi3jKE4JbrmmvR8JqhJdp9jXzQ@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 08:44:40 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "they just updated me like this I\u0026#39;ve just confirmed with my manager. USD 0.60 per unit for 100k pcs, USD 0.48 per unit for 762k pcs. If acceptable, we will place the order immediately. We have"
+                                      },
+                                      {
+                                          "id":  "19fb8f2cea3cb435",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCAOp2-_Pwo5cQ4X_2F3VzmZ6_vFgme4Fh1vcMtgjg-PHiC1Zdrw@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 09:12:15 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Okay so all of them 765k David V. Poggi Jr Forte Technologies LLC 27130 Paseo Espada A1401 San Juan Capistrano Ca 92675 On Fri, Jul 31, 2026 at 8:45 AM John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt;"
+                                      },
+                                      {
+                                          "id":  "19fb8fd4dc1ca04f",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E2vYY9zJXoeWBQTUoXrXKMracsJFFv0r2V9=ZaZxrSEPQ@mail.gmail.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 09:23:55 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "YEs Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information contained in this"
+                                      },
+                                      {
+                                          "id":  "19fb904ba5133282",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c004801dd210a$1d76d6e0$586484a0$@fortetechno.com\u003e",
+                                          "date":  "Fri, 31 Jul 2026 09:32:01 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Just made the counter off citing the tariff making it difficult for customer to move on this From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Friday, July 31, 2026 9:24 AM To: David Poggi"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fa92d4a888a19f",
+        "data":  {
+                     "threadId":  "19fa92d4a888a19f",
+                     "messages":  [
+                                      {
+                                          "id":  "19fa92d4a888a19f",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "MT46V32M16P-5BIT.J  #4011 No stk",
+                                          "messageId":  "\u003c03b101dd1e9f$4dd98fc0$e98caf40$@fortetechno.com\u003e",
+                                          "date":  "Tue, 28 Jul 2026 07:42:23 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fac81d68e154d2",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: MT46V32M16P-5BIT.J  #4011 No stk",
+                                          "messageId":  "\u003cCANGx=E2AKqzGXWzYq-D0BC_F3cdcy_JQYHFPnKmPZL-O8qLr2Q@mail.gmail.com\u003e",
+                                          "date":  "Tue, 28 Jul 2026 23:13:37 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fa8b8542af3426",
+        "data":  {
+                     "threadId":  "19fa8b8542af3426",
+                     "messages":  [
+                                      {
+                                          "id":  "19fa8b8542af3426",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "FEMDME004G-A8A39 #4167 No stk",
+                                          "messageId":  "\u003c00a401dd1e8d$74e57640$5eb062c0$@fortetechno.com\u003e",
+                                          "date":  "Tue, 28 Jul 2026 05:34:38 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fa8e0d1af91f21",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: FEMDME004G-A8A39 #4167 No stk",
+                                          "messageId":  "\u003cCANGx=E1bE+hzKFchi45E_CeMxisWw5tPmWymF=uqq_kmk+JyCA@mail.gmail.com\u003e",
+                                          "date":  "Tue, 28 Jul 2026 06:18:47 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fa6712e926f0b4",
+        "data":  {
+                     "threadId":  "19fa6712e926f0b4",
+                     "messages":  [
+                                      {
+                                          "id":  "19fa6712e926f0b4",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c014a01dd1e34$7973ae60$6c5b0b20$@fortetechno.com\u003e",
+                                          "date":  "Mon, 27 Jul 2026 18:57:40 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "They have qty 765000 COO is China Customer TP is .48 COO is China They are asking for a TP what should I ask. .15 Getting pricing Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan"
+                                      },
+                                      {
+                                          "id":  "19fa8b4a8e83b8ec",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c007a01dd1e8c$e59f4ce0$b0dde6a0$@fortetechno.com\u003e",
+                                          "date":  "Tue, 28 Jul 2026 05:30:37 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "They have qty 765000 COO is China Customer TP is .48 COO is China They are asking for a TP what should I ask. .15 Mouser: No stk .979 4011 Expected 8/26 6000 Expected 1/18/2027 Digi Qty 81 stk $1.43 LT"
+                                      },
+                                      {
+                                          "id":  "19fa8e8f90f1c881",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003cCANGx=E3zgiUJvX5pMwW=5WSUO0xQ4NX4h8Lw97x8txWWbO_u_w@mail.gmail.com\u003e",
+                                          "date":  "Tue, 28 Jul 2026 06:27:47 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "If we had .15 we could make some money Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The"
+                                      },
+                                      {
+                                          "id":  "19faa38c34031d8b",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: STM32L031G6U6TR #4166",
+                                          "messageId":  "\u003c010301dd1ec8$1da04c80$58e0e580$@fortetechno.com\u003e",
+                                          "date":  "Tue, 28 Jul 2026 12:34:32 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "I made the offer just to quote out From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Tuesday, July 28, 2026 6:28 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re:"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fa6680cb2a1f55",
+        "data":  {
+                     "threadId":  "19fa6680cb2a1f55",
+                     "messages":  [
+                                      {
+                                          "id":  "19fa6680cb2a1f55",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "STM32H742VIT6 #4147  no stk",
+                                          "messageId":  "\u003c010801dd1e33$14909d10$3db1d730$@fortetechno.com\u003e",
+                                          "date":  "Mon, 27 Jul 2026 18:47:41 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fa8e06b65a4eb2",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: STM32H742VIT6 #4147  no stk",
+                                          "messageId":  "\u003cCANGx=E1Txs48SVSHsiTPt5f0wVQ=cdPPwwTQDqzvEXBA4BDySA@mail.gmail.com\u003e",
+                                          "date":  "Tue, 28 Jul 2026 06:18:26 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19fa3ee406150b73",
+        "data":  {
+                     "threadId":  "19fa3ee406150b73",
+                     "messages":  [
+                                      {
+                                          "id":  "19fa3ee406150b73",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "TPSM53602RDAR #4165  No stk",
+                                          "messageId":  "\u003c02a901dd1dd2$5f26aa10$1d73fe30$@fortetechno.com\u003e",
+                                          "date":  "Mon, 27 Jul 2026 07:15:25 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19fa46d19f803c3c",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: TPSM53602RDAR #4165  No stk",
+                                          "messageId":  "\u003cCANGx=E0WZew4SHkxLCiviaWaGb_dD2LwhXmQ-Ydj8TQ1KbjoUQ@mail.gmail.com\u003e",
+                                          "date":  "Mon, 27 Jul 2026 09:33:56 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f940bd25f6a936",
+        "data":  {
+                     "threadId":  "19f940bd25f6a936",
+                     "messages":  [
+                                      {
+                                          "id":  "19f940bd25f6a936",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "MIC5219-3.3YML-TR  #4152",
+                                          "messageId":  "\u003c015a01dd1b65$e1f8f8e0$a5eaeaa0$@fortetechno.com\u003e",
+                                          "date":  "Fri, 24 Jul 2026 05:13:47 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "no stk Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19f944e834cfc982",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: MIC5219-3.3YML-TR  #4152",
+                                          "messageId":  "\u003cCANGx=E0NEEtWHTA4y0PgzXnrPNzw48v++tkUZ=e2SF4jL8OB7A@mail.gmail.com\u003e",
+                                          "date":  "Fri, 24 Jul 2026 06:26:39 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f9006536af12c2",
+        "data":  {
+                     "threadId":  "19f9006536af12c2",
+                     "messages":  [
+                                      {
+                                          "id":  "19f9006536af12c2",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "ADUM1100ARZ-RL7  #4142 No stk",
+                                          "messageId":  "\u003c010f01dd1ac8$ca99a070$5fcce150$@fortetechno.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 10:29:17 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19f903a024595dc2",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: ADUM1100ARZ-RL7  #4142 No stk",
+                                          "messageId":  "\u003cCANGx=E3sA=2hV6HLXWWnKXuZw5Fu6Yo=kZ0L4XU4jyuabD=F6A@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 11:25:48 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f8f69ca0b76682",
+        "data":  {
+                     "threadId":  "19f8f69ca0b76682",
+                     "messages":  [
+                                      {
+                                          "id":  "19f8f69ca0b76682",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "1410187-3 # 4147  no stk",
+                                          "messageId":  "\u003c044801dd1ab0$e9c91a60$bd5b4f20$@fortetechno.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 07:38:21 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19f8f7d9c81551c5",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: 1410187-3 # 4147  no stk",
+                                          "messageId":  "\u003cCANGx=E0AvdNZP_rwfekJ+eRxfi6Cg0LmKuSDBWNkEcE+wgwmsQ@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 08:00:02 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. On Thu, Jul 23, 2026 07:38 AM, David Poggi \u0026lt;david@fortetechno.com\u0026gt; wrote: Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f8f49cfc9af85a",
+        "data":  {
+                     "threadId":  "19f8f49cfc9af85a",
+                     "messages":  [
+                                      {
+                                          "id":  "19f8f49cfc9af85a",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "EP3C40F484C6N #4148",
+                                          "messageId":  "\u003c035401dd1aac$07f644e0$17e2cea0$@fortetechno.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 07:03:25 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "We had this in April All info there except the pricing below I would go light several US brokers share this stk and the parts are local Digi: Qty 85 stk $375.40 Mouser: Qty 44 $375 LT: 16 wks Converge:"
+                                      },
+                                      {
+                                          "id":  "19f8f4c8abc2f43e",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: EP3C40F484C6N #4148",
+                                          "messageId":  "\u003cCANGx=E3is=o78Se=ijoENOH9VmwwMXfhk9=Mv-cP1jEM3M34Qg@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 07:06:25 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Are you good with $185 Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      },
+                                      {
+                                          "id":  "19f8f4fd2bf96ec5",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: EP3C40F484C6N #4148",
+                                          "messageId":  "\u003c037a01dd1aac$f36a4cf0$da3ee6d0$@fortetechno.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 07:10:00 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "$150-155 Too many local brokers. No tariff and little shipping cost. From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Thursday, July 23, 2026 7:06 AM To: David Poggi \u0026lt;david@fortetechno."
+                                      },
+                                      {
+                                          "id":  "19f8f564171b432e",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: EP3C40F484C6N #4148",
+                                          "messageId":  "\u003cCANGx=E0=yr8mwHpq5D=meJdJdGab-zw9JY+m2iSjhTCxnA326g@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 07:17:01 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "and quote a MOQ of 540? so $155 with a MOQ of 540 right Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949)"
+                                      },
+                                      {
+                                          "id":  "19f8f587559980fc",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: EP3C40F484C6N #4148",
+                                          "messageId":  "\u003c03b501dd1aae$44a52c10$cdef8430$@fortetechno.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 07:19:26 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Is the customer looking for qty 540? Then yes right? $155 is good Unless you think differently Too much competition so do the best to get a PO. From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt;"
+                                      },
+                                      {
+                                          "id":  "19f8f5baa613ed17",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: EP3C40F484C6N #4148",
+                                          "messageId":  "\u003cCANGx=E0eKhVVxD3L5w9GM=WJV1M8wggfS==H5Yvhh1oUYCcG-g@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 07:22:57 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "they asked for 540 ok I\u0026#39;ll quote it out Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f8f0b23325d108",
+        "data":  {
+                     "threadId":  "19f8f0b23325d108",
+                     "messages":  [
+                                      {
+                                          "id":  "19f8f0b23325d108",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "WG82574IT  #4061  No stk",
+                                          "messageId":  "\u003c00e201dd1aa2$785a7080$690f5180$@fortetechno.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 05:54:58 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19f8f1417510e67c",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: WG82574IT  #4061  No stk",
+                                          "messageId":  "\u003cCANGx=E1L600Jq-+xG8JzSrJ0-QkfVFUqTHvAPXEBDXaJeiJy9Q@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 06:04:46 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. On Thu, Jul 23, 2026 05:54 AM, David Poggi \u0026lt;david@fortetechno.com\u0026gt; wrote: Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f8f082e8809a50",
+        "data":  {
+                     "threadId":  "19f8f082e8809a50",
+                     "messages":  [
+                                      {
+                                          "id":  "19f8f082e8809a50",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "XCF08PVOG48C #4071 No stk",
+                                          "messageId":  "\u003c00cc01dd1aa2$04f174e0$0ed45ea0$@fortetechno.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 05:51:45 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19f8f142f9e56035",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: XCF08PVOG48C #4071 No stk",
+                                          "messageId":  "\u003cCANGx=E1C9xasdjgL0bsoQf7ZfhVBDHi3gSgw3eFbyaqVOeBdqw@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 06:04:53 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. On Thu, Jul 23, 2026 05:51 AM, David Poggi \u0026lt;david@fortetechno.com\u0026gt; wrote: Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f8cdb3a162340b",
+        "data":  {
+                     "threadId":  "19f8cdb3a162340b",
+                     "messages":  [
+                                      {
+                                          "id":  "19f8cdb3a162340b",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "TPS563200DDCR  #4143  No stk",
+                                          "messageId":  "\u003c00b301dd1a4d$0838d850$18aa88f0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 22 Jul 2026 19:43:23 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19f8f33b5008ae1a",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: TPS563200DDCR  #4143  No stk",
+                                          "messageId":  "\u003cCANGx=E0-SfQ+jNxcQi__sGAjud+uYkhdqJuiDUgPFHNvtVdpwg@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 06:39:18 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. On Wed, Jul 22, 2026 07:43 PM, David Poggi \u0026lt;david@fortetechno.com\u0026gt; wrote: Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f8a4d4e7c9ff3a",
+        "data":  {
+                     "threadId":  "19f8a4d4e7c9ff3a",
+                     "messages":  [
+                                      {
+                                          "id":  "19f8a4d4e7c9ff3a",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "553SCMGI8 #4139  No stk",
+                                          "messageId":  "\u003c009401dd19e9$40380370$c0a80a50$@fortetechno.com\u003e",
+                                          "date":  "Wed, 22 Jul 2026 07:49:07 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19f8ffa27c47f20b",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: 553SCMGI8 #4139  No stk",
+                                          "messageId":  "\u003cCANGx=E3fjxou+PBy3JYhTkEhw+J-FS2T-g2pkmfDmWpxADD6Lg@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 10:16:03 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f8a15c2c46728e",
+        "data":  {
+                     "threadId":  "19f8a15c2c46728e",
+                     "messages":  [
+                                      {
+                                          "id":  "19f8a15c2c46728e",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "EPM7032LC44-15T  #4138  No stk",
+                                          "messageId":  "\u003c076f01dd19e0$c47c92d0$4d75b870$@fortetechno.com\u003e",
+                                          "date":  "Wed, 22 Jul 2026 06:48:24 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Thank you David V. Poggi Jr 27130 Paseo Espada A1401 San Juan Capistrano, CA 92675 United States www.fortecomp.com 949-280-6906"
+                                      },
+                                      {
+                                          "id":  "19f8ffb8bc2afd8c",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "david@fortetechno.com",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: EPM7032LC44-15T  #4138  No stk",
+                                          "messageId":  "\u003cCANGx=E0LL1JCdhwRwE-cefb_xcA+hitq-qZ3a-MBZgKy=XZiqA@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 10:17:35 -0700",
+                                          "labelIds":  [
+                                                           "Label_164",
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "Ok, removed from listing. Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f89ac829ae0c3f",
+        "data":  {
+                     "threadId":  "19f89ac829ae0c3f",
+                     "messages":  [
+                                      {
+                                          "id":  "19f89ac829ae0c3f",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "Update Broker pricing RE: MT25QL512ABB1EW9-0SIT #4042",
+                                          "messageId":  "\u003c01b501dd19d0$b7296be0$257c43a0$@fortetechno.com\u003e",
+                                          "date":  "Wed, 22 Jul 2026 04:53:29 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Let me know what to offer. Digi: No stk Constrained: $31.53 Brightlife: no stk Golden Autumn: $15 DC25 Shenzhen Nanfeng $13 DC20 Waytong: $31 DC22 COO:TW International Source Trading: $32.75 DC24 HK"
+                                      },
+                                      {
+                                          "id":  "19f9225f90aa0513",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: Update Broker pricing RE: MT25QL512ABB1EW9-0SIT #4042",
+                                          "messageId":  "\u003cCANGx=E2VqV6hFxJxnGOHn6jn9mRurctDgAh_p_WiSZFdmQCsYQ@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 20:23:09 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "$6 each to stck them Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      },
+                                      {
+                                          "id":  "19f948bfd5e05187",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: Update Broker pricing RE: MT25QL512ABB1EW9-0SIT #4042",
+                                          "messageId":  "\u003c044e01dd1b79$708a0870$519e1950$@fortetechno.com\u003e",
+                                          "date":  "Fri, 24 Jul 2026 07:33:47 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Okay From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Thursday, July 23, 2026 8:23 PM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re: Update Broker pricing RE: MT25QL512ABB1EW9-"
+                                      }
+                                  ]
+                 }
+    },
+    {
+        "ok":  true,
+        "tid":  "19f87dcef471ecba",
+        "data":  {
+                     "threadId":  "19f87dcef471ecba",
+                     "messages":  [
+                                      {
+                                          "id":  "19f87dcef471ecba",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "Broker pricing RE: MT25QL512ABB1EW9-0SIT #4042",
+                                          "messageId":  "\u003c007901dd1989$fa6ec400$ef4c4c00$@fortetechno.com\u003e",
+                                          "date":  "Tue, 21 Jul 2026 20:27:08 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Let me know what to offer. Digi: No stk Constrained: $31.53 Brightlife: no stk Golden Autumn: $15 DC25 Shenzhen Nanfeng $13 DC20 Waytong: $31 DC22 COO:TW International Source Trading: $32.75 DC24 HK"
+                                      },
+                                      {
+                                          "id":  "19f8eff8f5bd0012",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "Broker pricing RE: MT25QL512ABB1EW9-0SIT #4042",
+                                          "messageId":  "\u003c00a901dd1aa0$b3a99d70$1afcd850$@fortetechno.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 05:42:19 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "Let me know what to offer. Digi: No stk Constrained: $31.53 Brightlife: no stk Golden Autumn: $15 DC25 Shenzhen Nanfeng $13 DC20 Waytong: $31 DC22 COO:TW International Source Trading: $32.75 DC24 HK"
+                                      },
+                                      {
+                                          "id":  "19f8f16b45f06be4",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: Broker pricing RE: MT25QL512ABB1EW9-0SIT #4042",
+                                          "messageId":  "\u003cCANGx=E1GrGkN9tLO=dXe9cx=tUKQGSju45_T3oybOO+CfKMt1Q@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 06:07:38 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "I\u0026#39;d strock at $5 Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877) 677-5868 x101 - Local (949) 481-7935 x101 The information"
+                                      },
+                                      {
+                                          "id":  "19f8f1819795045e",
+                                          "from":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "to":  "\u003cjohn.fluman@intransittech.com\u003e",
+                                          "subject":  "RE: Broker pricing RE: MT25QL512ABB1EW9-0SIT #4042",
+                                          "messageId":  "\u003c01d401dd1aa4$72885940$57990bc0$@fortetechno.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 06:09:07 -0700",
+                                          "labelIds":  [
+                                                           "IMPORTANT",
+                                                           "Label_167",
+                                                           "CATEGORY_PERSONAL"
+                                                       ],
+                                          "snippet":  "I hope that works What about quoting???? From: John Fluman \u0026lt;john.fluman@intransittech.com\u0026gt; Sent: Thursday, July 23, 2026 6:08 AM To: David Poggi \u0026lt;david@fortetechno.com\u0026gt; Subject: Re: Broker"
+                                      },
+                                      {
+                                          "id":  "19f8f1ce0daf820e",
+                                          "from":  "John Fluman \u003cjohn.fluman@intransittech.com\u003e",
+                                          "to":  "David Poggi \u003cdavid@fortetechno.com\u003e",
+                                          "replyTo":  "john.fluman@intransittech.com",
+                                          "subject":  "Re: Broker pricing RE: MT25QL512ABB1EW9-0SIT #4042",
+                                          "messageId":  "\u003cCANGx=E2-mXudHFKOkXJA+PgGKYze4yEKpaY6LDyx7-qG=jGN7w@mail.gmail.com\u003e",
+                                          "date":  "Thu, 23 Jul 2026 06:14:22 -0700",
+                                          "labelIds":  [
+                                                           "Label_167",
+                                                           "SENT"
+                                                       ],
+                                          "snippet":  "we were quoted I think around 8 in 2024 - I\u0026#39;d hate to ask for higher then 5 for now Regards, John Fluman Intransit Technologies john.fluman@intransittech.com An ISO 9001 Certified Company Toll (877"
+                                      }
+                                  ]
+                 }
+    }
+]
