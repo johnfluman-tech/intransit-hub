@@ -29,84 +29,6 @@ var HUB_SECRET = 'InTransit!Hub#2026';
 
 
 // ONE-TIME: Add IDT7202LA50P* to Stan's RFQ sheet (was misrouted as own_stock on Jul 16 2026)
-// Run once from Apps Script editor, then delete.
-function addIDT7202ToStanSheet_oneTime() {
-  addToStanSheet('IDT7202LA50P*', 'FR', 226, '');
-  Logger.log('Done — IDT7202LA50P* added to Stan sheet (FR, qty 226, no TP)');
-}
-
-
-// ONE-TIME: Jul 17 2026 — add manually processed entries from trigger-outage day (Jul 14/17)
-// Run once from Apps Script editor, then delete.
-function addJul17ManualEntries_oneTime() {
-  // Forte: XC7Z020-1CLG400I (msg_checking sent to Amelia, Newchip HK, qty=1080, TP=$20)
-  var dup = checkForteForMPN('XC7Z020-1CLG400I', 60);
-  if (dup && dup.length > 0) {
-    Logger.log('XC7Z020-1CLG400I: duplicate in Forte within 60 days — skipping');
-  } else {
-    addToForteSheet('XC7Z020-1CLG400I', 1080, 20.00, 'HK', '');
-    Logger.log('Forte added: XC7Z020-1CLG400I | qty=1080 | TP=$20 | HK');
-  }
-
-  // Forte: ADM232AARNZ-REEL7 (msg_checking sent to Amelia, Newchip HK, qty=3000, TP=$1.28 — OEM EXCESS, not Warehouse#3)
-  var dupAdm = checkForteForMPN('ADM232AARNZ-REEL7', 60);
-  if (dupAdm && dupAdm.length > 0) {
-    Logger.log('ADM232AARNZ-REEL7: duplicate in Forte within 60 days — skipping');
-  } else {
-    addToForteSheet('ADM232AARNZ-REEL7', 3000, 1.28, 'HK', '');
-    Logger.log('Forte added: ADM232AARNZ-REEL7 | qty=3000 | TP=$1.28 | HK');
-  }
-
-  // Stan sheet: STM32L496VGT6 (Warehouse#4, Damon, Forex Electronics GB, qty=1250, TP=$4)
-  addToStanSheet('STM32L496VGT6', 'GB', 1250, 4.00);
-  Logger.log('Stan added: STM32L496VGT6 | GB | qty=1250 | TP=$4');
-
-  // Forte: RAA2100404GLGMD0 (msg_checking sent to JIA EN Jiang, Standard International HK/CN, qty=1000, TP=$1.50)
-  var dup2 = checkForteForMPN('RAA2100404GLGMD0', 60);
-  if (dup2 && dup2.length > 0) {
-    Logger.log('RAA2100404GLGMD0: duplicate in Forte within 60 days — skipping');
-  } else {
-    addToForteSheet('RAA2100404GLGMD0', 1000, 1.50, 'CN', '');
-    Logger.log('Forte added: RAA2100404GLGMD0 | qty=1000 | TP=$1.50 | CN');
-  }
-
-  // NOTE: ATTINY85-20SUR (Andy Kang, HK Rudder) SKIPPED — 310 × $0.60 = $186, below $500 min line value. No msg_checking, no Forte entry.
-
-  // Forte: MAX538BESA+ (msg_checking sent to Min Liu, Zhong Ce Electronic Technology CN, qty=1600, TP=$4.7)
-  var dupMax = checkForteForMPN('MAX538BESA+', 60);
-  if (dupMax && dupMax.length > 0) {
-    Logger.log('MAX538BESA+: duplicate in Forte within 60 days — skipping');
-  } else {
-    addToForteSheet('MAX538BESA+', 1600, 4.70, 'CN', '');
-    Logger.log('Forte added: MAX538BESA+ | qty=1600 | TP=$4.70 | CN');
-  }
-
-  // Forte: APTS050A0X3-SRPHZ (msg_checking sent to ZOE ZOE, SZ Xinhe Tianxia CN, qty=556, TP=$13)
-  var dupApts = checkForteForMPN('APTS050A0X3-SRPHZ', 60);
-  if (dupApts && dupApts.length > 0) {
-    Logger.log('APTS050A0X3-SRPHZ: duplicate in Forte within 60 days — skipping');
-  } else {
-    addToForteSheet('APTS050A0X3-SRPHZ', 556, 13.00, 'CN', '');
-    Logger.log('Forte added: APTS050A0X3-SRPHZ | qty=556 | TP=$13 | CN');
-  }
-
-  // Forte: 8L02-05-00 (msg_checking sent to Veeresh HB, Converge EMEA IN, qty=10000, TP=$3.5)
-  var dup8L = checkForteForMPN('8L02-05-00', 60);
-  if (dup8L && dup8L.length > 0) {
-    Logger.log('8L02-05-00: duplicate in Forte within 60 days — skipping');
-  } else {
-    addToForteSheet('8L02-05-00', 10000, 3.50, 'IN', '');
-    Logger.log('Forte added: 8L02-05-00 | qty=10000 | TP=$3.50 | IN');
-  }
-
-  // Stan sheet: LMX2594RHA (W3_CHECKING sent to icpurchase2016@sina.com, LingFeng Huizhou CN, qty=200, TP=$6 — Warehouse#3 has 300 pcs)
-  addToStanSheet('LMX2594RHA', 'CN', 200, 6.00);
-  Logger.log('Stan added: LMX2594RHA | CN | qty=200 | TP=$6');
-
-  Logger.log('addJul17ManualEntries_oneTime: DONE');
-}
-
-
 function addonAgreeAndFixDraft(e) {
   try {
     var params     = e.commonEventObject.parameters;
@@ -1396,7 +1318,7 @@ function addonSmartReplyCreateDraft(e) {
     if (!toEmail) toEmail = extractBuyerEmail(lastMsg.getReplyTo() || lastMsg.getFrom());
 
     var html = buildSimpleHTML(body.replace(/\n/g, '<br>'));
-    createThreadedDraft(toEmail, 'Re: ' + subject, html, threadId, lastMsg.getId());
+    createThreadedDraft(toEmail, 'Re: ' + subject, html, lastMsg.getId(), threadId);
     hubLog('run', 'addonSmartReplyCreateDraft: draft created for ' + subject, { to: toEmail });
 
     return CardService.newActionResponseBuilder()
@@ -2687,62 +2609,6 @@ function checkForteForMPN(mpn, days) {
 
 
 // ── Forte no-stock reply handler ──────────────────────────────
-// When Forte replies "no stock" on a thread where we already sent msg_checking
-// (oem-tp-processed label), auto-create a buyer decline draft.
-function checkForteNoStockReplies() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) return;
-  var query = 'label:oem-tp-processed in:inbox (from:fortetechno.com OR from:fortecomp.com) -label:forte-nostock-processed';
-  var threadIds = gmailSearchREST(query, 20);
-  hubLog('run', 'checkForteNoStockReplies: ' + threadIds.length + ' thread(s)');
-  if (!threadIds.length) return;
-  var noStkKeywords = ['no stk', 'no stock', 'out of stock', "don't have", 'dont have',
-                       'not available', 'cannot source', 'no inventory', 'cant source',
-                       'unavailable', 'not in stock', 'cannot fill', 'cant fill', 'nothing available'];
-  threadIds.forEach(function(tid) {
-    var thread = GmailApp.getThreadById(tid);
-    if (!thread) return;
-    gmailModifyThread_(tid, ['forte-nostock-processed'], []);
-    var messages = thread.getMessages();
-    var subject = thread.getFirstMessageSubject().replace(/^(Re:\s*)+/i, '').trim();
-    var forteMsg = null;
-    for (var i = messages.length - 1; i >= 0; i--) {
-      var _fromLc = messages[i].getFrom().toLowerCase();
-      if (_fromLc.indexOf('fortetechno.com') >= 0 || _fromLc.indexOf('fortecomp.com') >= 0) {
-        forteMsg = messages[i]; break;
-      }
-    }
-    if (!forteMsg) return;
-    var body = forteMsg.getPlainBody().toLowerCase();
-    var isNoStock = noStkKeywords.some(function(kw) { return body.indexOf(kw) >= 0; });
-    if (!isNoStock) {
-      hubLog('run', 'checkForteNoStockReplies: Forte reply not no-stock for "' + subject + '" — skipped for manual review', {});
-      return;
-    }
-    var buyerEmail = null;
-    for (var j = 0; j < messages.length; j++) {
-      var from = messages[j].getFrom().toLowerCase();
-      if (from.indexOf('intransittech.com') < 0 && from.indexOf('fortetechno.com') < 0 && from.indexOf('fortecomp.com') < 0) {
-        var rt = messages[j].getReplyTo();
-        buyerEmail = extractBuyerEmail((rt && rt.indexOf('@') >= 0) ? rt : messages[j].getFrom());
-        break;
-      }
-    }
-    if (!buyerEmail || buyerEmail.indexOf('intransittech.com') >= 0) {
-      hubLog('error', 'checkForteNoStockReplies: no buyer email for "' + subject + '"', {});
-      return;
-    }
-    var declineBody = 'Thank you for your inquiry. Unfortunately, we are unable to source '
-      + subject + ' at this time. We appreciate the opportunity and hope to work with you on future requirements.';
-    try {
-      var lastMsg = messages[messages.length - 1];
-      lastMsg.createDraftReply('', { htmlBody: buildSimpleHTML(declineBody.replace(/\n/g, '<br>')) });
-      hubLog('run', 'checkForteNoStockReplies: buyer decline draft created for "' + subject + '" → ' + buyerEmail, {});
-    } catch(e) {
-      hubLog('error', 'checkForteNoStockReplies: draft error for "' + subject + '": ' + e, {});
-    }
-  });
-}
 
 
 
@@ -2782,16 +2648,6 @@ function checkInboxForPaymentAdvice() {
 }
 
 
-function cleanSendNowTriggers() {
-  var deleted = 0;
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'sendPleasePostNow') {
-      ScriptApp.deleteTrigger(t);
-      deleted++;
-    }
-  });
-  Logger.log('cleanSendNowTriggers: deleted ' + deleted + ' stale sendPleasePostNow triggers');
-}
 
 
 function createThreadedDraft(toEmail, subject, htmlBody, replyToGmailMsgId, threadId, ccEmail) {
@@ -2819,66 +2675,6 @@ function createThreadedDraft(toEmail, subject, htmlBody, replyToGmailMsgId, thre
 
 
 // ONE-TIME: Jul 17 2026 — full audit of Forte rows 4010+ with David no-stk in col L but col K still Open
-// Stamps col K with NO STK - 7/17/2026 by direct row number AND tries to delete from OEM EXCESS.
-// Run once from Apps Script editor. Safe to re-run (idempotent — skips already-stamped rows).
-function davidNoStockAuditJul17_oneTime() {
-  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var dateStr = '7/17/2026';
-  var newStatus = 'NO STK - ' + dateStr;
-
-  // [forteSheetRow, mpnAsInForteColB]
-  var noStkRows = [
-    [4010, 'SLI-343P8G3F'],
-    [4014, 'W25Q256JWEIM'],
-    [4019, 'LMX2594RHAT'],
-    [4022, 'AD8676ARMZ-REEL'],
-    [4024, 'TPSI2140QDWQRQ1'],
-    [4025, 'STM32G474RET6'],
-    [4028, 'MP9100-75.0-1'],
-    [4035, 'CCM03-3512LFTR851B'],
-    [4037, 'ADA4940-1ACPZ-R7'],
-    [4038, 'ISL9R3060G2'],
-    [4039, 'STM32G031G6U6TR'],
-    [4040, 'IPI024N06N3G'],
-    [4041, 'STM32H750VBT6TR'],
-    [4043, 'STM32L476JGY3TR'],
-    [4045, 'EPCQ64SI16N'],
-    [4048, 'STM32H573VIT6'],
-    [4049, 'DS-D076H030'],
-    [4053, 'CA91C142D-33IE'],
-    [4054, '7286-5421-40'],
-    [4057, 'DS2E-S-DC24V'],
-    [4062, 'ZOE-M8G-0'],
-    [4067, 'W25X40CLSNIG'],
-    [4075, 'BMS13-78T10C01G008'],
-    [4080, 'MT48LC4M16A2B4-6AIT:J'],
-    [4088, 'ADUM1200ARZ-RL7'],
-    [4089, 'D12S400A'],
-    [4090, 'DH82029PCHSLKM8'],
-    [4091, 'AD7682BCPZRL7'],
-  ];
-
-  noStkRows.forEach(function(entry) {
-    var rowNum = entry[0];
-    var mpn = entry[1];
-    // Stamp Forte col K directly by row number (more reliable than MPN search)
-    var statusCell = forteSheet.getRange(rowNum, FORTE_STATUS_COL + 1);
-    var currentVal = String(statusCell.getValue()).trim();
-    if (currentVal.toUpperCase().indexOf('NO STK') === -1 && currentVal.toUpperCase() !== 'CLOSED') {
-      statusCell.clearDataValidations();
-      statusCell.setValue(newStatus);
-      statusCell.setBackground('#000000'); statusCell.setFontColor('#FFFFFF'); statusCell.setFontWeight('bold');
-      Logger.log('Stamped Forte row ' + rowNum + ' (' + mpn + '): ' + newStatus);
-    } else {
-      Logger.log('Already stamped row ' + rowNum + ' (' + mpn + '): ' + currentVal);
-    }
-    // Delete from OEM EXCESS if present
-    var dRes = deletePart(mpn, 'davidNoStockAudit Jul17');
-    Logger.log('OEM EXCESS deletePart(' + mpn + ') → ' + dRes);
-  });
-
-  Logger.log('davidNoStockAuditJul17_oneTime: DONE — ' + noStkRows.length + ' rows processed');
-}
 
 
 function deleteOemRow(row) {
@@ -3363,22 +3159,6 @@ function findMatches(data, partNumber) {
 }
 
 
-// One-time: apply black/white formatting to the 28 rows already stamped with NO STK text
-function fixNoStkFormatJul17_oneTime() {
-  var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-  var rows = [4010,4014,4019,4022,4024,4025,4028,4035,4037,4038,4039,4040,4041,4043,4045,4048,4049,4053,4054,4057,4062,4067,4075,4080,4088,4089,4090,4091];
-  var fixed = 0;
-  rows.forEach(function(rowNum) {
-    var cell = forteSheet.getRange(rowNum, FORTE_STATUS_COL + 1);
-    var val = String(cell.getValue()).trim();
-    if (val.toUpperCase().indexOf('NO STK') !== -1) {
-      cell.setBackground('#000000'); cell.setFontColor('#FFFFFF'); cell.setFontWeight('bold');
-      fixed++;
-    }
-  });
-  Logger.log('fixNoStkFormatJul17_oneTime: applied black/white to ' + fixed + ' of ' + rows.length + ' rows');
-}
-
 function getBlockedDomains() {
   var cache = CacheService.getScriptCache();
   var cached = cache.get('blocked_domains');
@@ -3491,19 +3271,7 @@ function getRemoteConfig() {
 }
 
 
-// ── Gmail REST API — threaded draft creation ──────────────────
-
-function getRFC2822MessageId(gmailMsgId) {
-  var url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + gmailMsgId + '?format=metadata&metadataHeaders=Message-ID';
-  var resp = UrlFetchApp.fetch(url, { method: 'GET', headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
-  var data = JSON.parse(resp.getContentText());
-  if (data.payload && data.payload.headers) {
-    for (var i = 0; i < data.payload.headers.length; i++) {
-      if (data.payload.headers[i].name === 'Message-ID') return data.payload.headers[i].value;
-    }
-  }
-  return null;
-}
+// ── Sidebar: "Fix Claude Drafts" ─────────────────────────────
 
 
 // ── Sidebar: "Fix Claude Drafts" — finds drafts where body starts with "claude" ──
@@ -4290,55 +4058,6 @@ function rebuildRawMessage(draft, newHtmlBody) {
 }
 
 
-function runEmailScan() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'runEmailScan: disabled'); return; }
-  try { archiveBlockedDomains(); } catch(e) {}
-  var BLOCKED_DOMAINS = getBlockedDomains();
-  var blockFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
-
-  try { checkDavidNoStockEmails(); } catch(e) { hubLog('error', 'checkDavidNoStockEmails crashed: ' + e, {}); }
-  try { checkForteNoStockReplies(); } catch(e) { hubLog('error', 'checkForteNoStockReplies crashed: ' + e, {}); }
-
-  var rfqLabel = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
-  var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote"))) -from:intransittech.com -from:david@fortetechno.com -from:steve@fortetechno.com -from:fortecomp.com -label:oem-rfq-incoming-processed ' + blockFilter;
-  GmailApp.search(rfqQ, 0, 10).forEach(function(t) {
-    t.addLabel(rfqLabel);
-    var msgs = t.getMessages();
-    if (msgs.some(function(m){ return m.getFrom().indexOf(JOHN_EMAIL) >= 0; })) return;
-    if (msgs[msgs.length-1].getFrom().indexOf('intransittech.com') >= 0) return;
-    var allTo = (msgs[0].getTo() + ',' + (msgs[0].getCc() || '')).toLowerCase();
-    var validT = ['rfq@intransittech.com','john.fluman@intransittech.com','sales@intransittech.com','websiterfq@intransittech.com'];
-    if (allTo.indexOf('intransittech.com') >= 0 && !validT.some(function(v){ return allTo.indexOf(v) >= 0; })) return;
-    try { processThread(t); } catch(e) { hubLog('error', 'runEmailScan rfqQ processThread error: ' + e, {}); }
-  });
-
-  var tpLabel = GmailApp.getUserLabelByName('oem-tp-processed') || GmailApp.createLabel('oem-tp-processed');
-  var tpQ = 'in:inbox label:oem-rfq-incoming-processed -label:oem-tp-processed newer_than:30d ' + blockFilter;
-  GmailApp.search(tpQ, 0, 20).forEach(function(t) {
-    var msgs = t.getMessages();
-    if (msgs[msgs.length-1].getFrom().indexOf(JOHN_EMAIL) >= 0) return;
-    var buyerCount = 0;
-    msgs.forEach(function(m){ if (m.getFrom().indexOf(JOHN_EMAIL) < 0 && m.getFrom().indexOf('intransittech') < 0) buyerCount++; });
-    if (buyerCount < 2) return;
-    t.addLabel(tpLabel);
-    try { processThread(t); } catch(e) { hubLog('error', 'runEmailScan tpQ processThread error: ' + e, {}); }
-  });
-
-  var agentLabel = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
-  var agentQ = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed newer_than:2d -from:' + DAVID_EMAIL + ' ' + blockFilter;
-  GmailApp.search(agentQ, 0, 15).forEach(function(t) {
-    var from = t.getMessages()[0].getFrom().toLowerCase();
-    if (from.indexOf('intransittech.com') >= 0 || from.indexOf('fortetechno.com') >= 0) { t.addLabel(agentLabel); return; }
-    var liveLabels = t.getLabels().map(function(l){ return l.getName(); });
-    if (liveLabels.indexOf('oem-rfq-incoming-processed') >= 0) { t.addLabel(agentLabel); return; }
-    t.addLabel(agentLabel);
-    t.addLabel(rfqLabel);
-    try { processThread(t); } catch(e) { hubLog('error', 'runEmailScan agentQ processThread error: ' + e, {}); }
-  });
-
-  hubLog('run', 'runEmailScan complete');
-}
 
 
 // ── Web App ───────────────────────────────────────────────────
@@ -4571,24 +4290,6 @@ function sendReviewEmail(partNumber, emailSubject, matches) {
 }
 
 
-function sendThreadedReply(toEmail, subject, htmlBody, replyToGmailMsgId, threadId) {
-  var rfcId = getRFC2822MessageId(replyToGmailMsgId);
-  var lines = ['From: John Fluman <' + JOHN_EMAIL + '>', 'To: ' + toEmail, 'Subject: ' + subject];
-  if (rfcId) { lines.push('In-Reply-To: ' + rfcId); lines.push('References: ' + rfcId); }
-  lines.push('MIME-Version: 1.0', 'Content-Type: text/html; charset=UTF-8', '', htmlBody);
-  var encoded = Utilities.base64EncodeWebSafe(lines.join('\r\n'));
-  var url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
-  var resp = UrlFetchApp.fetch(url, {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken(), 'Content-Type': 'application/json' },
-    payload: JSON.stringify({ raw: encoded, threadId: threadId }),
-    muteHttpExceptions: true
-  });
-  var result = JSON.parse(resp.getContentText());
-  if (result.error) { Logger.log('API send error: ' + JSON.stringify(result.error)); return null; }
-  Logger.log('Auto-sent reply | To: ' + toEmail + ' | ' + subject);
-  return result.id;
-}
 
 
 function setupTriggers() {
@@ -4597,7 +4298,7 @@ function setupTriggers() {
   // processPendingThreads calls Claude API on a slower 5-min schedule.
   // This prevents runEmailScan from exhausting the 6-hr daily execution quota.
   ScriptApp.newTrigger('fastScanInbox').timeBased().everyMinutes(1).create();
-  ScriptApp.newTrigger('processPendingThreads').timeBased().everyMinutes(1).create();
+  ScriptApp.newTrigger('processPendingThreads').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkDavidNoStockEmails').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
@@ -4626,18 +4327,6 @@ function stripQuotedLines(text) {
   return result.join('\n');
 }
 
-function testNewRFQs() { runEmailScan(); }
-function testTPReplies() { runEmailScan(); }
-
-
-// ── Test / utility functions ──────────────────────────────────
-function testSearch(mpn) {
-  Logger.log('--- OEM EXCESS ---'); searchOEMExcess(mpn);
-  Logger.log('--- IN STOCK ---'); searchInStock(mpn);
-  Logger.log('--- STAN SHEET ---'); searchStanSheet(mpn);
-}
-
-function testSentChecking() { Logger.log('Replaced by executeDecision — Forte added inline.'); }
 
 
 function unlabelUnprocessedRFQs() {
@@ -4674,19 +4363,3 @@ function updateForteSheet(mpn, customDate) {
 }
 
 
-// ONE-TIME: Aug 4 2026 — create "Ok, removed from listing." draft to David for MPF200TS-FCG484I
-// OEM row already deleted, Forte row 4192 already stamped. Just needs the reply draft.
-function davidNoStk_MPF200TS_Aug4_oneTime() {
-  var thread = GmailApp.getThreadById('19fcd908d455fc3a');
-  if (!thread) { Logger.log('Thread not found'); return; }
-  var lastMsg = thread.getMessages()[thread.getMessageCount() - 1];
-  var sig = getSignatureHTML();
-  var html = 'Ok, removed from listing.' + sig;
-  var draft = lastMsg.createDraftReply('', { htmlBody: html, name: 'John Fluman' });
-  Logger.log('Draft created: ' + draft.getId());
-  // Label + archive the thread
-  var lbl = GmailApp.getUserLabelByName('oem-rfq-incoming-processed') || GmailApp.createLabel('oem-rfq-incoming-processed');
-  thread.addLabel(lbl);
-  thread.moveToArchive();
-  Logger.log('davidNoStk_MPF200TS_Aug4_oneTime: done');
-}
