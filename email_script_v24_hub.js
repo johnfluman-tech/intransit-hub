@@ -2460,9 +2460,9 @@ function buildHomepageCard() {
 // Card action: schedules background fix via trigger, returns immediately to avoid 30s timeout
 function addonFixClaudeDrafts() {
   try {
-    // Delete any existing pending fix triggers first
+    // Delete any existing pending fix triggers first (no trailing underscore)
     ScriptApp.getProjectTriggers().forEach(function(t) {
-      if (t.getHandlerFunction() === 'runClaudeDraftFix_') ScriptApp.deleteTrigger(t);
+      if (t.getHandlerFunction() === 'runClaudeDraftFix') ScriptApp.deleteTrigger(t);
     });
     // Schedule background run
     ScriptApp.newTrigger('runClaudeDraftFix').timeBased().after(3000).create();
