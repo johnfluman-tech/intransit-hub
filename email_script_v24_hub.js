@@ -3073,6 +3073,7 @@ function extractNetcompRFQ(messages) {
 // fast scan every minute, Claude calls on a slower 5-min trigger.
 
 function fastScanInbox() {
+  hubLog('run', 'fastScanInbox: starting');
   var _cfg = getCachedRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'fastScanInbox: disabled'); return; }
   try { archiveBlockedDomains(); } catch(e) {}
@@ -3094,7 +3095,13 @@ function fastScanInbox() {
 
   var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com OR to:rfq@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -label:oem-rfq-incoming-processed ' + blockFilter;
   var rfqCount = 0;
-  gmailSearchREST(rfqQ, 50).forEach(function(tid) {
+  var rfqIds = gmailSearchREST(rfqQ, 50);
+  // Fallback: ScriptApp.getOAuthToken() may lack Gmail REST scope; GmailApp.search() is always authorized
+  if (!rfqIds.length) {
+    try { rfqIds = GmailApp.search(rfqQ, 0, 50).map(function(t){ return t.getId(); }); } catch(e) {}
+  }
+  hubLog('run', 'fastScanInbox: rfqQ=' + rfqIds.length);
+  rfqIds.forEach(function(tid) {
     var meta = gmailGetThreadMeta_(tid);
     if (meta.senders.some(function(s){ return s.indexOf(JOHN_EMAIL) >= 0; })) return;
     if (meta.senders.length && meta.senders[meta.senders.length-1].indexOf('intransittech.com') >= 0) return;
@@ -3141,9 +3148,7 @@ function fastScanInbox() {
     agentCount++;
   });
 
-  if (rfqCount + tpCount + agentCount > 0) {
-    hubLog('run', 'fastScanInbox: queued ' + (rfqCount+tpCount+agentCount) + ' thread(s) (rfq:' + rfqCount + ' tp:' + tpCount + ' agent:' + agentCount + ')');
-  }
+  hubLog('run', 'fastScanInbox: done rfq:' + rfqCount + ' tp:' + tpCount + ' agent:' + agentCount);
 }
 
 
