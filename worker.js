@@ -816,6 +816,7 @@ async function handleEmailAgent(request, env) {
 
   // Self-lookup: if Apps Script sends raw thread without pre-fetched inventory,
   // worker extracts MPN via AI (reads full body, not regex on subject) then fetches inventory.
+  let inventoryLookupSucceeded = false;
   if (oem_results === null) {
     try {
       const mpn0 = body.mpn || await extractMpnFromThread(subject, thread_content, env);
@@ -826,13 +827,19 @@ async function handleEmailAgent(request, env) {
           in_stock_results = inv.in_stock    || [];
           stan_results     = inv.stan_sheet  || [];
           forte_results    = inv.forte_sheet || [];
+          inventoryLookupSucceeded = true;
         }
       }
-    } catch(e) {}
+    } catch(e) {
+      await hubLog(env, 'email_automation', 'error', 'handleEmailAgent: inventory lookup failed — ' + e.message, { subject });
+    }
     oem_results      = oem_results      || [];
     in_stock_results = in_stock_results || [];
     stan_results     = stan_results     || [];
     forte_results    = forte_results    || [];
+  } else {
+    // Apps Script pre-fetched inventory — treat as confirmed lookup
+    inventoryLookupSucceeded = true;
   }
 
   // Filter in_stock_results to exact/close MPN matches only — removes web-app fuzzy
@@ -850,7 +857,9 @@ async function handleEmailAgent(request, env) {
 
   // Cost opt: skip all Claude calls when nothing is in inventory — result is always no_bid.
   // Saves ~$1/day by eliminating ~60% of email-agent calls for parts not in our system.
-  if (oem_results.length === 0 && in_stock_results.length === 0 && stan_results.length === 0) {
+  // ONLY fire if inventoryLookupSucceeded — if the lookup itself failed, fall through to Claude
+  // so a silent network error doesn't wrongly send a "no longer available" reply.
+  if (inventoryLookupSucceeded && oem_results.length === 0 && in_stock_results.length === 0 && stan_results.length === 0) {
     // If the RFQ came through a listing site (netCOMPONENTS, IC Source), the buyer found our
     // listing and deserves a polite apology — not silence. Part was removed from OEM EXCESS
     // (David no-stk or similar) but the listing hasn't dropped off the site yet.
