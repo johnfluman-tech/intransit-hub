@@ -3763,8 +3763,6 @@ function processCommandQueue() {
           hubLog('inventory', 'delete_forte_row: deleted row ' + rowNum + ' (' + actualMpn + ')', { row: rowNum, mpn: actualMpn });
 
         } else if (cmd.type === 'send_datamaster_email') {
-          var token = ScriptApp.getOAuthToken();
-          var fetchOpts = { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true };
           var DATAMASTER_BCC = [
             '5BDFA5@stkdst.com',
             'datamaster@netcomponents.com',
@@ -3774,56 +3772,12 @@ function processCommandQueue() {
             'Stan@amorelectronics.com'
           ].join(',');
 
-          // Build a clean filtered OEM EXCESS XLSX via a temp sheet:
-          // - Keeps header row (ICS needs it for column mapping)
-          // - Skips rows with blank MPN or blank/non-numeric QTY
-          // - Converts comma-text quantities ("1,254") to plain numbers
-          // - Removes trailing whitespace from MPN
-          // This prevents ICS rejections for null qty and phantom blank rows.
-          var oemBlob;
-          var oemSS = SpreadsheetApp.openById(SPREADSHEET_ID);
-          var srcData = oemSS.getSheets()[0].getDataRange().getValues();
-          // Nuke any leftover temp sheet — iterate all sheets because getSheetByName
-          // can return null even when the sheet exists (API caching), causing insertSheet to crash.
-          oemSS.getSheets().forEach(function(s) {
-            if (s.getName() === '_ICS_UPLOAD_TEMP') {
-              try { oemSS.deleteSheet(s); } catch(e3) {}
-            }
-          });
-          SpreadsheetApp.flush();
-          var tempSheet = oemSS.insertSheet('_ICS_UPLOAD_TEMP');
-          try {
-            var filteredRows = [srcData[0]];
-            var skipped = 0;
-            for (var di = 1; di < srcData.length; di++) {
-              var mpn = String(srcData[di][0]).trim();
-              if (!mpn) { skipped++; continue; }
-              var qtyRaw = srcData[di][3];
-              var qtyNum = (typeof qtyRaw === 'number') ? qtyRaw
-                         : parseFloat(String(qtyRaw).replace(/,/g, ''));
-              if (isNaN(qtyNum) || qtyNum <= 0) { skipped++; continue; }
-              var cleanRow = srcData[di].slice();
-              cleanRow[0] = mpn;
-              cleanRow[3] = qtyNum;
-              filteredRows.push(cleanRow);
-            }
-            tempSheet.getRange(1, 1, filteredRows.length, filteredRows[0].length).setValues(filteredRows);
-            SpreadsheetApp.flush();
-            var gid = tempSheet.getSheetId();
-            oemBlob = UrlFetchApp.fetch(
-              'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/export?format=xlsx&gid=' + gid,
-              fetchOpts
-            ).getBlob().setName('OEM_EXCESS.xlsx');
-            hubLog('inventory', 'OEM EXCESS clean export: ' + (filteredRows.length - 1) + ' rows sent, ' + skipped + ' blank/null-qty rows skipped', {});
-          } finally {
-            try { oemSS.deleteSheet(tempSheet); } catch(e) {}
-          }
+          var oemBlob = buildFilteredOemBlob_();
+          var inBlob  = DriveApp.getFileById(IN_STOCK_ID)
+            .getAs('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          inBlob.setName('IN STOCK.xlsx');
 
-          var inBlob = UrlFetchApp.fetch(
-            'https://docs.google.com/spreadsheets/d/' + IN_STOCK_ID + '/export?format=xlsx',
-            fetchOpts
-          ).getBlob().setName('IN STOCK.xlsx');
-
+          var token = ScriptApp.getOAuthToken();
           sendPleasePostViaREST(token, oemBlob, inBlob, DATAMASTER_BCC);
           hubLog('inventory', 'Sent NetCOMPONENTS report (OEM_EXCESS + IN STOCK) to ' + DATAMASTER_BCC, {});
 
@@ -4234,9 +4188,6 @@ function sendDailyCostReport() {
 
 // Run this NOW to send the Please Post email immediately (bypasses command queue).
 function sendPleasePostNow() {
-  var token    = ScriptApp.getOAuthToken();
-  var fetchOpts = { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true };
-
   var DATAMASTER_BCC = [
     '5BDFA5@stkdst.com',
     'datamaster@netcomponents.com',
@@ -4246,42 +4197,45 @@ function sendPleasePostNow() {
     'Stan@amorelectronics.com'
   ].join(',');
 
-  var oemBlob;
-  var oemSS   = SpreadsheetApp.openById(SPREADSHEET_ID);
-  var srcData = oemSS.getSheets()[0].getDataRange().getValues();
-  var _existing = oemSS.getSheetByName('_ICS_UPLOAD_TEMP');
-  if (_existing) oemSS.deleteSheet(_existing);
-  var tempSheet = oemSS.insertSheet('_ICS_UPLOAD_TEMP');
-  try {
-    var filteredRows = [srcData[0]];
-    var skipped = 0;
-    for (var i = 1; i < srcData.length; i++) {
-      var mpn    = String(srcData[i][0]).trim();
-      if (!mpn) { skipped++; continue; }
-      var qtyRaw = srcData[i][3];
-      var qtyNum = (typeof qtyRaw === 'number') ? qtyRaw : parseFloat(String(qtyRaw).replace(/,/g, ''));
-      if (isNaN(qtyNum) || qtyNum <= 0) { skipped++; continue; }
-      var row = srcData[i].slice(); row[0] = mpn; row[3] = qtyNum;
-      filteredRows.push(row);
-    }
-    tempSheet.getRange(1, 1, filteredRows.length, filteredRows[0].length).setValues(filteredRows);
-    SpreadsheetApp.flush();
-    oemBlob = UrlFetchApp.fetch(
-      'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID + '/export?format=xlsx&gid=' + tempSheet.getSheetId(),
-      fetchOpts
-    ).getBlob().setName('OEM_EXCESS.xlsx');
-    Logger.log('OEM EXCESS: ' + (filteredRows.length - 1) + ' rows exported, ' + skipped + ' skipped');
-  } finally {
-    try { oemSS.deleteSheet(tempSheet); } catch(e) {}
-  }
+  var oemBlob = buildFilteredOemBlob_();
+  var inBlob  = DriveApp.getFileById(IN_STOCK_ID)
+    .getAs('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  inBlob.setName('IN STOCK.xlsx');
 
-  var inBlob = UrlFetchApp.fetch(
-    'https://docs.google.com/spreadsheets/d/' + IN_STOCK_ID + '/export?format=xlsx',
-    fetchOpts
-  ).getBlob().setName('IN STOCK.xlsx');
-
+  var token = ScriptApp.getOAuthToken();
   sendPleasePostViaREST(token, oemBlob, inBlob, DATAMASTER_BCC);
   Logger.log('sendPleasePostNow: DONE');
+}
+
+// Builds a filtered OEM EXCESS XLSX blob using DriveApp (no UrlFetchApp / no URL whitelist needed).
+// Creates a standalone temp spreadsheet, populates it, exports via DriveApp, then trashes it.
+function buildFilteredOemBlob_() {
+  var srcData = SpreadsheetApp.openById(SPREADSHEET_ID).getSheets()[0].getDataRange().getValues();
+  var filteredRows = [srcData[0]];
+  var skipped = 0;
+  for (var i = 1; i < srcData.length; i++) {
+    var mpn = String(srcData[i][0]).trim();
+    if (!mpn) { skipped++; continue; }
+    var qtyRaw = srcData[i][3];
+    var qtyNum = (typeof qtyRaw === 'number') ? qtyRaw : parseFloat(String(qtyRaw).replace(/,/g, ''));
+    if (isNaN(qtyNum) || qtyNum <= 0) { skipped++; continue; }
+    var row = srcData[i].slice(); row[0] = mpn; row[3] = qtyNum;
+    filteredRows.push(row);
+  }
+  Logger.log('OEM EXCESS filter: ' + (filteredRows.length - 1) + ' rows, ' + skipped + ' skipped');
+
+  var tempSS = SpreadsheetApp.create('_OEM_EXPORT_TEMP');
+  try {
+    var sheet = tempSS.getActiveSheet();
+    sheet.getRange(1, 1, filteredRows.length, filteredRows[0].length).setValues(filteredRows);
+    SpreadsheetApp.flush();
+    var blob = DriveApp.getFileById(tempSS.getId())
+      .getAs('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    blob.setName('OEM_EXCESS.xlsx');
+    return blob;
+  } finally {
+    try { DriveApp.getFileById(tempSS.getId()).setTrashed(true); } catch(e) {}
+  }
 }
 
 
