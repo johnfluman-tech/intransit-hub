@@ -3773,11 +3773,15 @@ function processCommandQueue() {
           ].join(',');
 
           var oemBlob = buildFilteredOemBlob_();
-          var inBlob  = DriveApp.getFileById(IN_STOCK_ID)
-            .getAs('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-          inBlob.setName('IN STOCK.xlsx');
-
           var token = ScriptApp.getOAuthToken();
+          var inResp = UrlFetchApp.fetch(
+            'https://www.googleapis.com/drive/v3/files/' + IN_STOCK_ID +
+              '/export?mimeType=application%2Fvnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+          );
+          if (inResp.getResponseCode() !== 200) throw new Error('IN STOCK export failed (' + inResp.getResponseCode() + '): ' + inResp.getContentText().substring(0, 200));
+          var inBlob = inResp.getBlob();
+          inBlob.setName('IN STOCK.xlsx');
           sendPleasePostViaREST(token, oemBlob, inBlob, DATAMASTER_BCC);
           hubLog('inventory', 'Sent NetCOMPONENTS report (OEM_EXCESS + IN STOCK) to ' + DATAMASTER_BCC, {});
 
@@ -4198,17 +4202,21 @@ function sendPleasePostNow() {
   ].join(',');
 
   var oemBlob = buildFilteredOemBlob_();
-  var inBlob  = DriveApp.getFileById(IN_STOCK_ID)
-    .getAs('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  inBlob.setName('IN STOCK.xlsx');
-
   var token = ScriptApp.getOAuthToken();
+  var inResp = UrlFetchApp.fetch(
+    'https://www.googleapis.com/drive/v3/files/' + IN_STOCK_ID +
+      '/export?mimeType=application%2Fvnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+  );
+  if (inResp.getResponseCode() !== 200) throw new Error('IN STOCK export failed (' + inResp.getResponseCode() + '): ' + inResp.getContentText().substring(0, 200));
+  var inBlob = inResp.getBlob();
+  inBlob.setName('IN STOCK.xlsx');
   sendPleasePostViaREST(token, oemBlob, inBlob, DATAMASTER_BCC);
   Logger.log('sendPleasePostNow: DONE');
 }
 
-// Builds a filtered OEM EXCESS XLSX blob using DriveApp (no UrlFetchApp / no URL whitelist needed).
-// Creates a standalone temp spreadsheet, populates it, exports via DriveApp, then trashes it.
+// Builds a filtered OEM EXCESS XLSX blob via Drive REST API (avoids DriveApp GCP permission issue).
+// Creates a standalone temp spreadsheet, populates it, exports via UrlFetchApp, then trashes it.
 function buildFilteredOemBlob_() {
   var srcData = SpreadsheetApp.openById(SPREADSHEET_ID).getSheets()[0].getDataRange().getValues();
   var filteredRows = [srcData[0]];
@@ -4225,16 +4233,32 @@ function buildFilteredOemBlob_() {
   Logger.log('OEM EXCESS filter: ' + (filteredRows.length - 1) + ' rows, ' + skipped + ' skipped');
 
   var tempSS = SpreadsheetApp.create('_OEM_EXPORT_TEMP');
+  var tempId = tempSS.getId();
+  var token = ScriptApp.getOAuthToken();
   try {
     var sheet = tempSS.getActiveSheet();
     sheet.getRange(1, 1, filteredRows.length, filteredRows[0].length).setValues(filteredRows);
     SpreadsheetApp.flush();
-    var blob = DriveApp.getFileById(tempSS.getId())
-      .getAs('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    var resp = UrlFetchApp.fetch(
+      'https://www.googleapis.com/drive/v3/files/' + tempId +
+        '/export?mimeType=application%2Fvnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+    );
+    if (resp.getResponseCode() !== 200) {
+      throw new Error('Drive export failed (' + resp.getResponseCode() + '): ' + resp.getContentText().substring(0, 300));
+    }
+    var blob = resp.getBlob();
     blob.setName('OEM_EXCESS.xlsx');
     return blob;
   } finally {
-    try { DriveApp.getFileById(tempSS.getId()).setTrashed(true); } catch(e) {}
+    try {
+      UrlFetchApp.fetch(
+        'https://www.googleapis.com/drive/v3/files/' + tempId,
+        { method: 'PATCH', contentType: 'application/json',
+          payload: JSON.stringify({ trashed: true }),
+          headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+      );
+    } catch(e) { Logger.log('trash error: ' + e); }
   }
 }
 

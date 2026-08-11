@@ -21,7 +21,8 @@
   ],
   "urlFetchWhitelist": [
     "https://intransit-hub.intransit-sales.workers.dev/",
-    "https://gmail.googleapis.com/"
+    "https://gmail.googleapis.com/",
+    "https://www.googleapis.com/"
   ],
   "addOns": {
     "common": {
