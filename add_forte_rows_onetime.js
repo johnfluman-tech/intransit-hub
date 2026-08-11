@@ -193,3 +193,26 @@ function deleteForteRow4264() {
 // DO NOT RUN — MT40A1G16TB-062EIT:FTR is now a David no-stk (#4266 and #4267).
 // Running addForteAug9() would add a buyer entry for a part with no stock. Skip it.
 // function addForteAug9() { ... }
+
+
+// Run addForteAug11() to add Forte entry for L6384ED013TR (msg_checking sent 8/11/2026).
+// Buyer: Roger Zhang / HK Waykey Technology. OEM EXCESS 132,800 units confirmed.
+function addForteAug11() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([
+    '8/11/2026',       // A — Date
+    'L6384ED013TR',    // B — MPN
+    132800,            // C — Qty
+    0.15,              // D — Buyer TP
+    '',                // E — John Buy (blank)
+    'HK',              // F — Country
+    '=C' + nextRow + '*D' + nextRow, // G — Potential
+    '',                // H — John Quoted (blank)
+    '',                // I — Notes (blank)
+    '',                // J — History (auto-populated for duplicates)
+    'Open'             // K — Status
+  ]);
+  Logger.log('Added L6384ED013TR — 132800 qty, $0.15 TP, HK buyer (HK Waykey Technology)');
+}
