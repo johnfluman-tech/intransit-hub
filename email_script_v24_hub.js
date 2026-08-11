@@ -3074,6 +3074,7 @@ function extractNetcompRFQ(messages) {
 
 function fastScanInbox() {
   hubLog('run', 'fastScanInbox: starting');
+  try {
   var _cfg = getCachedRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'fastScanInbox: disabled'); return; }
   try { archiveBlockedDomains(); } catch(e) {}
@@ -3149,6 +3150,7 @@ function fastScanInbox() {
   });
 
   hubLog('run', 'fastScanInbox: done rfq:' + rfqCount + ' tp:' + tpCount + ' agent:' + agentCount);
+  } catch(e) { hubLog('error', 'fastScanInbox CRASHED: ' + e.toString()); }
 }
 
 
