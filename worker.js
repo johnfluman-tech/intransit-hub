@@ -119,6 +119,7 @@ export default {
       if (p === '/api/command-queue' && m === 'GET')  return handleGetCommandQueue(url, env);
       if (p === '/api/command-queue' && m === 'POST') return handlePostCommandQueue(request, env);
       const cmdId = p.match(/^\/api\/command-queue\/(\d+)$/);
+      if (cmdId && m === 'GET')   return handleGetCommandById(env, parseInt(cmdId[1]));
       if (cmdId && m === 'PATCH') return handlePatchCommandQueue(request, env, parseInt(cmdId[1]));
 
       const agentId = p.match(/^\/api\/agent-decisions\/(\d+)$/);
@@ -1266,9 +1267,15 @@ async function handleDeleteStockPrice(url, env) {
 async function handleGetCommandQueue(url, env) {
   const status = url.searchParams.get('status') || 'pending';
   const { results: rows } = await env.DB.prepare(
-    'SELECT * FROM command_queue WHERE status = ? ORDER BY created_at ASC LIMIT 50'
+    'SELECT * FROM command_queue WHERE status = ? ORDER BY created_at DESC LIMIT 50'
   ).bind(status).all();
   return json({ commands: rows || [] });
+}
+
+async function handleGetCommandById(env, id) {
+  const { results } = await env.DB.prepare('SELECT * FROM command_queue WHERE id = ?').bind(id).all();
+  if (!results || !results.length) return json({ error: 'Not found' }, 404);
+  return json({ command: results[0] });
 }
 
 async function handlePostCommandQueue(request, env) {
