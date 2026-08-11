@@ -3650,11 +3650,13 @@ function notify(text) {
 // ── Command queue — inventory actions queued remotely ─────────
 function processCommandQueue() {
   try {
+    hubLog('run', 'processCommandQueue: starting', {});
     var resp = UrlFetchApp.fetch(HUB_URL + '/api/command-queue?status=pending', {
       headers: { Authorization: 'Bearer ' + HUB_SECRET },
       muteHttpExceptions: true
     });
     var commands = (JSON.parse(resp.getContentText()).commands) || [];
+    hubLog('run', 'processCommandQueue: ' + commands.length + ' pending command(s)', {});
     if (!commands.length) return;
 
     commands.forEach(function(cmd) {
@@ -3781,8 +3783,14 @@ function processCommandQueue() {
           var oemBlob;
           var oemSS = SpreadsheetApp.openById(SPREADSHEET_ID);
           var srcData = oemSS.getSheets()[0].getDataRange().getValues();
-          var _ex = oemSS.getSheetByName('_ICS_UPLOAD_TEMP');
-          if (_ex) oemSS.deleteSheet(_ex);
+          // Nuke any leftover temp sheet — iterate all sheets because getSheetByName
+          // can return null even when the sheet exists (API caching), causing insertSheet to crash.
+          oemSS.getSheets().forEach(function(s) {
+            if (s.getName() === '_ICS_UPLOAD_TEMP') {
+              try { oemSS.deleteSheet(s); } catch(e3) {}
+            }
+          });
+          SpreadsheetApp.flush();
           var tempSheet = oemSS.insertSheet('_ICS_UPLOAD_TEMP');
           try {
             var filteredRows = [srcData[0]];
@@ -3855,6 +3863,7 @@ function processCommandQueue() {
       }
     });
   } catch(e) {
+    hubLog('error', 'processCommandQueue OUTER error: ' + e.toString(), {});
     Logger.log('processCommandQueue error: ' + e.toString());
   }
 }
