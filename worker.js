@@ -840,6 +840,12 @@ async function handleEmailAgent(request, env) {
   if (requestMpn && Array.isArray(in_stock_results) && in_stock_results.length > 0) {
     in_stock_results = in_stock_results.filter(r => isMpnMatch(requestMpn, r.mpn));
   }
+  // Same filter for stan_results — prevents a fuzzy Stan match from triggering stan_quoted
+  // when the buyer MPN is concatenated or otherwise doesn't match our inventory MPN.
+  // e.g. "TPS82130SILTTPS82130SILR" fuzzy-matches TPS82130SILT (suffix diff=12 > 3 → filtered out).
+  if (requestMpn && Array.isArray(stan_results) && stan_results.length > 0) {
+    stan_results = stan_results.filter(r => isMpnMatch(requestMpn, r.mpn));
+  }
 
   // Cost opt: skip all Claude calls when nothing is in inventory — result is always no_bid.
   // Saves ~$1/day by eliminating ~60% of email-agent calls for parts not in our system.
