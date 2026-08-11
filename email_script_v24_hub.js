@@ -3251,15 +3251,21 @@ function getRecentSentQuotesFull(mpn, maxThreads) {
     var out = [];
     threads.forEach(function(thread) {
       var msgs = thread.getMessages();
+      // Collect all John messages; prefer the most recent one with a dollar price,
+      // fall back to the most recent John message without one.
+      var withPrice = null, withoutPrice = null;
       for (var i = msgs.length - 1; i >= 0; i--) {
         var msg = msgs[i];
-        if (msg.getFrom().indexOf(JOHN_EMAIL) >= 0) {
-          var body = stripQuotedLines(msg.getPlainBody()).substring(0, 350);
-          var dateStr = Utilities.formatDate(msg.getDate(), Session.getScriptTimeZone(), 'MMM d, yyyy');
-          out.push('[Sent ' + dateStr + ' to ' + msg.getTo() + ']\n' + body);
-          break;
-        }
+        if (msg.getFrom().indexOf(JOHN_EMAIL) < 0) continue;
+        var body = stripQuotedLines(msg.getPlainBody()).substring(0, 350);
+        var dateStr = Utilities.formatDate(msg.getDate(), Session.getScriptTimeZone(), 'MMM d, yyyy');
+        var entry = '[Sent ' + dateStr + ' to ' + msg.getTo() + ']\n' + body;
+        if (!withPrice && /\$\s*\d/.test(body)) { withPrice = entry; }
+        if (!withoutPrice) { withoutPrice = entry; }
+        if (withPrice && withoutPrice) break;
       }
+      var best = withPrice || withoutPrice;
+      if (best) out.push(best);
     });
     return out.length ? out.join('\n\n') : 'No sent messages from John found for ' + mpn + '.';
   } catch(e) {
