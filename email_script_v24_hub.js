@@ -3096,11 +3096,9 @@ function fastScanInbox() {
 
   var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com OR to:rfq@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -label:oem-rfq-incoming-processed ' + blockFilter;
   var rfqCount = 0;
-  var rfqIds = gmailSearchREST(rfqQ, 50);
-  // Fallback: ScriptApp.getOAuthToken() may lack Gmail REST scope; GmailApp.search() is always authorized
-  if (!rfqIds.length) {
-    try { rfqIds = GmailApp.search(rfqQ, 0, 50).map(function(t){ return t.getId(); }); } catch(e) {}
-  }
+  // rfqQ is too long for URLFetch URL limit — use GmailApp.search() directly (no URL limit)
+  var rfqIds = [];
+  try { rfqIds = GmailApp.search(rfqQ, 0, 50).map(function(t){ return t.getId(); }); } catch(e) { hubLog('error', 'rfqQ search failed: ' + e); }
   hubLog('run', 'fastScanInbox: rfqQ=' + rfqIds.length);
   rfqIds.forEach(function(tid) {
     var meta = gmailGetThreadMeta_(tid);
@@ -3990,7 +3988,17 @@ function processNextEmailManual() {
 function processPendingThreads() {
   var _cfg = getCachedRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) return;
-  var threadIds = gmailSearchREST('label:' + PENDING_LABEL, 10);
+  // Use GmailApp label lookup (always authorized) instead of gmailSearchREST
+  // which silently returns [] when ScriptApp.getOAuthToken() lacks Gmail REST scope.
+  var threadIds = [];
+  try {
+    var _lbl = GmailApp.getUserLabelByName(PENDING_LABEL);
+    if (_lbl) threadIds = _lbl.getThreads(0, 10).map(function(t){ return t.getId(); });
+  } catch(e) {
+    hubLog('error', 'processPendingThreads: label lookup failed: ' + e);
+    return;
+  }
+  hubLog('run', 'processPendingThreads: found ' + threadIds.length + ' pending');
   if (!threadIds.length) return;
   hubLog('run', 'processPendingThreads: processing ' + threadIds.length + ' thread(s)');
   threadIds.forEach(function(tid) {
