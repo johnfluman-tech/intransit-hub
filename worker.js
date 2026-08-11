@@ -853,8 +853,13 @@ async function handleEmailAgent(request, env) {
     // If the RFQ came through a listing site (netCOMPONENTS, IC Source), the buyer found our
     // listing and deserves a polite apology — not silence. Part was removed from OEM EXCESS
     // (David no-stk or similar) but the listing hasn't dropped off the site yet.
+    // Check sender AND subject — the last message may be from John (reply), not the relay address.
     const senderLC = (sender || '').toLowerCase();
-    const isListingSite = senderLC.includes('netcomponents.com') || senderLC.includes('icsource.com');
+    const subjectLC = (subject || '').toLowerCase();
+    const contentLC = (thread_content || '').toLowerCase();
+    const isListingSite = senderLC.includes('netcomponents.com') || senderLC.includes('icsource.com') ||
+                          subjectLC.includes('netcomponents') || subjectLC.includes('icsource') ||
+                          contentLC.includes('messagesend@netcomponents') || contentLC.includes('autosend@icsource');
     if (isListingSite) {
       return json({ action: 'listing_removed', reasoning: 'No inventory — RFQ from listing site, send polite removal notice', mpn: requestMpn || null, buyer_email: null, draft_body: 'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.', forte_entry: null, oem_delete_row: null });
     }
