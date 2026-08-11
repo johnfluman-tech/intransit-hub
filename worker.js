@@ -850,6 +850,14 @@ async function handleEmailAgent(request, env) {
   // Cost opt: skip all Claude calls when nothing is in inventory — result is always no_bid.
   // Saves ~$1/day by eliminating ~60% of email-agent calls for parts not in our system.
   if (oem_results.length === 0 && in_stock_results.length === 0 && stan_results.length === 0) {
+    // If the RFQ came through a listing site (netCOMPONENTS, IC Source), the buyer found our
+    // listing and deserves a polite apology — not silence. Part was removed from OEM EXCESS
+    // (David no-stk or similar) but the listing hasn't dropped off the site yet.
+    const senderLC = (sender || '').toLowerCase();
+    const isListingSite = senderLC.includes('netcomponents.com') || senderLC.includes('icsource.com');
+    if (isListingSite) {
+      return json({ action: 'listing_removed', reasoning: 'No inventory — RFQ from listing site, send polite removal notice', mpn: requestMpn || null, buyer_email: null, draft_body: 'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.', forte_entry: null, oem_delete_row: null });
+    }
     return json({ action: 'no_bid', reasoning: 'No inventory found for this MPN', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
   }
 
@@ -973,12 +981,13 @@ async function handleEmailAgent(request, env) {
   // Enforce exact template wording — override whatever Claude wrote for standard reply types.
   // Claude picks the action; the worker locks the text. No improvisation possible.
   const DRAFT_TEMPLATES = {
-    remove_oem:      'Ok, removed from listing.',
-    request_tp_500:  'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
-    request_tp_2000: 'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.',
-    msg_checking:    'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.',
-    bill_handle:     'Bill will help with this request',
-    add_to_stan:     'Warehouse is checking details and I will update ASAP',
+    remove_oem:       'Ok, removed from listing.',
+    request_tp_500:   'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
+    request_tp_2000:  'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.',
+    msg_checking:     'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.',
+    bill_handle:      'Bill will help with this request',
+    add_to_stan:      'Warehouse is checking details and I will update ASAP',
+    listing_removed:  'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.',
   };
   // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic — leave as-is
   if (DRAFT_TEMPLATES[decision.action]) {
