@@ -3110,7 +3110,9 @@ function fastScanInbox() {
 
   var tpQ = 'in:inbox label:oem-rfq-incoming-processed -label:oem-tp-processed -label:' + PENDING_LABEL + ' newer_than:60d ' + blockFilter;
   var tpCount = 0;
-  gmailSearchREST(tpQ, 50).forEach(function(tid) {
+  var tpIds = [];
+  try { tpIds = GmailApp.search(tpQ, 0, 50).map(function(t){ return t.getId(); }); } catch(e) { hubLog('error', 'tpQ search failed: ' + e); }
+  tpIds.forEach(function(tid) {
     var meta = gmailGetThreadMeta_(tid);
     if (meta.senders.length && meta.senders[meta.senders.length-1].indexOf(JOHN_EMAIL) >= 0) return;
     var buyerCount = meta.senders.filter(function(s){ return s.indexOf(JOHN_EMAIL) < 0 && s.indexOf('intransittech') < 0; }).length;
@@ -3132,7 +3134,9 @@ function fastScanInbox() {
     ' OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend' +
     ' OR quotation OR "looking for" OR "please quote" OR "please check" OR "can you quote" OR "provide the price")';
   var agentCount = 0;
-  gmailSearchREST(agentQ, 50).forEach(function(tid) {
+  var agentIds = [];
+  try { agentIds = GmailApp.search(agentQ, 0, 50).map(function(t){ return t.getId(); }); } catch(e) { hubLog('error', 'agentQ search failed: ' + e); }
+  agentIds.forEach(function(tid) {
     var meta = gmailGetThreadMeta_(tid);
     var firstSender = (meta.senders[0] || '').toLowerCase();
     if (firstSender.indexOf('intransittech.com') >= 0 || firstSender.indexOf('fortetechno.com') >= 0 || firstSender.indexOf('fortecomp.com') >= 0) {
