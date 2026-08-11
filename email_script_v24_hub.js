@@ -2379,37 +2379,25 @@ function buildHomepageCard() {
 }
 
 
-// Card action: schedules background fix via trigger, returns immediately to avoid 30s timeout
+// Card action: runs synchronously — no trigger creation, no trigger limit issues ever.
+// Processes up to 22s worth of "claude" drafts and shows results inline.
+// If there are more drafts than fit in 22s, click again to process the next batch.
 function addonFixClaudeDrafts() {
   try {
-    // The 8 core recurring triggers — never touch these
-    var CORE_TRIGGERS = [
-      'fastScanInbox','processPendingThreads','checkDavidNoStockEmails',
-      'checkBillNetcompRemovals','checkInboxForPaymentAdvice',
-      'processFixQueue','processCommandQueue','sendDailyCostReport'
-    ];
-    // Delete ALL non-core triggers (runClaudeDraftFix + any orphaned one-time triggers
-    // that piled up from repeated button clicks where the trigger never fired or crashed).
-    // Root cause of "too many triggers" error: orphaned runClaudeDraftFix triggers accumulate
-    // (each button click creates one; if it crashes before self-deleting, it sticks forever).
-    ScriptApp.getProjectTriggers().forEach(function(t) {
-      if (CORE_TRIGGERS.indexOf(t.getHandlerFunction()) === -1) {
-        ScriptApp.deleteTrigger(t);
-      }
-    });
-    // Schedule background run — now guaranteed to be < 20 total triggers
-    ScriptApp.newTrigger('runClaudeDraftFix').timeBased().after(3000).create();
-
-    var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader()
-        .setTitle('Fix Claude Drafts')
-        .setSubtitle('Processing in background...'))
-      .addSection(CardService.newCardSection()
-        .addWidget(CardService.newTextParagraph()
-          .setText('Scanning and fixing "claude" drafts now. Check your Gmail drafts in ~30 seconds. Results are logged in Apps Script execution log.')));
-
+    var startMs = new Date().getTime();
+    var results = findAndFixClaudeDrafts(startMs);
+    var msg;
+    if (results.length === 0) {
+      msg = 'No "claude" drafts found.';
+    } else {
+      msg = 'Fixed ' + results.length + ' draft(s):\n' +
+        results.map(function(r) {
+          return '• ' + (r.subject || '').substring(0, 45) + ' → ' + (r.action || 'done');
+        }).join('\n');
+      if (results._partial) msg += '\n\nMore remain — click again to continue.';
+    }
     return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().pushCard(card.build()))
+      .setNotification(CardService.newNotification().setText(msg))
       .build();
   } catch(err) {
     return CardService.newActionResponseBuilder()
@@ -2418,14 +2406,10 @@ function addonFixClaudeDrafts() {
   }
 }
 
-// Background trigger handler — full 6-min Apps Script execution limit
+// Standalone runner — call from Apps Script editor for manual/debug runs (no time limit)
 function runClaudeDraftFix() {
-  // Self-delete this one-time trigger first
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'runClaudeDraftFix') ScriptApp.deleteTrigger(t);
-  });
   try {
-    var results = findAndFixClaudeDrafts();
+    var results = findAndFixClaudeDrafts(null);
     hubLog('info', 'Fix Claude Drafts: processed ' + results.length + ' draft(s)', {});
     results.forEach(function(r) {
       hubLog('info', 'Fixed draft: ' + r.subject + ' → action=' + r.action, {});
@@ -3297,12 +3281,20 @@ function getRemoteConfig() {
 // ── Sidebar: "Fix Claude Drafts" — finds drafts where body starts with "claude",
 //    deletes the placeholder, then reprocesses the thread through the full email agent
 //    (same path as the automation: inventory lookup + Claude decision + correct draft).
-function findAndFixClaudeDrafts() {
+// startMs: Date.getTime() from the card callback — used to stop before the 30s timeout.
+// Pass null for manual/background runs (no time limit).
+function findAndFixClaudeDrafts(startMs) {
+  var TIME_LIMIT_MS = 22000;
   var results = [];
   var data = gmailREST_('/drafts?maxResults=50');
   var drafts = (data.drafts || []);
 
   for (var i = 0; i < drafts.length; i++) {
+    // Stop before hitting the 30s card callback timeout
+    if (startMs && (new Date().getTime() - startMs) > TIME_LIMIT_MS) {
+      results._partial = true;
+      break;
+    }
     var d = drafts[i];
     var msgId = d.message && d.message.id;
     if (!msgId) continue;
