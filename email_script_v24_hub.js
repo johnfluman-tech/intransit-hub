@@ -3774,9 +3774,9 @@ function processCommandQueue() {
 
           var oemBlob = buildFilteredOemBlob_();
           var token = ScriptApp.getOAuthToken();
+          var inGid = SpreadsheetApp.openById(IN_STOCK_ID).getSheets()[0].getSheetId();
           var inResp = UrlFetchApp.fetch(
-            'https://www.googleapis.com/drive/v3/files/' + IN_STOCK_ID +
-              '/export?mimeType=application%2Fvnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'https://docs.google.com/spreadsheets/d/' + IN_STOCK_ID + '/export?format=xlsx&gid=' + inGid,
             { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
           );
           if (inResp.getResponseCode() !== 200) throw new Error('IN STOCK export failed (' + inResp.getResponseCode() + '): ' + inResp.getContentText().substring(0, 200));
@@ -4203,9 +4203,9 @@ function sendPleasePostNow() {
 
   var oemBlob = buildFilteredOemBlob_();
   var token = ScriptApp.getOAuthToken();
+  var inGid = SpreadsheetApp.openById(IN_STOCK_ID).getSheets()[0].getSheetId();
   var inResp = UrlFetchApp.fetch(
-    'https://www.googleapis.com/drive/v3/files/' + IN_STOCK_ID +
-      '/export?mimeType=application%2Fvnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'https://docs.google.com/spreadsheets/d/' + IN_STOCK_ID + '/export?format=xlsx&gid=' + inGid,
     { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
   );
   if (inResp.getResponseCode() !== 200) throw new Error('IN STOCK export failed (' + inResp.getResponseCode() + '): ' + inResp.getContentText().substring(0, 200));
@@ -4215,51 +4215,24 @@ function sendPleasePostNow() {
   Logger.log('sendPleasePostNow: DONE');
 }
 
-// Builds a filtered OEM EXCESS XLSX blob via Drive REST API (avoids DriveApp GCP permission issue).
-// Creates a standalone temp spreadsheet, populates it, exports via UrlFetchApp, then trashes it.
+// Exports OEM EXCESS as XLSX directly via the Sheets export URL (no DriveApp, no Drive API needed).
+// Uses docs.google.com/spreadsheets/export which works with the OAuth token and Sheets scope alone.
 function buildFilteredOemBlob_() {
-  var srcData = SpreadsheetApp.openById(SPREADSHEET_ID).getSheets()[0].getDataRange().getValues();
-  var filteredRows = [srcData[0]];
-  var skipped = 0;
-  for (var i = 1; i < srcData.length; i++) {
-    var mpn = String(srcData[i][0]).trim();
-    if (!mpn) { skipped++; continue; }
-    var qtyRaw = srcData[i][3];
-    var qtyNum = (typeof qtyRaw === 'number') ? qtyRaw : parseFloat(String(qtyRaw).replace(/,/g, ''));
-    if (isNaN(qtyNum) || qtyNum <= 0) { skipped++; continue; }
-    var row = srcData[i].slice(); row[0] = mpn; row[3] = qtyNum;
-    filteredRows.push(row);
-  }
-  Logger.log('OEM EXCESS filter: ' + (filteredRows.length - 1) + ' rows, ' + skipped + ' skipped');
-
-  var tempSS = SpreadsheetApp.create('_OEM_EXPORT_TEMP');
-  var tempId = tempSS.getId();
+  var gid = SpreadsheetApp.openById(SPREADSHEET_ID).getSheets()[0].getSheetId();
   var token = ScriptApp.getOAuthToken();
-  try {
-    var sheet = tempSS.getActiveSheet();
-    sheet.getRange(1, 1, filteredRows.length, filteredRows[0].length).setValues(filteredRows);
-    SpreadsheetApp.flush();
-    var resp = UrlFetchApp.fetch(
-      'https://www.googleapis.com/drive/v3/files/' + tempId +
-        '/export?mimeType=application%2Fvnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-    );
-    if (resp.getResponseCode() !== 200) {
-      throw new Error('Drive export failed (' + resp.getResponseCode() + '): ' + resp.getContentText().substring(0, 300));
-    }
-    var blob = resp.getBlob();
-    blob.setName('OEM_EXCESS.xlsx');
-    return blob;
-  } finally {
-    try {
-      UrlFetchApp.fetch(
-        'https://www.googleapis.com/drive/v3/files/' + tempId,
-        { method: 'PATCH', contentType: 'application/json',
-          payload: JSON.stringify({ trashed: true }),
-          headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-      );
-    } catch(e) { Logger.log('trash error: ' + e); }
+  var url = 'https://docs.google.com/spreadsheets/d/' + SPREADSHEET_ID +
+            '/export?format=xlsx&gid=' + gid;
+  var resp = UrlFetchApp.fetch(url, {
+    headers: { Authorization: 'Bearer ' + token },
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() !== 200) {
+    throw new Error('OEM EXCESS export failed (' + resp.getResponseCode() + '): ' + resp.getContentText().substring(0, 300));
   }
+  var blob = resp.getBlob();
+  blob.setName('OEM_EXCESS.xlsx');
+  Logger.log('OEM EXCESS export: OK (' + blob.getBytes().length + ' bytes)');
+  return blob;
 }
 
 
