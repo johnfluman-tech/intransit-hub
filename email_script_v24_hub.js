@@ -2386,13 +2386,16 @@ function addonFixClaudeDrafts() {
   try {
     var startMs = new Date().getTime();
     var results = findAndFixClaudeDrafts(startMs);
+    // Write every result to the persistent log sheet
+    results.forEach(function(r) { appendFixLog_(r.subject, r.action, r.draft_created); });
     var msg;
     if (results.length === 0) {
       msg = 'No "claude" drafts found.';
     } else {
-      msg = 'Fixed ' + results.length + ' draft(s):\n' +
+      msg = 'Processed ' + results.length + ' draft(s):\n' +
         results.map(function(r) {
-          return '• ' + (r.subject || '').substring(0, 45) + ' → ' + (r.action || 'done');
+          var icon = r.draft_created ? '✅' : (r.action === 'error' ? '❌' : '⚪');
+          return icon + ' ' + (r.subject || '').substring(0, 40) + '\n   → ' + (r.action || 'done');
         }).join('\n');
       if (results._partial) msg += '\n\nMore remain — click again to continue.';
     }
@@ -2403,6 +2406,32 @@ function addonFixClaudeDrafts() {
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText('Error: ' + err.toString()))
       .build();
+  }
+}
+
+// Appends one row to "FixClaudeLog" sheet in the OEM EXCESS spreadsheet.
+// Creates the sheet + header on first use. Keeps a rolling 30-day history.
+function appendFixLog_(subject, action, draftCreated) {
+  try {
+    var ss    = SpreadsheetApp.openById('1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4');
+    var sheet = ss.getSheetByName('FixClaudeLog');
+    if (!sheet) {
+      sheet = ss.insertSheet('FixClaudeLog');
+      sheet.appendRow(['Timestamp', 'Subject', 'Action', 'Draft Created?']);
+      sheet.getRange(1, 1, 1, 4).setFontWeight('bold');
+    }
+    sheet.appendRow([new Date(), subject || '', action || '', draftCreated ? 'YES' : 'NO']);
+    // Prune rows older than 30 days (keep header row 1)
+    var now = new Date().getTime();
+    var data = sheet.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      var ts = data[i][0];
+      if (ts instanceof Date && (now - ts.getTime()) > 30 * 24 * 3600 * 1000) {
+        sheet.deleteRow(i + 1);
+      }
+    }
+  } catch(e) {
+    Logger.log('appendFixLog_ error: ' + e);
   }
 }
 
@@ -3307,25 +3336,34 @@ function findAndFixClaudeDrafts(startMs) {
       var thread  = msg.getThread();
       var subject = thread.getFirstMessageSubject();
 
-      // Delete the "claude" placeholder draft first
-      try { gmailREST_('/drafts/' + d.id, 'DELETE'); } catch(delErr) {
-        hubLog('warn', 'findAndFixClaudeDrafts: could not delete placeholder draft ' + d.id + ': ' + delErr, {});
-      }
+      hubLog('info', 'FixClaudeDraft START: ' + subject, {draft_id: d.id});
 
-      // Reprocess through the full automation path — inventory lookup, Claude decision,
-      // audit, and correct draft creation. Same logic as processPendingThreads → processThread.
+      // CRITICAL: run processThread FIRST — it creates the new draft if appropriate.
+      // Only delete the placeholder AFTER we know what happened.
+      // If processThread throws, leave the placeholder intact so John can retry.
       var decision = null;
-      try { decision = processThread(thread); } catch(procErr) {
-        hubLog('error', 'findAndFixClaudeDrafts processThread: ' + procErr, {});
+      try {
+        decision = processThread(thread);
+      } catch(procErr) {
+        hubLog('error', 'FixClaudeDraft ERROR: "' + subject + '" — ' + procErr, {draft_id: d.id});
+        results.push({ subject: subject, action: 'error', draft_created: false });
+        continue; // Leave placeholder intact
       }
 
-      results.push({
-        subject: subject,
-        action:  decision ? (decision.action || 'unknown') : 'error',
-        draft_created: !!(decision && decision.draft_body && decision.action !== 'no_bid' && decision.action !== 'no_action')
-      });
+      var action       = decision ? (decision.action || 'unknown') : 'null';
+      var draftCreated = !!(decision && decision.draft_body &&
+                           action !== 'no_bid' && action !== 'no_action' && action !== 'no_longer_available');
+
+      hubLog('info', 'FixClaudeDraft DONE: "' + subject + '" → ' + action + (draftCreated ? ' ✓ draft' : ' (no draft)'), {draft_id: d.id, action: action});
+
+      // Now safe to delete the placeholder — the new draft (if any) is already created above
+      try { gmailREST_('/drafts/' + d.id, 'DELETE'); } catch(delErr) {
+        hubLog('warn', 'FixClaudeDraft: could not delete placeholder ' + d.id + ': ' + delErr, {});
+      }
+
+      results.push({ subject: subject, action: action, draft_created: draftCreated });
     } catch(e) {
-      hubLog('error', 'findAndFixClaudeDrafts: ' + e, {});
+      hubLog('error', 'findAndFixClaudeDrafts outer: ' + e, {});
     }
   }
   return results;
