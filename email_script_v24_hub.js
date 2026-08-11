@@ -2382,12 +2382,22 @@ function buildHomepageCard() {
 // Card action: schedules background fix via trigger, returns immediately to avoid 30s timeout
 function addonFixClaudeDrafts() {
   try {
-    // Delete ALL runClaudeDraftFix triggers (with or without underscore suffix)
+    // The 8 core recurring triggers — never touch these
+    var CORE_TRIGGERS = [
+      'fastScanInbox','processPendingThreads','checkDavidNoStockEmails',
+      'checkBillNetcompRemovals','checkInboxForPaymentAdvice',
+      'processFixQueue','processCommandQueue','sendDailyCostReport'
+    ];
+    // Delete ALL non-core triggers (runClaudeDraftFix + any orphaned one-time triggers
+    // that piled up from repeated button clicks where the trigger never fired or crashed).
+    // Root cause of "too many triggers" error: orphaned runClaudeDraftFix triggers accumulate
+    // (each button click creates one; if it crashes before self-deleting, it sticks forever).
     ScriptApp.getProjectTriggers().forEach(function(t) {
-      var fn = t.getHandlerFunction();
-      if (fn === 'runClaudeDraftFix' || fn === 'runClaudeDraftFix_') ScriptApp.deleteTrigger(t);
+      if (CORE_TRIGGERS.indexOf(t.getHandlerFunction()) === -1) {
+        ScriptApp.deleteTrigger(t);
+      }
     });
-    // Schedule background run
+    // Schedule background run — now guaranteed to be < 20 total triggers
     ScriptApp.newTrigger('runClaudeDraftFix').timeBased().after(3000).create();
 
     var card = CardService.newCardBuilder()
@@ -2408,27 +2418,20 @@ function addonFixClaudeDrafts() {
   }
 }
 
-// Background trigger handler — runs findAndFixClaudeDrafts with full 6-min Apps Script limit
+// Background trigger handler — full 6-min Apps Script execution limit
 function runClaudeDraftFix() {
-  // Clean up this trigger (both old and new name variants)
+  // Self-delete this one-time trigger first
   ScriptApp.getProjectTriggers().forEach(function(t) {
-    var fn = t.getHandlerFunction();
-    if (fn === 'runClaudeDraftFix' || fn === 'runClaudeDraftFix_') ScriptApp.deleteTrigger(t);
+    if (t.getHandlerFunction() === 'runClaudeDraftFix') ScriptApp.deleteTrigger(t);
   });
   try {
     var results = findAndFixClaudeDrafts();
-    Logger.log('Fix Claude Drafts: found ' + results.length + ' draft(s)');
+    hubLog('info', 'Fix Claude Drafts: processed ' + results.length + ' draft(s)', {});
     results.forEach(function(r) {
-      try {
-        applyClaudeDraftFix(r.draft_id, r.thread_id, r.to_email, r.subject, r.corrected_body);
-        Logger.log('Fixed: ' + r.subject + ' → ' + r.corrected_body.substring(0, 80));
-      } catch(e) {
-        Logger.log('Error fixing "' + r.subject + '": ' + e.toString());
-      }
+      hubLog('info', 'Fixed draft: ' + r.subject + ' → action=' + r.action, {});
     });
-    Logger.log('Fix Claude Drafts: complete');
   } catch(e) {
-    Logger.log('runClaudeDraftFix_ error: ' + e.toString());
+    hubLog('error', 'runClaudeDraftFix error: ' + e, {});
   }
 }
 
@@ -3291,7 +3294,9 @@ function getRemoteConfig() {
 // ── Sidebar: "Fix Claude Drafts" ─────────────────────────────
 
 
-// ── Sidebar: "Fix Claude Drafts" — finds drafts where body starts with "claude" ──
+// ── Sidebar: "Fix Claude Drafts" — finds drafts where body starts with "claude",
+//    deletes the placeholder, then reprocesses the thread through the full email agent
+//    (same path as the automation: inventory lookup + Claude decision + correct draft).
 function findAndFixClaudeDrafts() {
   var results = [];
   var data = gmailREST_('/drafts?maxResults=50');
@@ -3307,55 +3312,25 @@ function findAndFixClaudeDrafts() {
       var body = (msg.getPlainBody() || '').trim();
       if (!/^claude\b/i.test(body)) continue;
 
-      var thread    = msg.getThread();
-      var threadId  = thread.getId();
-      var messages  = thread.getMessages();
-      var rawSubj   = thread.getFirstMessageSubject();
-      var subject   = 'Re: ' + rawSubj.replace(/^Re:\s*/i, '');
-      var toEmail   = msg.getTo();
+      var thread  = msg.getThread();
+      var subject = thread.getFirstMessageSubject();
 
-      // If To header is empty fall back to last non-John sender
-      if (!toEmail) {
-        for (var mi = messages.length - 1; mi >= 0; mi--) {
-          var fe = extractBuyerEmail(messages[mi].getFrom());
-          if (fe && fe.indexOf('intransittech.com') === -1) { toEmail = fe; break; }
-        }
+      // Delete the "claude" placeholder draft first
+      try { gmailREST_('/drafts/' + d.id, 'DELETE'); } catch(delErr) {
+        hubLog('warn', 'findAndFixClaudeDrafts: could not delete placeholder draft ' + d.id + ': ' + delErr, {});
       }
 
-      // Build thread content for context
-      var parts = ['Subject: ' + rawSubj];
-      messages.forEach(function(m, idx) {
-        var mb = (m.getPlainBody() || '').split('\n')
-          .filter(function(ln) { return ln.charAt(0) !== '>'; })
-          .join('\n').trim().substring(0, 1500);
-        parts.push('--- Msg ' + (idx + 1) + ' | From: ' + m.getFrom() + ' ---');
-        parts.push(mb);
-      });
-      var threadContent = parts.join('\n').substring(0, 5000);
-
-      var fixResp = UrlFetchApp.fetch(HUB_URL + '/api/fix-draft', {
-        method: 'post',
-        contentType: 'application/json',
-        payload: JSON.stringify({
-          draft_body: 'claude',
-          feedback: 'Draft body says "claude" as a placeholder. Determine the correct reply based on the thread context.',
-          subject: subject,
-          to_email: toEmail,
-          thread_content: threadContent
-        }),
-        headers: { Authorization: 'Bearer ' + HUB_SECRET },
-        muteHttpExceptions: true
-      });
-      var fix = {};
-      try { fix = JSON.parse(fixResp.getContentText()); } catch(e) {}
+      // Reprocess through the full automation path — inventory lookup, Claude decision,
+      // audit, and correct draft creation. Same logic as processPendingThreads → processThread.
+      var decision = null;
+      try { decision = processThread(thread); } catch(procErr) {
+        hubLog('error', 'findAndFixClaudeDrafts processThread: ' + procErr, {});
+      }
 
       results.push({
-        draft_id:       d.id,
-        thread_id:      threadId,
-        subject:        subject,
-        to_email:       toEmail,
-        corrected_body: fix.corrected_body || '(could not determine)',
-        advice:         fix.advice || ''
+        subject: subject,
+        action:  decision ? (decision.action || 'unknown') : 'error',
+        draft_created: !!(decision && decision.draft_body && decision.action !== 'no_bid' && decision.action !== 'no_action')
       });
     } catch(e) {
       hubLog('error', 'findAndFixClaudeDrafts: ' + e, {});
