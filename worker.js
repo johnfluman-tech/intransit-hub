@@ -737,13 +737,16 @@ TP given:
 - No qty from buyer → request_qty: "We need a quantity to proceed. Once you provide the quantity you are looking for, we will get back to you right away."
 - Has qty: check non-BILL-EXT row notes for "$2,000 MIN" → min=$2000, else min=$500
   - (qty × TP) < min → below_min_line: "Thank you for your inquiry. Our minimum line value for this item is $[MIN]. At your target price of $[TP] per piece, we would require a minimum of [ceil(MIN/TP)] pieces. If you are able to adjust your quantity, please let us know and we will get right back to you. Thank you for the opportunity."
-  - (qty × TP) ≥ min → msg_checking + forte_entry
+  - (qty × TP) ≥ min → FIRST check: does thread_content show "checking on it now" already sent by John AND forte_results has an Open entry? If yes → still_checking (buyer is following up; we haven't gotten OEM response yet). If no prior MSG_CHECKING → msg_checking + forte_entry
 
 No TP: any non-BILL-EXT row has "$2,000 MIN" in notes → request_tp_2000; otherwise → request_tp_500
 Buyers often say "no target" on first email — always ask anyway. When uncertain, default to request_tp_500.
 
+Buyer follow-up with no new TP (e.g. "any update?", "please quote", "how much?"): if thread shows MSG_CHECKING was sent and forte_results has an Open entry → still_checking. If no prior MSG_CHECKING → request_tp_500.
+
 ## STANDARD TEXTS (copy exactly, no paraphrasing)
 MSG_CHECKING: "We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
+STILL_CHECKING: "We are still checking on this. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity."
 REQUEST_TP_500: "We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away."
 REQUEST_TP_2000: "We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away."
 BILL: "Bill will help with this request"
@@ -1000,6 +1003,7 @@ async function handleEmailAgent(request, env) {
     request_tp_500:   'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
     request_tp_2000:  'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.',
     msg_checking:     'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.',
+    still_checking:   'We are still checking on this. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.',
     bill_handle:      'Bill will help with this request',
     add_to_stan:      'Warehouse is checking details and I will update ASAP',
     listing_removed:  'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.',

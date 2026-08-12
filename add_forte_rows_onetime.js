@@ -195,6 +195,33 @@ function deleteForteRow4264() {
 // function addForteAug9() { ... }
 
 
+// Run davidNoStk_Aug12() to stamp Forte rows + (OEM deletions already queued via command-queue #179-180):
+//   OPA1678IDRGR        #4278  No stock
+//   35MXC10000MEFCSN30X30 #4282  No stk
+function davidNoStk_Aug12() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var stamp = 'NO STK - 8/12/2026';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  [4278, 4282].forEach(function(rowNum) {
+    try {
+      var cell = sheet.getRange(rowNum, 11);
+      var cur = String(cell.getValue()).trim().toUpperCase();
+      if (cur.indexOf('NO STK') === -1 && cur !== 'CLOSED') {
+        cell.clearDataValidations();
+        cell.setValue(stamp);
+        cell.setBackground('#000000');
+        cell.setFontColor('#FFFFFF');
+        cell.setFontWeight('bold');
+        Logger.log('Stamped Forte row ' + rowNum);
+      } else {
+        Logger.log('Row ' + rowNum + ' already stamped: ' + cur);
+      }
+    } catch(e) { Logger.log('Error row ' + rowNum + ': ' + e); }
+  });
+  Logger.log('davidNoStk_Aug12: DONE');
+}
+
+
 // Run addForteAug11() to add Forte entry for L6384ED013TR (msg_checking sent 8/11/2026).
 // Buyer: Roger Zhang / HK Waykey Technology. OEM EXCESS 132,800 units confirmed.
 function addForteAug11() {

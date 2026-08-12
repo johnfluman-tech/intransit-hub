@@ -3124,7 +3124,9 @@ function fastScanInbox() {
     rfqCount++;
   });
 
-  var tpQ = 'in:inbox label:oem-rfq-incoming-processed -label:oem-tp-processed -label:' + PENDING_LABEL + ' newer_than:60d ' + blockFilter;
+  // Also catch netCOMPONENTS threads where John manually replied before automation labeled them
+  // (original tpQ requires label:oem-rfq-incoming-processed which never got applied in those cases)
+  var tpQ = 'in:inbox (label:oem-rfq-incoming-processed OR from:messagesend@netcomponents.com) -label:oem-tp-processed -label:' + PENDING_LABEL + ' newer_than:60d ' + blockFilter;
   var tpCount = 0;
   var tpIds = [];
   try { tpIds = GmailApp.search(tpQ, 0, 50).map(function(t){ return t.getId(); }); } catch(e) { hubLog('error', 'tpQ search failed: ' + e); }
@@ -3148,6 +3150,7 @@ function fastScanInbox() {
     ' (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for"' +
     ' OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts' +
     ' OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend' +
+    ' OR subject:pcs OR subject:units' +
     ' OR quotation OR "looking for" OR "please quote" OR "please check" OR "can you quote" OR "provide the price")';
   var agentCount = 0;
   var agentIds = [];
