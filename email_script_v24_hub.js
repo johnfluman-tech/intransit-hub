@@ -2599,7 +2599,32 @@ function checkDavidNoStockEmails() {
           hubLog('error', 'checkDavidNoStockEmails: Forte row stamp error row ' + forteRow + ': ' + e, {});
         }
       }
-      try { processThread(thread); } catch(e) { hubLog('error', 'checkDavidNoStockEmails processThread error: ' + e, {}); }
+      // Bypass worker for David no-stk — action is always "Ok, removed from listing."
+      // Using worker was causing timeouts/failures that left threads unlabeled.
+      try {
+        var replyMsg = thread.getMessages()[thread.getMessageCount() - 1];
+        var bodyText = 'Ok, removed from listing.';
+        var bodyHtml = '<p>' + bodyText + '</p>' + getSignatureHTML();
+        replyMsg.createDraftReply(bodyText, { htmlBody: bodyHtml });
+        hubLog('run', 'checkDavidNoStockEmails: draft created for ' + subject, {});
+      } catch(eDraft) {
+        hubLog('error', 'checkDavidNoStockEmails: draft creation error: ' + eDraft, {});
+      }
+      // Queue OEM EXCESS removal
+      try {
+        var mpnToRemove = extractMPNFromSubject(subject) || extractMPN(subject);
+        if (mpnToRemove) {
+          UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
+            method: 'post', contentType: 'application/json',
+            headers: { Authorization: 'Bearer ' + HUB_SECRET },
+            payload: JSON.stringify({ type: 'remove_oem_mpn', mpn: mpnToRemove }),
+            muteHttpExceptions: true
+          });
+          hubLog('run', 'checkDavidNoStockEmails: queued remove_oem_mpn for ' + mpnToRemove, {});
+        }
+      } catch(eOem) {
+        hubLog('error', 'checkDavidNoStockEmails: OEM queue error: ' + eOem, {});
+      }
       gmailModifyThread_(tid, [INCOMING_LABEL, 'oem-rfq-incoming-processed'], []);
       gmailArchiveThread_(tid);
     } catch(e) {
