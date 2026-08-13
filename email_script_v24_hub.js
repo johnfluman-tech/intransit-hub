@@ -2706,6 +2706,7 @@ function createThreadedDraft(toEmail, subject, htmlBody, replyToGmailMsgId, thre
       }
     }
     var opts = { htmlBody: htmlBody, name: 'John Fluman' };
+    if (toEmail) opts.to = toEmail;
     if (ccEmail) opts.cc = ccEmail;
     var draft = replyMsg.createDraftReply('', opts);
     Logger.log('Draft created | To: ' + toEmail + ' | ' + subject);
