@@ -1087,17 +1087,16 @@ async function handleEmailAgent(request, env) {
   }
 
   // ── Stock price substitution for own_stock ───────────────────────────────
-  // Looks up a price stored via the sidebar "Stock Price" tool.
-  // If found: substitutes $[FILL IN] in draft_body, or builds draft_body when
-  // the code guard forced own_stock with null draft_body.
+  // Priority: (1) price_to_quote col from IN STOCK sheet, (2) D1 stock_prices table.
   if (decision.action === 'own_stock') {
     const mpnKey = (decision.mpn || requestMpn || '').replace(/\s+/g, '').toUpperCase();
     if (mpnKey) {
-      const priceRow = await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(mpnKey).first();
-      const storedPrice = priceRow != null ? priceRow.price : null;
+      // Check sheet price_to_quote first (col F added by John)
+      const ownRows = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
+      const sheetPrice = ownRows.length > 0 && ownRows[0].price_to_quote ? Number(ownRows[0].price_to_quote) : null;
+      const priceRow = sheetPrice == null ? await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(mpnKey).first() : null;
+      const storedPrice = sheetPrice != null ? sheetPrice : (priceRow != null ? priceRow.price : null);
       if (!decision.draft_body) {
-        // Code guard set draft_body to null — build it now using in_stock data
-        const ownRows = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
         const dc = (ownRows[0] && ownRows[0].dc) ? ownRows[0].dc : '';
         const totalQty = ownRows.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
         const priceStr = storedPrice != null ? `$${Number(storedPrice).toFixed(2)} each` : '$[FILL IN]';
