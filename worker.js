@@ -762,7 +762,9 @@ REQUEST_QTY: "We need a quantity to proceed. Once you provide the quantity you a
 - country: 2-letter ISO (CN=China, US=USA, CA=Canada, NL=Netherlands, etc.)
 
 ## RESPONSE FORMAT
-{"action":"...","reasoning":"1-2 sentences","mpn":"...","buyer_email":"...","buyer_country":"...","qty":N,"target_price":N,"draft_body":"...","forte_entry":{"mpn":"...","qty":N,"target_price":N,"country":"XX"} or null}`;
+{"action":"...","reasoning":"1-2 sentences","mpn":"...","buyer_email":"...","buyer_country":"...","qty":N,"target_price":N,"draft_body":"...","forte_entry":{"mpn":"...","qty":N,"target_price":N,"country":"XX"} or null}
+
+CRITICAL: NEVER set action or draft_body to "claude". "claude" is NOT a valid action. When uncertain, always default to request_tp_500.`;
 
 // ── Inventory self-lookup helpers ────────────────────────────────────────────
 const OEM_WEB_APP = 'https://script.google.com/macros/s/AKfycbyuuBmiYVW5mKI82D5YQGPh1nNGLJZzlLKoxuOdtmOUwUe75VlhhakqgwKooZu5LHFK/exec?key=baSDJ%23444FE%268';
@@ -1011,6 +1013,56 @@ async function handleEmailAgent(request, env) {
   // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic — leave as-is
   if (DRAFT_TEMPLATES[decision.action]) {
     decision.draft_body = DRAFT_TEMPLATES[decision.action];
+  }
+
+  // ── Unknown action guard ────────────────────────────────────────────────────
+  // Haiku occasionally returns "claude" or another invalid action as a fallback.
+  // Catch it here and apply deterministic rules instead of letting it create a "claude" draft.
+  const KNOWN_ACTIONS = new Set([
+    'msg_checking','request_tp_500','request_tp_2000','request_qty','bill_handle',
+    'own_stock','stan_quoted','add_to_stan','no_bid','no_action','remove_oem',
+    'david_nostock','forward_deb','listing_removed','ask_similar_mpn','below_min_line','still_checking'
+  ]);
+  if (!KNOWN_ACTIONS.has(decision.action)) {
+    const hasOwnStock   = (in_stock_results || []).some(r => !/Warehouse#/i.test(r.notes || ''));
+    const hasWarehouse  = (in_stock_results || []).some(r => /Warehouse#\d/i.test(r.notes || ''));
+    const allBillExt    = (oem_results || []).length > 0 && (oem_results || []).every(r => /BILL EXT/i.test(r.notes || ''));
+    const hasNonBillOem = (oem_results || []).some(r => !/BILL EXT/i.test(r.notes || ''));
+    const has2kMin      = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+    const hasTp         = decision.target_price && decision.target_price > 0;
+    decision._corrected_from    = decision.action;
+    decision._correction_reason = `Unknown action "${decision.action}" — deterministic fallback applied`;
+    if (hasOwnStock) {
+      decision.action = 'own_stock';
+      decision.draft_body = null; // own_stock price block below will build it
+    } else if (hasWarehouse && !hasNonBillOem) {
+      decision.action = 'add_to_stan';
+      decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+    } else if (allBillExt && hasTp) {
+      decision.action = 'bill_handle';
+      decision.draft_body = DRAFT_TEMPLATES.bill_handle;
+    } else if (hasNonBillOem || allBillExt) {
+      decision.action = has2kMin ? 'request_tp_2000' : 'request_tp_500';
+      decision.draft_body = DRAFT_TEMPLATES[decision.action];
+    } else {
+      decision.action = 'no_bid';
+      decision.draft_body = null;
+    }
+  }
+
+  // ── BILL EXT + no-TP guard ──────────────────────────────────────────────────
+  // If all OEM rows are BILL EXT and buyer gave no TP, force request_tp_500.
+  // Guards against Haiku returning msg_checking or other actions for this case.
+  if (decision.action !== 'request_tp_500' && decision.action !== 'request_tp_2000' && decision.action !== 'bill_handle' && decision.action !== 'no_bid' && decision.action !== 'no_action') {
+    const allBillExt2 = (oem_results || []).length > 0 && (oem_results || []).every(r => /BILL EXT/i.test(r.notes || ''));
+    const hasOwnStock2 = (in_stock_results || []).some(r => !/Warehouse#/i.test(r.notes || ''));
+    if (allBillExt2 && !hasOwnStock2 && !(decision.target_price && decision.target_price > 0)) {
+      const has2kMin2 = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+      decision._corrected_from    = decision._corrected_from || decision.action;
+      decision._correction_reason = 'All OEM BILL EXT with no buyer TP — must ask for TP first';
+      decision.action     = has2kMin2 ? 'request_tp_2000' : 'request_tp_500';
+      decision.draft_body = DRAFT_TEMPLATES[decision.action];
+    }
   }
 
   // Code-level Warehouse# guard: if Haiku said own_stock but every in_stock row has
