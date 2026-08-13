@@ -1000,6 +1000,13 @@ async function handleEmailAgent(request, env) {
 
   // Enforce exact template wording — override whatever Claude wrote for standard reply types.
   // Claude picks the action; the worker locks the text. No improvisation possible.
+  // Build draft body for stan_quoted from Stan sheet colB + colC (verbatim per John's rule)
+  function buildStanQuotedBody(stanRow) {
+    const colB = (stanRow.colB || '').trim();
+    const colC = (stanRow.colC || '').trim();
+    return colC ? colB + '\n\n' + colC : colB;
+  }
+
   const DRAFT_TEMPLATES = {
     remove_oem:       'Ok, removed from listing.',
     request_tp_500:   'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
@@ -1036,8 +1043,14 @@ async function handleEmailAgent(request, env) {
       decision.action = 'own_stock';
       decision.draft_body = null; // own_stock price block below will build it
     } else if (hasWarehouse && !hasNonBillOem) {
-      decision.action = 'add_to_stan';
-      decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+      const stanQuotedRow = (stan_results || []).find(r => r.status === 'QUOTED' && r.colB);
+      if (stanQuotedRow) {
+        decision.action = 'stan_quoted';
+        decision.draft_body = buildStanQuotedBody(stanQuotedRow);
+      } else {
+        decision.action = 'add_to_stan';
+        decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+      }
     } else if (allBillExt && hasTp) {
       decision.action = 'bill_handle';
       decision.draft_body = DRAFT_TEMPLATES.bill_handle;
@@ -1070,10 +1083,18 @@ async function handleEmailAgent(request, env) {
   if (decision.action === 'own_stock' && Array.isArray(in_stock_results) && in_stock_results.length > 0) {
     const allWarehouse = in_stock_results.every(r => /Warehouse#\d/i.test(r.notes || ''));
     if (allWarehouse) {
-      decision._corrected_from    = 'own_stock';
-      decision._correction_reason = 'All in_stock rows have Warehouse#N in notes — must be add_to_stan not own_stock';
-      decision.action    = 'add_to_stan';
-      decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+      const stanQuotedRow2 = (stan_results || []).find(r => r.status === 'QUOTED' && r.colB);
+      if (stanQuotedRow2) {
+        decision._corrected_from    = 'own_stock';
+        decision._correction_reason = 'All in_stock rows are Warehouse#N but Stan already has QUOTED — using stan_quoted';
+        decision.action    = 'stan_quoted';
+        decision.draft_body = buildStanQuotedBody(stanQuotedRow2);
+      } else {
+        decision._corrected_from    = 'own_stock';
+        decision._correction_reason = 'All in_stock rows have Warehouse#N in notes — must be add_to_stan not own_stock';
+        decision.action    = 'add_to_stan';
+        decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+      }
     }
   }
 
