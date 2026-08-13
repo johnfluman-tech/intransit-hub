@@ -784,7 +784,7 @@ async function extractMpnFromThread(subject, content, env) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 40,
-        system: 'Extract the electronic component part number (MPN) from this email thread. Return ONLY valid JSON: {"mpn":"PART-NUMBER"} or {"mpn":null}. No markdown, no explanation.',
+        system: 'Extract the electronic component part number (MPN) from this email thread. IMPORTANT: RFQ numbers, PO numbers, and order reference numbers in the subject line (e.g. "RFQ B26000486264", "PO #12345", "Order 987654") are NOT part numbers — ignore them. Look instead for explicit "PN:", "Part Number:", "MPN:", or "part number" labels in the body. Return ONLY valid JSON: {"mpn":"PART-NUMBER"} or {"mpn":null}. No markdown, no explanation.',
         messages: [{ role: 'user', content: `Subject: ${subject || ''}\n\n${(content || '').substring(0, 3000)}` }],
       })
     });
