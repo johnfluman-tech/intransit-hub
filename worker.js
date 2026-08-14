@@ -1154,6 +1154,23 @@ async function handleEmailAgent(request, env) {
     }
   }
 
+  // Code-level guard: msg_checking must become below_min_line if qty × TP < minimum.
+  // Haiku occasionally skips this check even when the prompt instructs it explicitly.
+  if (decision.action === 'msg_checking') {
+    const has2kMin = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+    const lineMin = has2kMin ? 2000 : 500;
+    const qty = decision.qty && decision.qty > 0 ? Number(decision.qty) : null;
+    const tp  = decision.target_price && decision.target_price > 0 ? Number(decision.target_price) : null;
+    if (qty && tp && (qty * tp) < lineMin) {
+      const minPcs = Math.ceil(lineMin / tp);
+      decision._corrected_from    = 'msg_checking';
+      decision._correction_reason = `qty(${qty}) × TP(${tp}) = $${(qty * tp).toFixed(0)} < $${lineMin} minimum`;
+      decision.action     = 'below_min_line';
+      decision.draft_body = `Thank you for your inquiry. Our minimum line value for this item is $${lineMin}. At your target price of $${tp} per piece, we would require a minimum of ${minPcs} pieces. If you are able to adjust your quantity, please let us know and we will get right back to you. Thank you for the opportunity.`;
+      decision.forte_entry = null;
+    }
+  }
+
   // Auto-set oem_delete_row from lookup data so Apps Script just calls deleteOemRow(row)
   if (decision.action === 'remove_oem' && oem_results && oem_results.length > 0) {
     decision.oem_delete_row = oem_results[0].row || null;

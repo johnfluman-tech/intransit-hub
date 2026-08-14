@@ -3106,6 +3106,49 @@ function extractNetcompRFQ(messages) {
 }
 
 
+// Parses an IC Source HTML table to extract QtyReq, TgtPrice, and MPN.
+// IC Source columns: Quantity | Part Number | Mfg | Date Code | List Price | Req Unit Price | Total Price
+// Returns { qtyReq, tgtPrice, mpn } or null if not found / not an IC Source email.
+function extractICSourceRFQ(messages) {
+  var msg = messages[messages.length - 1];
+  var html = msg.getBody() || '';
+  var htmlLower = html.toLowerCase();
+  var fromLower = msg.getFrom().toLowerCase();
+  if (fromLower.indexOf('icsource') < 0 && fromLower.indexOf('autosend') < 0 &&
+      htmlLower.indexOf('icsource') < 0 && htmlLower.indexOf('req unit price') < 0) return null;
+  if (htmlLower.indexOf('quantity') < 0) return null;
+
+  var rows = html.split(/<tr[^>]*>/i);
+  var qtyCol = -1, mpnCol = -1, tpCol = -1, foundHeader = false;
+  for (var r = 0; r < rows.length; r++) {
+    var rowHtml = rows[r];
+    var cells = rowHtml.match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi) || [];
+    if (!cells.length) continue;
+    var vals = cells.map(function(c) {
+      return c.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').replace(/&#\d+;/g, '').trim();
+    });
+    if (!foundHeader && rowHtml.toLowerCase().indexOf('<th') >= 0) {
+      vals.forEach(function(v, i) {
+        if (/^quantity$/i.test(v)) qtyCol = i;
+        if (/part\s*number/i.test(v)) mpnCol = i;
+        if (/req\.?\s*unit\s*price/i.test(v)) tpCol = i;
+      });
+      if (qtyCol >= 0) foundHeader = true;
+      continue;
+    }
+    if (foundHeader && vals.length > qtyCol) {
+      var qty = parseInt((vals[qtyCol] || '').replace(/,/g, ''), 10);
+      if (!isNaN(qty) && qty > 0) {
+        var mpn = (mpnCol >= 0 && vals.length > mpnCol) ? vals[mpnCol].trim() : null;
+        var tp  = (tpCol >= 0 && vals.length > tpCol) ? parseFloat((vals[tpCol] || '').replace(/[$,\s]/g, '')) : NaN;
+        return { qtyReq: qty, mpn: mpn || null, tgtPrice: (!isNaN(tp) && tp > 0) ? tp : null };
+      }
+    }
+  }
+  return null;
+}
+
+
 // ── Two-phase scanning: fastScanInbox (1 min, labels only) ────
 // ── + processPendingThreads (5 min, Claude calls) ─────────────
 // Root cause of quota exhaustion: runEmailScan calls Claude API
@@ -4044,18 +4087,20 @@ function processThread(thread) {
   if (content.length > 8000) content = content.substring(0, 8000) + '\n[truncated]';
 
   var parsedRFQ = extractNetcompRFQ(messages);
+  if (!parsedRFQ) parsedRFQ = extractICSourceRFQ(messages);
   if (parsedRFQ) {
-    // Only include TgtPrice when the netcomp table actually had one.
+    // Only include TgtPrice when the table actually had one.
     // If TgtPrice is null (blank in table), omit it so the worker reads
     // the buyer's TP from later messages (e.g. their reply to our TP request)
     // rather than treating a missing table value as "no TP given."
     var rLine = '[PARSED_RFQ: QtyReq=' + parsedRFQ.qtyReq;
     if (parsedRFQ.tgtPrice !== null) rLine += ', TgtPrice=' + parsedRFQ.tgtPrice;
+    if (parsedRFQ.mpn) rLine += ', MPN=' + parsedRFQ.mpn;
     rLine += ']';
     content = rLine + '\n' + content;
   }
 
-  var mpnHint = extractMPNFromSubject(subject) || extractMPN(subject);
+  var mpnHint = extractMPNFromSubject(subject) || extractMPN(subject) || (parsedRFQ && parsedRFQ.mpn) || null;
   var priorQuotes = mpnHint ? getRecentSentQuotesFull(mpnHint, 5) : 'None found';
 
   var payload = {
