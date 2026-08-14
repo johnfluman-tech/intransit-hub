@@ -1,6 +1,20 @@
 // ONE-TIME scripts — paste into Apps Script and run as needed
 
 // ─────────────────────────────────────────────────────────────────
+// Run removeDuplicateOEM_9GA0812P4H001() to remove 2 duplicate rows
+// for 9GA0812P4H001 (rows 63627 and 63628 — same qty/notes as row 63626).
+// Keeps row 63626, deletes the duplicates.
+// ─────────────────────────────────────────────────────────────────
+function removeDuplicateOEM_9GA0812P4H001() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var sheet = SpreadsheetApp.openById(OEM_SHEET_ID).getSheets()[0];
+  // Delete in descending order so row numbers stay valid
+  sheet.deleteRow(63628);
+  sheet.deleteRow(63627);
+  Logger.log('Deleted duplicate OEM rows 63627 and 63628 for 9GA0812P4H001. Row 63626 remains.');
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Run fixDavidNoStkDrafts_Aug10() to:
 //   1. Delete all wrong drafts in 5 David no-stk threads
 //      (wrong drafts: "Ok, noted.", "claude", MSG_CHECKING)
