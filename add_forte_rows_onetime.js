@@ -262,6 +262,73 @@ function davidNoStk_Aug12b() {
 }
 
 
+// ─────────────────────────────────────────────────────────────────
+// Run removeAllDuplicateOEM() to scan the ENTIRE OEM EXCESS sheet,
+// find every MPN that appears more than once, keep the first row,
+// and delete all subsequent duplicate rows (in descending order).
+// Safe to run multiple times — idempotent after first run.
+// ─────────────────────────────────────────────────────────────────
+function removeAllDuplicateOEM() {
+  var OEM_SHEET_ID = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+  var ss = SpreadsheetApp.openById(OEM_SHEET_ID);
+  var sheet = ss.getSheetByName('sheet1');
+
+  var lastRow = sheet.getLastRow();
+  Logger.log('Total rows in OEM EXCESS: ' + lastRow);
+
+  // Read only column A (MPN) — much faster than getDataRange() on 60k+ rows
+  var mpnValues = sheet.getRange(1, 1, lastRow, 1).getValues();
+
+  var seen = {};    // normalized MPN → first row number
+  var toDelete = []; // row numbers of duplicates
+
+  // Row 1 is header; start at index 1 (row 2)
+  for (var i = 1; i < mpnValues.length; i++) {
+    var mpn = String(mpnValues[i][0]).trim().toUpperCase();
+    if (!mpn) continue;  // skip blank rows
+    var rowNum = i + 1;
+    if (seen.hasOwnProperty(mpn)) {
+      toDelete.push(rowNum);
+    } else {
+      seen[mpn] = rowNum;
+    }
+  }
+
+  Logger.log('Duplicate rows found: ' + toDelete.length);
+  if (toDelete.length === 0) {
+    Logger.log('No duplicates found — sheet is clean.');
+    return;
+  }
+
+  // Log sample of duplicate MPNs for review
+  var mpnCounts = {};
+  toDelete.forEach(function(rn) {
+    var m = String(mpnValues[rn - 1][0]).trim().toUpperCase();
+    mpnCounts[m] = (mpnCounts[m] || 0) + 1;
+  });
+  var sample = Object.keys(mpnCounts).slice(0, 30).map(function(m) {
+    return m + '×' + (mpnCounts[m] + 1);
+  });
+  Logger.log('Sample duplicated MPNs (MPN×total_count): ' + sample.join(', '));
+
+  // Delete bottom-up so row numbers above stay valid
+  toDelete.sort(function(a, b) { return b - a; });
+
+  var deleted = 0;
+  for (var j = 0; j < toDelete.length; j++) {
+    sheet.deleteRow(toDelete[j]);
+    deleted++;
+    if (deleted % 100 === 0) {
+      Logger.log('Progress: ' + deleted + ' / ' + toDelete.length + ' deleted');
+      SpreadsheetApp.flush();
+    }
+  }
+
+  Logger.log('removeAllDuplicateOEM DONE. Deleted ' + deleted +
+    ' duplicate rows. Sheet now has ~' + (lastRow - deleted) + ' rows.');
+}
+
+
 // Run addForteAug11() to add Forte entry for L6384ED013TR (msg_checking sent 8/11/2026).
 // Buyer: Roger Zhang / HK Waykey Technology. OEM EXCESS 132,800 units confirmed.
 function addForteAug11() {
