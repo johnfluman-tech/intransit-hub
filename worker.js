@@ -810,9 +810,61 @@ function isMpnMatch(requestMpn, resultMpn) {
   return longer.startsWith(shorter) && (longer.length - shorter.length) <= 3;
 }
 
+// Parses an IC Source HTML RFQ table.
+// Columns: Quantity | Part Number | Mfg | Date Code | List Price | Req Unit Price | Total Price
+// Returns { qtyReq, mpn, tgtPrice } or null.
+function parseICSourceHTML(html) {
+  const thRe = /<th[^>]*>([\s\S]*?)<\/th>/gi;
+  const headers = [];
+  let m;
+  while ((m = thRe.exec(html)) !== null) {
+    headers.push(m[1].replace(/<[^>]+>/g, '').trim().toLowerCase());
+  }
+  if (!headers.length) return null;
+  const qtyIdx = headers.findIndex(h => h === 'quantity' || h === 'qty');
+  const mpnIdx = headers.findIndex(h => h === 'part number' || h === 'part no.' || (h.includes('part') && !h.includes('price')));
+  const tpIdx  = headers.findIndex(h => h.includes('req unit price') || h.includes('target price'));
+  if (qtyIdx < 0) return null;
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  const rows = [];
+  while ((m = rowRe.exec(html)) !== null) {
+    const tdRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    const cells = [];
+    let td;
+    while ((td = tdRe.exec(m[1])) !== null) {
+      cells.push(td[1].replace(/<[^>]+>/g, '').trim());
+    }
+    if (cells.length > 0) rows.push(cells);
+  }
+  const maxIdx = Math.max(qtyIdx, mpnIdx >= 0 ? mpnIdx : 0, tpIdx >= 0 ? tpIdx : 0);
+  const dataRow = rows.find(r => r.length > maxIdx);
+  if (!dataRow) return null;
+  const qty = parseInt((dataRow[qtyIdx] || '').replace(/,/g, ''), 10);
+  const mpn = mpnIdx >= 0 ? dataRow[mpnIdx] : null;
+  const tp  = tpIdx  >= 0 ? parseFloat((dataRow[tpIdx] || '').replace(/[$,]/g, '')) : NaN;
+  return {
+    qtyReq:   isNaN(qty) ? null : qty,
+    mpn:      mpn || null,
+    tgtPrice: isNaN(tp) || tp <= 0 ? null : tp,
+  };
+}
+
 async function handleEmailAgent(request, env) {
   const body = await request.json();
-  const { thread_id, last_message_id, subject, sender, thread_content, current_labels, prior_quotes } = body;
+  const { thread_id, last_message_id, subject, sender, current_labels, prior_quotes } = body;
+  // IC Source: Apps Script sends raw HTML body — parse the RFQ table here in the worker
+  let thread_content = body.thread_content || '';
+  if (body.icsource_html) {
+    const ic = parseICSourceHTML(body.icsource_html);
+    if (ic && ic.qtyReq) {
+      let rLine = '[PARSED_RFQ: QtyReq=' + ic.qtyReq;
+      if (ic.tgtPrice !== null) rLine += ', TgtPrice=' + ic.tgtPrice;
+      if (ic.mpn)               rLine += ', MPN=' + ic.mpn;
+      rLine += ']';
+      thread_content = rLine + '\n' + thread_content;
+      if (!body.mpn && ic.mpn) body.mpn = ic.mpn;
+    }
+  }
   // Use let so we can override if Apps Script sends empty/no inventory (new slim mode)
   let oem_results      = body.oem_results      ?? null;
   let in_stock_results = body.in_stock_results ?? null;
