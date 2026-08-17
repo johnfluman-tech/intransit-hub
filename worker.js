@@ -899,9 +899,15 @@ async function handleEmailAgent(request, env) {
     inventoryLookupSucceeded = true;
   }
 
+  // Filter oem_results to exact/close MPN matches — removes fuzzy hits like "MPM" matching
+  // "MPM3650GQW-P" or concatenated rows like "MPM3650GQW-PMPM3650GQW-Z" that wrongly trigger
+  // the OEM override and force msg_checking on warehouse-only inventory.
+  const requestMpn = body.mpn || (Array.isArray(in_stock_results) && in_stock_results[0] && in_stock_results[0].mpn) || null;
+  if (requestMpn && Array.isArray(oem_results) && oem_results.length > 0) {
+    oem_results = oem_results.filter(r => isMpnMatch(requestMpn, r.mpn));
+  }
   // Filter in_stock_results to exact/close MPN matches only — removes web-app fuzzy
   // results that would wrongly trigger stan_quoted / add_to_stan routing (Bug 2).
-  const requestMpn = body.mpn || (Array.isArray(oem_results) && oem_results[0] && oem_results[0].mpn) || null;
   if (requestMpn && Array.isArray(in_stock_results) && in_stock_results.length > 0) {
     in_stock_results = in_stock_results.filter(r => isMpnMatch(requestMpn, r.mpn));
   }
