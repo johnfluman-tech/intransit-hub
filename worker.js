@@ -710,7 +710,7 @@ Draft (use exactly):
 MPN: [mpn]
 DC: [dc — omit line if blank]
 QTY available: [qty]
-Price: [most recent prior_quotes price as $X.XX each — or $[FILL IN] if none]
+Price: $[FILL IN]
 
 There is a $100 minimum on stock items"
 
@@ -1311,6 +1311,21 @@ async function handleEmailAgent(request, env) {
     } catch(auditErr) {}
   }
 
+  // Post-audit own_stock price enforcement: audit may override draft_body with a hallucinated
+  // price. Re-build the draft from trusted sources (sheet col F → D1 → $[FILL IN]) to ensure
+  // no AI-invented dollar amount survives.
+  if (decision.action === 'own_stock') {
+    const mpnKey2 = (decision.mpn || requestMpn || '').replace(/\s+/g, '').toUpperCase();
+    const ownRows2 = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
+    const sheetPrice2 = ownRows2.length > 0 && ownRows2[0].price_to_quote ? Number(ownRows2[0].price_to_quote) : null;
+    const priceRow2 = sheetPrice2 == null ? await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(mpnKey2).first() : null;
+    const storedPrice2 = sheetPrice2 != null ? sheetPrice2 : (priceRow2 != null ? priceRow2.price : null);
+    const dc2 = (ownRows2[0] && ownRows2[0].dc) ? ownRows2[0].dc : '';
+    const totalQty2 = ownRows2.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
+    const priceStr2 = storedPrice2 != null ? `$${Number(storedPrice2).toFixed(2)} each` : '$[FILL IN]';
+    decision.draft_body = `This is our stock\n\nMPN: ${mpnKey2}${dc2 ? '\nDC: ' + dc2 : ''}\nQTY available: ${totalQty2 || '?'}\nPrice: ${priceStr2}\n\nThere is a $100 minimum on stock items`;
+  }
+
   // Bug 4 / Bug 23 fix: same THREAD+MPN actioned within 30 min → no_action.
   // Guards against IC Source sending the same RFQ email 2-3× in rapid succession.
   // Must check thread_id (not MPN alone) — different buyers RFQing the same MPN
@@ -1772,7 +1787,7 @@ AUTOMATION RULES:
 - BILL EXT parts: forward to Bill after buyer gives TP — never add to Forte, never MSG_CHECKING
 - OEM EXCESS + no buyer TP → request_tp_500. Buyers commonly say they have no target on the first email — always ask anyway.
 - msg_checking: sent when OEM EXCESS + buyer TP ≥$500 MOV qualifies — "We are checking on it now..."
-- Own inventory IN STOCK parts (notes do NOT contain "Warehouse#"): reply is own_stock format — "This is our stock\n\nMPN: [mpn]\nDC: [dc]\nQTY available: [qty]\nPrice: $[FILL IN]\n\nThere is a $100 minimum on stock items". Own_stock takes ABSOLUTE PRIORITY over OEM EXCESS — do not send msg_checking or request_tp when own inventory exists.
+- Own inventory IN STOCK parts (notes do NOT contain "Warehouse#"): reply is own_stock format — "This is our stock\n\nMPN: [mpn]\nDC: [dc]\nQTY available: [qty]\nPrice: $[FILL IN]\n\nThere is a $100 minimum on stock items". Own_stock takes ABSOLUTE PRIORITY over OEM EXCESS — do not send msg_checking or request_tp when own inventory exists. CRITICAL: always write $[FILL IN] for the price — NEVER invent or guess a dollar amount, even from prior_quotes. The code fills in the real price from the sheet.
 - External warehouse IN STOCK parts (notes contain "Warehouse#" — Warehouse#3, Warehouse#4, or any Warehouse#N): reply is "Warehouse is checking details and I will update ASAP" — NOT msg_checking, NOT TP request. External warehouse parts never need a buyer TP to proceed.
 - Forte entry: only when msg_checking is correct action AND part is NOT BILL EXT
 - Blocked domains: auto-archive, no reply
