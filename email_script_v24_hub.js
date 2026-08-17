@@ -2553,11 +2553,14 @@ function checkDavidNoStockEmails() {
   // auto-applies it to every David email regardless of processing status.
   var seenIds = {};
   var allIds = [];
-  var davidQ = '(from:' + DAVID_EMAIL + ' OR from:david@fortecomp.com)';
-  var q1 = davidQ + ' -label:oem-rfq-incoming-processed newer_than:14d';
-  var q2 = 'in:inbox ' + davidQ + ' -label:oem-rfq-incoming-processed';
-  // Use GmailApp.search (reliable, properly authorized) instead of REST API which silently fails
-  GmailApp.search(q1, 0, 50).concat(GmailApp.search(q2, 0, 50)).forEach(function(t) {
+  // GmailApp.search() silently returns 0 results with parenthesized OR — split into separate calls per address
+  var q1a = 'from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed newer_than:14d';
+  var q1b = 'from:david@fortecomp.com -label:oem-rfq-incoming-processed newer_than:14d';
+  var q2a = 'in:inbox from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed';
+  var q2b = 'in:inbox from:david@fortecomp.com -label:oem-rfq-incoming-processed';
+  GmailApp.search(q1a, 0, 50).concat(GmailApp.search(q1b, 0, 50))
+    .concat(GmailApp.search(q2a, 0, 50)).concat(GmailApp.search(q2b, 0, 50))
+    .forEach(function(t) {
     var tid = t.getId();
     if (!seenIds[tid]) { seenIds[tid] = true; allIds.push(tid); }
   });
