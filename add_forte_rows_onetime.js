@@ -1,76 +1,75 @@
 // ONE-TIME scripts — paste into Apps Script and run as needed
 
 // ─────────────────────────────────────────────────────────────────
-// populateInStockPriceHistory()
-//
-// For every row in the IN STOCK sheet, searches all sent Gmail for
-// that MPN and writes:
-//   Col J (price_history)  — full text of up to 5 recent sent emails
-//   Col F (price_to_quote) — last per-unit price extracted from emails,
-//                            only written if col F is currently blank
-//
-// Skips rows that already have col J filled (unless it's "No sent quotes found").
-// Supports resume: saves row index in Script Properties. If it times out,
-// just run again — it picks up where it left off.
-// Run clearPriceHistoryProgress() to reset and start from scratch.
+// Run startAutoPopulateHistory() ONCE.
+// It clears col J, then auto-schedules itself every 90 seconds until
+// all rows are done — no manual re-running needed.
+// Check progress in the Executions log. Runs DONE when it logs "DONE".
 // ─────────────────────────────────────────────────────────────────
+
+// Run this once to kick off the full auto-populate.
+function startAutoPopulateHistory() {
+  // Kill any lingering auto-triggers for this function
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'populateInStockPriceHistory') ScriptApp.deleteTrigger(t);
+  });
+  // Clear col J and reset progress so everything gets the compact format
+  var props = PropertiesService.getScriptProperties();
+  props.deleteProperty('priceHistoryProgress');
+  var sheet = SpreadsheetApp.openById('1iOFHUBiWRgA6EjtO2ujoGpz-8v1qTRkgCXSvCa2Gf54').getSheets()[0];
+  sheet.getRange(2, 10, sheet.getLastRow() - 1, 1).clearContent();
+  Logger.log('Col J cleared. Kicking off auto-populate...');
+  populateInStockPriceHistory();
+}
+
 function populateInStockPriceHistory() {
   var IN_STOCK_ID = '1iOFHUBiWRgA6EjtO2ujoGpz-8v1qTRkgCXSvCa2Gf54';
   var sheet = SpreadsheetApp.openById(IN_STOCK_ID).getSheets()[0];
   var data  = sheet.getDataRange().getValues();
-
-  var props    = PropertiesService.getScriptProperties();
+  var props = PropertiesService.getScriptProperties();
   var startIdx = parseInt(props.getProperty('priceHistoryProgress') || '1', 10);
-  var MAX_PER_RUN = 75; // stay well inside 6-min limit (~3-4 s per MPN Gmail search)
-  var processed = 0, updated = 0, skipped = 0;
+  var START_MS = new Date().getTime();
+  var TIME_LIMIT_MS = 5 * 60 * 1000; // stop at 5 min, well under 6-min limit
+  var processed = 0, updated = 0;
 
-  Logger.log('populateInStockPriceHistory: ' + data.length + ' total rows, starting at row ' + (startIdx + 1));
+  Logger.log('Row ' + (startIdx + 1) + ' of ' + data.length);
 
   for (var i = startIdx; i < data.length; i++) {
-    if (processed >= MAX_PER_RUN) {
+    // Time check — stop and auto-schedule continuation before hitting 6-min wall
+    if (new Date().getTime() - START_MS > TIME_LIMIT_MS) {
       props.setProperty('priceHistoryProgress', String(i));
-      Logger.log('MAX_PER_RUN reached — saved progress at row ' + (i + 1) + '. Run again to continue.');
+      ScriptApp.newTrigger('populateInStockPriceHistory').timeBased().after(90 * 1000).create();
+      Logger.log('Paused at row ' + (i + 1) + ' — auto-continuing in 90s');
+      SpreadsheetApp.flush();
       return;
     }
 
     var mpn = String(data[i][0]).trim();
-    if (!mpn) { skipped++; continue; } // blank row
+    if (!mpn) continue;
 
-    // Skip rows that already have real history content
-    var existingHistory = String(data[i][9] || '').trim();
-    if (existingHistory && existingHistory !== 'No sent quotes found') { skipped++; continue; }
-
-    // Build compact "price · date" history (e.g. "$12.50 · 3/15/26 | $11.00 · 1/10/26")
     var history = getCompactPriceHistory_(mpn, 5);
-    var hasQuotes = history && history.indexOf('$') >= 0;
-
-    if (hasQuotes) {
+    if (history && history.indexOf('$') >= 0) {
       sheet.getRange(i + 1, 10).setValue(history);
-
-      // Auto-populate col F if blank — use first price from compact history
       var existingPrice = String(data[i][5] || '').trim();
       if (!existingPrice) {
         var price = extractPerUnitPriceFromHistory_(history);
-        if (price !== null) {
-          sheet.getRange(i + 1, 6).setValue(price);
-          Logger.log('Row ' + (i + 1) + ' (' + mpn + '): ' + history + ' — price=$' + price + ' auto-filled');
-        } else {
-          Logger.log('Row ' + (i + 1) + ' (' + mpn + '): ' + history + ' — no clear unit price');
-        }
+        if (price !== null) sheet.getRange(i + 1, 6).setValue(price);
       }
       updated++;
     } else {
       sheet.getRange(i + 1, 10).setValue('No sent quotes found');
     }
-
     processed++;
-    if (processed % 10 === 0) SpreadsheetApp.flush();
+    if (processed % 20 === 0) SpreadsheetApp.flush();
   }
 
-  // Completed all rows
+  // All rows done — clean up trigger and progress marker
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'populateInStockPriceHistory') ScriptApp.deleteTrigger(t);
+  });
   props.deleteProperty('priceHistoryProgress');
   SpreadsheetApp.flush();
-  Logger.log('populateInStockPriceHistory DONE. Processed=' + processed + ', Updated=' + updated + ', Skipped=' + skipped);
+  Logger.log('DONE. Processed=' + processed + ', Updated=' + updated);
 }
 
 
