@@ -40,34 +40,27 @@ function populateInStockPriceHistory() {
     var existingHistory = String(data[i][9] || '').trim();
     if (existingHistory && existingHistory !== 'No sent quotes found') { skipped++; continue; }
 
-    // Gmail search — uses getRecentSentQuotesFull() already in email_script_v24_hub.js
-    var history = getRecentSentQuotesFull(mpn, 5);
-    var hasQuotes = history &&
-      history.indexOf('No prior sent') < 0 &&
-      history.indexOf('No sent messages') < 0 &&
-      history.indexOf('No sent quotes') < 0 &&
-      history.indexOf('error') < 0;
+    // Build compact "price · date" history (e.g. "$12.50 · 3/15/26 | $11.00 · 1/10/26")
+    var history = getCompactPriceHistory_(mpn, 5);
+    var hasQuotes = history && history.indexOf('$') >= 0;
 
     if (hasQuotes) {
       sheet.getRange(i + 1, 10).setValue(history);
 
-      // Auto-populate col F if blank — extract per-unit price from history
+      // Auto-populate col F if blank — use first price from compact history
       var existingPrice = String(data[i][5] || '').trim();
       if (!existingPrice) {
         var price = extractPerUnitPriceFromHistory_(history);
         if (price !== null) {
           sheet.getRange(i + 1, 6).setValue(price);
-          Logger.log('Row ' + (i + 1) + ' (' + mpn + '): history written, price=$' + price + ' auto-filled in col F');
+          Logger.log('Row ' + (i + 1) + ' (' + mpn + '): ' + history + ' — price=$' + price + ' auto-filled');
         } else {
-          Logger.log('Row ' + (i + 1) + ' (' + mpn + '): history written, no clear per-unit price found');
+          Logger.log('Row ' + (i + 1) + ' (' + mpn + '): ' + history + ' — no clear unit price');
         }
-      } else {
-        Logger.log('Row ' + (i + 1) + ' (' + mpn + '): history written, col F already has value');
       }
       updated++;
     } else {
       sheet.getRange(i + 1, 10).setValue('No sent quotes found');
-      Logger.log('Row ' + (i + 1) + ' (' + mpn + '): no quotes found');
     }
 
     processed++;
@@ -105,10 +98,54 @@ function extractPerUnitPriceFromHistory_(historyText) {
 }
 
 
+// Returns compact price+date history: "$12.50 · 3/15/26 | $11.00 · 1/10/26"
+// Searches sent Gmail for MPN, extracts per-unit price and send date from each thread.
+function getCompactPriceHistory_(mpn, maxThreads) {
+  if (!mpn) return '';
+  try {
+    var max = maxThreads || 5;
+    var threads = GmailApp.search('in:sent subject:"' + mpn + '"', 0, max);
+    if (!threads.length) threads = GmailApp.search('in:sent "' + mpn + '"', 0, max);
+    if (!threads.length) {
+      var loose = mpn.replace(/-/g, ' ');
+      threads = GmailApp.search('in:sent subject:(' + loose + ')', 0, max);
+    }
+    if (!threads.length) return '';
+    var entries = [];
+    threads.forEach(function(thread) {
+      var msgs = thread.getMessages();
+      for (var i = msgs.length - 1; i >= 0; i--) {
+        var msg = msgs[i];
+        if (msg.getFrom().indexOf(JOHN_EMAIL) < 0) continue;
+        var body = msg.getPlainBody().substring(0, 600);
+        var price = extractPerUnitPriceFromHistory_(body);
+        if (price !== null) {
+          var d = msg.getDate();
+          var dateStr = (d.getMonth() + 1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(2);
+          entries.push('$' + price + ' \xB7 ' + dateStr);
+          break;
+        }
+      }
+    });
+    return entries.join(' | ');
+  } catch(e) { return ''; }
+}
+
+
 // Resets progress so the next populateInStockPriceHistory() run starts from row 2.
 function clearPriceHistoryProgress() {
   PropertiesService.getScriptProperties().deleteProperty('priceHistoryProgress');
   Logger.log('Progress cleared. Next run will start from row 2.');
+}
+
+// Reset progress AND clear existing col J values so the compact format gets written fresh.
+function resetAndRepopulateHistory() {
+  PropertiesService.getScriptProperties().deleteProperty('priceHistoryProgress');
+  var sheet = SpreadsheetApp.openById('1iOFHUBiWRgA6EjtO2ujoGpz-8v1qTRkgCXSvCa2Gf54').getSheets()[0];
+  var lastRow = sheet.getLastRow();
+  // Clear col J entirely so populateInStockPriceHistory overwrites with new compact format
+  sheet.getRange(2, 10, lastRow - 1, 1).clearContent();
+  Logger.log('Col J cleared for ' + (lastRow - 1) + ' rows. Run populateInStockPriceHistory() to repopulate.');
 }
 
 
