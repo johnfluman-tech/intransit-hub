@@ -1004,7 +1004,12 @@ async function handleEmailAgent(request, env) {
       ? `NETCOMPONENTS CHECK: Listed — Part# ${ncResult.partNumber}, Qty ${ncResult.qty ?? 'unknown'} (searchApiId: ${ncResult.apiId})\n\n`
       : `NETCOMPONENTS CHECK: Part searchable (apiId: ${ncResult.apiId}) but our listing row not found in result page\n\n`;
 
+  const inventoryWarning = inventoryLookupSucceeded
+    ? ''
+    : 'CRITICAL WARNING: INVENTORY LOOKUP FAILED (network/timeout error). Results below may be empty due to failure, NOT because the part is unavailable. DO NOT issue no_bid or listing_removed based on empty inventory results — default to request_tp_500 instead.\n\n';
+
   const userMessage =
+    inventoryWarning +
     similarMpnNote +
     `EMAIL THREAD\nSubject: ${subject || '(none)'}\nSender: ${sender || '(unknown)'}\nCurrent labels: ${(current_labels || []).join(', ') || 'none'}\n\n` +
     `THREAD CONTENT:\n${thread_content || '(empty)'}\n\n` +
