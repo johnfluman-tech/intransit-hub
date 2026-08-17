@@ -4131,7 +4131,8 @@ function searchInStock(mpn) {
   var results = [];
   for (var i = 1; i < data.length; i++) {
     var cellNorm = normalize(String(data[i][0]));
-    if (cellNorm.length >= 3 && (cellNorm === searchNorm || cellNorm.startsWith(searchNorm) || searchNorm.startsWith(cellNorm))) {
+    var reverseOk = searchNorm.startsWith(cellNorm) && cellNorm.length >= Math.ceil(searchNorm.length * 0.75);
+    if (cellNorm.length >= 3 && (cellNorm === searchNorm || cellNorm.startsWith(searchNorm) || reverseOk)) {
       results.push({ row: i+1, mpn: data[i][0], man: data[i][1], dc: data[i][2], qty: data[i][3], notes: data[i][4], price_to_quote: data[i][5] || '', price_history: data[i][9] || '' });
     }
   }
