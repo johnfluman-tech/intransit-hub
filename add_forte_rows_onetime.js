@@ -148,6 +148,45 @@ function resetAndRepopulateHistory() {
   Logger.log('Col J cleared for ' + (lastRow - 1) + ' rows. Run populateInStockPriceHistory() to repopulate.');
 }
 
+// Fix rows 2–151 that were already populated with the old verbose format.
+// Run this once after the main populateInStockPriceHistory() finishes rows 152+.
+// If it times out before finishing 151 rows, just run it again — it resumes automatically.
+function fixEarlyHistoryRows() {
+  var IN_STOCK_ID = '1iOFHUBiWRgA6EjtO2ujoGpz-8v1qTRkgCXSvCa2Gf54';
+  var sheet = SpreadsheetApp.openById(IN_STOCK_ID).getSheets()[0];
+  var data = sheet.getRange(1, 1, 151, 10).getValues();
+  var props = PropertiesService.getScriptProperties();
+  var startIdx = parseInt(props.getProperty('earlyRowProgress') || '1', 10);
+  var MAX_PER_RUN = 50;
+  var processed = 0;
+  for (var i = startIdx; i < 151; i++) {
+    if (processed >= MAX_PER_RUN) {
+      props.setProperty('earlyRowProgress', String(i));
+      Logger.log('Paused at row ' + (i + 1) + '. Run again to continue.');
+      return;
+    }
+    var mpn = String(data[i][0]).trim();
+    if (!mpn) continue;
+    var history = getCompactPriceHistory_(mpn, 5);
+    if (history && history.indexOf('$') >= 0) {
+      sheet.getRange(i + 1, 10).setValue(history);
+      var existingPrice = String(data[i][5] || '').trim();
+      if (!existingPrice) {
+        var price = extractPerUnitPriceFromHistory_(history);
+        if (price !== null) sheet.getRange(i + 1, 6).setValue(price);
+      }
+      Logger.log('Row ' + (i + 1) + ' (' + mpn + '): ' + history);
+    } else {
+      sheet.getRange(i + 1, 10).setValue('No sent quotes found');
+    }
+    processed++;
+    if (processed % 10 === 0) SpreadsheetApp.flush();
+  }
+  props.deleteProperty('earlyRowProgress');
+  SpreadsheetApp.flush();
+  Logger.log('fixEarlyHistoryRows DONE — rows 2-151 updated.');
+}
+
 
 
 
