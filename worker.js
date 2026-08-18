@@ -860,6 +860,41 @@ function parseICSourceHTML(html) {
   };
 }
 
+// Parse netCOMPONENTS RFQ HTML table → { qtyReq, tgtPrice, mpn }
+function parseNetCompHTML(html) {
+  const thRe = /<th[^>]*>([\s\S]*?)<\/th>/gi;
+  const headers = [];
+  let m;
+  while ((m = thRe.exec(html)) !== null) {
+    headers.push(m[1].replace(/<[^>]+>/g, '').trim().toLowerCase().replace(/\s+/g, ''));
+  }
+  if (!headers.length) return null;
+  const qtyIdx = headers.findIndex(h => h === 'qtyreq');
+  const tpIdx  = headers.findIndex(h => h === 'tgtprice' || h === 'targetprice' || h === 'price');
+  const mpnIdx = headers.findIndex(h => h === 'partnumber' || h === 'partno' || h === 'partno.');
+  if (qtyIdx < 0) return null;
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  const rows = [];
+  while ((m = rowRe.exec(html)) !== null) {
+    const tdRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    const cells = [];
+    let td;
+    while ((td = tdRe.exec(m[1])) !== null) cells.push(td[1].replace(/<[^>]+>/g, '').trim());
+    if (cells.length > 0) rows.push(cells);
+  }
+  const maxIdx = Math.max(qtyIdx, tpIdx >= 0 ? tpIdx : 0, mpnIdx >= 0 ? mpnIdx : 0);
+  const dataRow = rows.find(r => r.length > maxIdx);
+  if (!dataRow) return null;
+  const qty = parseInt((dataRow[qtyIdx] || '').replace(/,/g, ''), 10);
+  const tp  = tpIdx >= 0 ? parseFloat((dataRow[tpIdx] || '').replace(/[$,]/g, '')) : NaN;
+  const mpn = mpnIdx >= 0 ? (dataRow[mpnIdx] || '').split(/\s/)[0] : null;
+  return {
+    qtyReq:   isNaN(qty) ? null : qty,
+    tgtPrice: isNaN(tp) || tp <= 0 ? null : tp,
+    mpn:      mpn || null,
+  };
+}
+
 async function handleEmailAgent(request, env) {
   const body = await request.json();
   const { thread_id, last_message_id, subject, sender, current_labels, prior_quotes } = body;
@@ -2417,6 +2452,24 @@ async function buildScanPayload(threadId, token, env) {
   };
   if (mpnHint && /[A-Za-z]/.test(mpnHint) && /[0-9]/.test(mpnHint) && mpnHint.length >= 5) payload.mpn = mpnHint;
   if (isICS) payload.icsource_html = extractMimeText(lastMsg.payload, true) || extractMimeText(lastMsg.payload);
+
+  // Inject [PARSED_RFQ] for netCOMPONENTS emails — gives agent authoritative QtyReq/TgtPrice
+  const isNetComp = msgs[0] && getHdr(msgs[0], 'From').toLowerCase().includes('messagesend@netcomponents.com');
+  if (isNetComp) {
+    const ncHtml = extractMimeText(msgs[0].payload, true);
+    if (ncHtml) {
+      const nc = parseNetCompHTML(ncHtml);
+      if (nc && nc.qtyReq) {
+        let rLine = '[PARSED_RFQ: QtyReq=' + nc.qtyReq;
+        if (nc.tgtPrice !== null && nc.tgtPrice !== undefined) rLine += ', TgtPrice=' + nc.tgtPrice;
+        if (nc.mpn) rLine += ', MPN=' + nc.mpn;
+        rLine += ']';
+        payload.thread_content = rLine + '\n' + payload.thread_content;
+        if (!payload.mpn && nc.mpn && /[A-Za-z]/.test(nc.mpn) && /[0-9]/.test(nc.mpn) && nc.mpn.length >= 5) payload.mpn = nc.mpn;
+      }
+    }
+  }
+
   return payload;
 }
 
