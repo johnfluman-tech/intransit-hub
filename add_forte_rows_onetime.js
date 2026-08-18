@@ -1,6 +1,115 @@
 // ONE-TIME scripts — paste into Apps Script and run as needed
 
 // ─────────────────────────────────────────────────────────────────
+// retryAuditDraftsViaREST_Aug18()
+// GmailApp hit daily quota — this uses Gmail REST API (UrlFetchApp) instead.
+// Gets all failed fix-queue items, dedupes by thread, creates drafts via REST.
+// Run ONCE. Check Apps Script Execution Log for results.
+// ─────────────────────────────────────────────────────────────────
+function retryAuditDraftsViaREST_Aug18() {
+  var HUB_URL = 'https://intransit-hub.intransit-sales.workers.dev';
+  var HUB_SECRET = 'InTransit!Hub#2026';
+  var FROM_EMAIL = 'john.fluman@intransittech.com';
+  var token = ScriptApp.getOAuthToken();
+
+  var SIG = '<br><br><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">Regards,</span></b></div>'
+    + '<div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">John Fluman</span></b></div>'
+    + '<div><b><span style="color:rgb(31,73,125);font-family:Arial,sans-serif;font-size:8pt">Intransit Technologies</span></b></div>'
+    + '<div><a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a></div>'
+    + '<div><i><span style="color:gray;font-family:Arial,sans-serif;font-size:7.5pt">An ISO 9001 Certified Company</span></i></div>'
+    + '<div><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:8pt">Toll (877) 677-5868 x101 - Local (949) 481-7935 x101</span></div>'
+    + '<br><div><span style="color:rgb(166,166,166);font-family:Calibri,sans-serif;font-size:8pt">The information contained in this communication and its attachment(s) is intended only for the use of the individual to whom it is addressed and may contain information that is privileged, confidential, or exempt from disclosure. If the reader of this message is not the intended recipient, you are hereby notified that any dissemination, distribution, or copying of this communication is strictly prohibited. If you have received this communication in error, please notify <a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a> and delete the communication without retaining any copies. Thank you.</span></div>';
+
+  // Fetch all failed items
+  var fResp = UrlFetchApp.fetch(HUB_URL + '/api/fix-queue?status=failed', {
+    headers: {Authorization: 'Bearer ' + HUB_SECRET}, muteHttpExceptions: true
+  });
+  var allFailed = JSON.parse(fResp.getContentText()).fixes || [];
+  Logger.log('Failed items: ' + allFailed.length);
+
+  // Deduplicate: highest ID wins per thread (most recent draft_body)
+  var byThread = {};
+  allFailed.forEach(function(f) {
+    if (!byThread[f.thread_id] || f.id > byThread[f.thread_id].id) byThread[f.thread_id] = f;
+  });
+
+  var done = 0, errors = 0;
+  Object.keys(byThread).forEach(function(threadId) {
+    var fix = byThread[threadId];
+    try {
+      // Get thread metadata
+      var tResp = UrlFetchApp.fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/threads/' + threadId +
+        '?format=metadata&metadataHeaders=Message-ID&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=References',
+        {headers: {Authorization: 'Bearer ' + token}, muteHttpExceptions: true}
+      );
+      var tData = JSON.parse(tResp.getContentText());
+      if (tData.error) throw new Error('Thread: ' + JSON.stringify(tData.error));
+      var msgs = tData.messages || [];
+      if (!msgs.length) throw new Error('No messages');
+
+      function getHdr(msg, name) {
+        var h = ((msg.payload || {}).headers || []).filter(function(x){ return x.name.toLowerCase() === name.toLowerCase(); });
+        return h.length ? h[0].value : '';
+      }
+
+      var lastMsg = msgs[msgs.length - 1];
+      var subject = getHdr(lastMsg, 'Subject') || (fix.subject || 'Re:');
+      if (!subject.match(/^re:/i)) subject = 'Re: ' + subject;
+      var msgId   = getHdr(lastMsg, 'Message-ID');
+      var refs    = getHdr(lastMsg, 'References');
+      var toEmail = fix.to_email || getHdr(msgs[0], 'From');
+
+      // Build HTML body
+      var bodyHtml = '<div dir="ltr">' + String(fix.draft_body || '').replace(/\n/g, '<br>') + SIG + '</div>';
+
+      // Build MIME
+      var mime = [
+        'MIME-Version: 1.0',
+        'From: ' + FROM_EMAIL,
+        'To: ' + toEmail,
+        'Subject: ' + subject,
+        'Content-Type: text/html; charset=UTF-8'
+      ];
+      if (msgId) {
+        mime.push('In-Reply-To: ' + msgId);
+        mime.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim());
+      }
+      mime.push('');
+      mime.push(bodyHtml);
+
+      var raw = Utilities.base64EncodeWebSafe(mime.join('\r\n'));
+
+      var dResp = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts', {
+        method: 'post', contentType: 'application/json',
+        headers: {Authorization: 'Bearer ' + token},
+        payload: JSON.stringify({message: {threadId: threadId, raw: raw}}),
+        muteHttpExceptions: true
+      });
+      var dData = JSON.parse(dResp.getContentText());
+      if (dData.error) throw new Error('Draft: ' + JSON.stringify(dData.error));
+
+      Logger.log('OK thread=' + threadId + ' draftId=' + dData.id);
+      done++;
+
+      // Mark ALL failed items for this thread as done
+      allFailed.forEach(function(f2) {
+        if (f2.thread_id !== threadId) return;
+        UrlFetchApp.fetch(HUB_URL + '/api/fix-queue/' + f2.id, {
+          method: 'PATCH', contentType: 'application/json',
+          headers: {Authorization: 'Bearer ' + HUB_SECRET},
+          payload: JSON.stringify({status: 'done'}), muteHttpExceptions: true
+        });
+      });
+    } catch(e) {
+      Logger.log('ERROR thread=' + threadId + ': ' + e.toString());
+      errors++;
+    }
+  });
+  Logger.log('DONE: ' + done + ' drafts created, ' + errors + ' errors');
+}
+
+// ─────────────────────────────────────────────────────────────────
 // addForteFromInboxAudit_Aug18() — adds 2 Forte rows from Aug 18 inbox audit
 // Run ONCE in Apps Script editor (uses addToForteSheet so dupe check is auto)
 // ─────────────────────────────────────────────────────────────────
