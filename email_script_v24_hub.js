@@ -28,58 +28,6 @@ var HUB_URL    = 'https://intransit-hub.intransit-sales.workers.dev';
 var HUB_SECRET = 'InTransit!Hub#2026';
 
 
-// ONE-TIME: Add IDT7202LA50P* to Stan's RFQ sheet (was misrouted as own_stock on Jul 16 2026)
-function addonAgreeAndFixDraft(e) {
-  try {
-    var params     = e.commonEventObject.parameters;
-    var draftId    = params.draftId    || '';
-    var threadId   = params.threadId   || '';
-    var subject    = params.subject    || '';
-    var toEmail    = params.toEmail    || '';
-    var correction = params.correction || '';
-    if (!correction.trim()) return notify('No correction found from diagnosis.');
-
-    var token = ScriptApp.getOAuthToken();
-    var fetchResp = UrlFetchApp.fetch(
-      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
-      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-    );
-    if (fetchResp.getResponseCode() !== 200) return notify('Could not load draft to fix.');
-    var draft = JSON.parse(fetchResp.getContentText());
-    var htmlBody = extractDraftHtmlBody(draft.message && draft.message.payload);
-    var currentBody = htmlBody ? htmlBody.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '';
-
-    var fixResp = UrlFetchApp.fetch(HUB_URL + '/api/fix-draft', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({ draft_body: currentBody, feedback: correction, subject: subject, to_email: toEmail, thread_id: threadId }),
-      muteHttpExceptions: true
-    });
-    if (fixResp.getResponseCode() !== 200) return notify('Fix failed: ' + fixResp.getContentText().substring(0, 100));
-    var fixResult = JSON.parse(fixResp.getContentText());
-    var correctedBody = fixResult.corrected_body || '';
-
-    var newHtml = buildSimpleHTML(correctedBody.replace(/\n/g, '<br>'));
-    var rebuilt = rebuildRawMessage(draft, newHtml);
-    var putResp = UrlFetchApp.fetch(
-      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId,
-      { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        payload: JSON.stringify({ message: { raw: rebuilt.raw, threadId: threadId || undefined } }),
-        muteHttpExceptions: true }
-    );
-    if (JSON.parse(putResp.getContentText()).error) return notify('Could not update draft.');
-
-    hubPostDraft(threadId, null, toEmail, subject, correctedBody, draftId, 'Auto-diagnosis fix: ' + correction);
-    hubLearn('auto-diagnosis: ' + correction, currentBody, correctedBody, threadId, subject, toEmail, null, null);
-    hubLog('run', 'addonAgreeAndFixDraft: draft corrected via auto-diagnosis — ' + subject, { correction: correction });
-
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification()
-        .setText('✅ Draft fixed! 🧠 Mistake logged for training.'))
-      .build();
-  } catch(err) { return notify('Error: ' + err.toString()); }
-}
-
 
 function addonBlockDomain(e) {
   try {
@@ -303,371 +251,6 @@ function addonChat(e) {
 }
 
 
-function addonConfirmDraft(e) {
-  try {
-    var params     = e.commonEventObject.parameters;
-    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
-    var threadId   = params.threadId || '';
-    var subject    = params.subject  || '';
-    var fromH      = params.fromH    || '';
-    var action     = params.action   || '';
-    var optLabel   = params.optLabel || action;
-    var draftContent = (formInputs.draftContent && formInputs.draftContent.stringInputs && formInputs.draftContent.stringInputs.value[0]) || '';
-    var editNote     = (formInputs.editNote     && formInputs.editNote.stringInputs     && formInputs.editNote.stringInputs.value[0])     || '';
-
-    var thread = GmailApp.getThreadById(threadId);
-    if (!thread) return notify('Thread not found.');
-    var msgs = thread.getMessages();
-    var lastMsg = msgs[msgs.length - 1];
-    var toEmail = extractBuyerEmail(fromH || lastMsg.getFrom());
-
-    // For remove_oem: delete from OEM sheet + stamp Forte before drafting
-    if (action === 'remove_oem') {
-      var rmMpn = extractMPN(subject);
-      if (rmMpn) {
-        deletePart(rmMpn, subject);
-        updateForteSheet(rmMpn);
-        hubLog('run', 'Sidebar remove_oem: ' + rmMpn, {mpn: rmMpn, source: 'sidebar'});
-      }
-    }
-
-    var html = buildSimpleHTML(draftContent.replace(/\n/g, '<br>'));
-    createThreadedDraft(toEmail, 'Re: ' + subject, html, lastMsg.getId(), threadId, null);
-
-    // Show training confirmation card
-    var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle('✅ Draft Created').setSubtitle(optLabel));
-    var confirmSection = CardService.newCardSection().setHeader('Log as training?');
-    var trainingNote = 'Draft created using: ' + optLabel;
-    if (editNote) trainingNote += '\n\nYour note: "' + editNote + '"';
-    confirmSection.addWidget(CardService.newTextParagraph().setText(trainingNote + '\n\nSave this as training so the worker learns from it?'));
-    confirmSection.addWidget(CardService.newTextButton()
-      .setText('✓ Yes — Save to Worker Memory')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#1a7340')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonLogDiagnosis')
-        .setParameters({
-          subject: subject, fromH: fromH,
-          action: action,
-          trigger: '',
-          reason: (params.diagReason || '') + (editNote ? ' | John note: ' + editNote : ''),
-          agreed: 'true',
-          needsScript: params.needsScript || 'false',
-          scriptNote: params.scriptNote || ''
-        })));
-    confirmSection.addWidget(CardService.newTextButton()
-      .setText('✗ Skip — Draft only')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonDismissCard')
-        .setParameters({})));
-    card.addSection(confirmSection);
-
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
-  } catch(err) { return notify('Error creating draft: ' + err.toString()); }
-}
-
-
-function addonCreateDraft(e) {
-  try {
-    var params     = e.commonEventObject.parameters;
-    var threadId   = params.threadId;
-    var subject    = params.subject || '';
-    var fromEmail  = params.fromEmail || '';
-    var formInputs = e.commonEventObject.formInputs || {};
-    var instruction = '';
-    if (formInputs.draftInstruction && formInputs.draftInstruction.stringInputs) {
-      instruction = (formInputs.draftInstruction.stringInputs.value || [])[0] || '';
-    }
-    if (!instruction.trim()) return notify('Please type what to draft before clicking Create.');
-
-    // Get thread to find the last message and reply target
-    var thread = GmailApp.getThreadById(threadId);
-    if (!thread) return notify('Thread not found.');
-    var messages = thread.getMessages();
-    var lastMsg = messages[messages.length - 1];
-    var threadSnippet = lastMsg.getPlainBody().substring(0, 600);
-    var replyTo = fromEmail || lastMsg.getReplyTo() || lastMsg.getFrom();
-
-    // Call fix-draft endpoint (also handles create-from-scratch when draft_body is empty)
-    var fixResp = UrlFetchApp.fetch(HUB_URL + '/api/fix-draft', {
-      method: 'POST',
-      contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({
-        draft_body: '',
-        feedback: instruction,
-        subject: subject,
-        to_email: replyTo,
-        thread_id: threadId,
-        thread_context: threadSnippet
-      }),
-      muteHttpExceptions: true
-    });
-
-    if (fixResp.getResponseCode() !== 200) {
-      return notify('Failed: ' + fixResp.getContentText().substring(0, 120));
-    }
-    var result = JSON.parse(fixResp.getContentText());
-    var bodyText = result.corrected_body || '';
-    var advice = result.advice || ('Created per: ' + instruction);
-    if (!bodyText.trim()) return notify('Received empty draft body from AI. Try rephrasing the instruction.');
-
-    var htmlBody = buildSimpleHTML(bodyText.replace(/\n/g, '<br>'));
-    var draft = lastMsg.createDraftReply('', { htmlBody: htmlBody });
-    if (!draft) return notify('Failed to save draft to Gmail.');
-
-    var draftId = draft.getId();
-    hubPostDraft(threadId, null, replyTo, subject, bodyText, draftId, advice);
-    hubLog('run', 'addonCreateDraft: sidebar-created draft — ' + subject, { instruction: instruction });
-
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification()
-        .setText('✅ Draft created! Close and reopen the sidebar to review it.'))
-      .build();
-
-  } catch(err) {
-    return notify('Error: ' + err.toString());
-  }
-}
-
-
-function addonDiagnoseDraft(e) {
-  try {
-    var params    = e.commonEventObject.parameters;
-    var draftId   = params.draftId   || '';
-    var threadId  = params.threadId  || '';
-    var subject   = params.subject   || '';
-    var fromH     = params.fromH     || '';
-    var toEmail   = params.toEmail   || '';
-
-    if (!draftId) return notify('No draft ID found.');
-
-    // Fetch current draft body
-    var token = ScriptApp.getOAuthToken();
-    var fetchResp = UrlFetchApp.fetch(
-      'https://gmail.googleapis.com/gmail/v1/users/me/drafts/' + draftId + '?format=full',
-      { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
-    );
-    if (fetchResp.getResponseCode() !== 200) return notify('Could not load draft.');
-    var draft = JSON.parse(fetchResp.getContentText());
-    var htmlBody = extractDraftHtmlBody(draft.message && draft.message.payload);
-    var draftBody = htmlBody ? htmlBody.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '';
-
-    // Read buyer's last message from thread
-    var buyerContent = '';
-    if (threadId) {
-      try {
-        var thread = GmailApp.getThreadById(threadId);
-        var msgs = thread ? thread.getMessages() : [];
-        if (msgs.length) buyerContent = stripQuotedLines(msgs[msgs.length - 1].getPlainBody()).substring(0, 800);
-      } catch(e2) {}
-    }
-
-    // Look up inventory
-    var mpn = extractMPNFromSubject(subject) || extractMPN(subject);
-    var oem_results = [], in_stock_results = [], forte_results = [];
-    if (mpn) {
-      try {
-        var inv = addonSheetLookup(mpn);
-        oem_results      = (inv && inv.oem_excess)  || [];
-        in_stock_results = (inv && inv.in_stock)    || [];
-        forte_results    = (inv && inv.forte_sheet) || [];
-      } catch(e3) {}
-    }
-
-    // Call /api/diagnose in draft mode
-    var diagResp = UrlFetchApp.fetch(HUB_URL + '/api/diagnose', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({
-        mode: 'draft',
-        draft_body: draftBody,
-        subject: subject, sender: fromH, content: buyerContent,
-        oem_results: oem_results, in_stock_results: in_stock_results, forte_results: forte_results
-      }),
-      muteHttpExceptions: true
-    });
-    var result = JSON.parse(diagResp.getContentText());
-
-    var confLabel = result.confidence === 'high' ? '🟢 High' : result.confidence === 'low' ? '🔴 Low' : '🟡 Medium';
-    var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle('🤔 Draft Diagnosis').setSubtitle(subject ? subject.substring(0,50) : 'Draft'));
-
-    var diagSection = CardService.newCardSection().setHeader('What I found');
-    diagSection.addWidget(CardService.newTextParagraph().setText('❌ Wrong: ' + (result.what_is_wrong || '—')));
-    diagSection.addWidget(CardService.newTextParagraph().setText('✅ Should be: ' + (result.what_it_should_say || '—')));
-    diagSection.addWidget(CardService.newTextParagraph().setText('Fix: ' + (result.corrected_instruction || '—')));
-    diagSection.addWidget(CardService.newTextParagraph().setText('Confidence: ' + confLabel));
-    card.addSection(diagSection);
-
-    var agreeSection = CardService.newCardSection().setHeader('Your verdict');
-    agreeSection.addWidget(CardService.newTextButton()
-      .setText('✓ Agree — Fix the Draft')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#1a7340')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonAgreeAndFixDraft')
-        .setParameters({
-          draftId: draftId, threadId: threadId, subject: subject, toEmail: toEmail,
-          correction: (result.corrected_instruction || '').substring(0, 250)
-        })));
-    agreeSection.addWidget(CardService.newTextInput()
-      .setFieldName('draftDiagCorrection')
-      .setTitle('Or type your own correction')
-      .setHint('e.g. "It should be a decline — qty×TP < $500"')
-      .setMultiline(false));
-    agreeSection.addWidget(CardService.newTextButton()
-      .setText('💬 Use My Correction')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#37474f')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonManualFixDraftFromDiag')
-        .setParameters({ draftId: draftId, threadId: threadId, subject: subject, toEmail: toEmail })));
-    card.addSection(agreeSection);
-
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
-  } catch(err) { return notify('❌ Diagnose draft error: ' + err.toString()); }
-}
-
-
-function addonDiagnoseEmail(e) {
-  try {
-    var params    = e.commonEventObject.parameters;
-    var threadId  = params.threadId  || '';
-    var subject   = params.subject   || '';
-    var fromH     = params.fromH     || '';
-
-    // Read email body from thread (full body, not stripped — stripping can hide context)
-    var content = '';
-    if (threadId) {
-      try {
-        var thread = GmailApp.getThreadById(threadId);
-        var msgs = thread ? thread.getMessages() : [];
-        if (msgs.length) {
-          var raw = msgs[msgs.length - 1].getPlainBody();
-          content = raw.substring(0, 1000);
-        }
-      } catch(e2) {}
-    }
-
-    // Extract MPN — handle netCOMPONENTS "Company | MPN)" format first
-    var mpn = '';
-    var ncPipe = subject.match(/\|\s*([A-Z0-9][A-Z0-9\-\.\/]{3,})\s*\)/i);
-    if (ncPipe) mpn = ncPipe[1];
-    else mpn = extractMPNFromSubject(subject) || extractMPN(subject) || '';
-
-    var oem_results = [], in_stock_results = [], forte_results = [];
-    if (mpn) {
-      try {
-        var inv = addonSheetLookup(mpn);
-        oem_results      = (inv && inv.oem_excess)  || [];
-        in_stock_results = (inv && inv.in_stock)    || [];
-        forte_results    = (inv && inv.forte_sheet) || [];
-      } catch(e3) {}
-    }
-
-    // Call /api/diagnose
-    var diagResp = UrlFetchApp.fetch(HUB_URL + '/api/diagnose', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({ subject: subject, sender: fromH, content: content, oem_results: oem_results, in_stock_results: in_stock_results, forte_results: forte_results }),
-      muteHttpExceptions: true
-    });
-    var result = JSON.parse(diagResp.getContentText());
-
-    var confLabel = result.confidence === 'high' ? '🟢 High' : result.confidence === 'low' ? '🔴 Low' : '🟡 Medium';
-    var options = result.reply_options || [];
-    var needsScript = result.needs_script_change === true;
-    var scriptNote = result.script_change_note || '';
-
-    var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle('🧠 Jiggle My Mind').setSubtitle(mpn || subject.substring(0,40)));
-
-    // Analysis — brief
-    var diagSection = CardService.newCardSection().setHeader('Analysis — ' + confLabel);
-    diagSection.addWidget(CardService.newTextParagraph().setText('Should be: ' + (result.action_should_have_been || '—')));
-    diagSection.addWidget(CardService.newTextParagraph().setText('Why missed: ' + (result.reason_missed || '—')));
-    if (needsScript) {
-      diagSection.addWidget(CardService.newTextParagraph().setText('⚠️ Code fix needed: ' + scriptNote));
-    }
-    card.addSection(diagSection);
-
-    // Reply options — one section per option with preview + button
-    if (options.length) {
-      var optSection = CardService.newCardSection().setHeader('Choose the correct reply:');
-      options.forEach(function(opt, i) {
-        var preview = (opt.draft || '(No reply sent)').substring(0, 130);
-        if ((opt.draft || '').length > 130) preview += '…';
-        optSection.addWidget(CardService.newTextParagraph().setText((i === 0 ? '▶ ' : '  ') + (opt.label || opt.action) + '\n"' + preview + '"'));
-        if (opt.action !== 'no_bid' && opt.action !== 'decline' && opt.draft && opt.draft !== '(No reply sent)') {
-          optSection.addWidget(CardService.newTextButton()
-            .setText('✓ Use: ' + (opt.label || opt.action))
-            .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-            .setBackgroundColor('#1a7340')
-            .setOnClickAction(CardService.newAction()
-              .setFunctionName('addonUseReplyOption')
-              .setParameters({
-                threadId: threadId, subject: subject, fromH: fromH,
-                action: opt.action || '',
-                optLabel: (opt.label || opt.action).substring(0, 80),
-                draft: (opt.draft || '').substring(0, 500),
-                diagAction: result.action_should_have_been || '',
-                diagReason: (result.reason_missed || '').substring(0, 200),
-                needsScript: needsScript ? 'true' : 'false',
-                scriptNote: scriptNote.substring(0, 200)
-              })));
-        } else {
-          optSection.addWidget(CardService.newTextButton()
-            .setText('✓ Log: No reply sent')
-            .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-            .setBackgroundColor('#37474f')
-            .setOnClickAction(CardService.newAction()
-              .setFunctionName('addonLogDiagnosis')
-              .setParameters({
-                subject: subject, fromH: fromH,
-                action: opt.action || result.action_should_have_been || '',
-                trigger: result.trigger_responsible || '',
-                reason: (result.reason_missed || '').substring(0, 200),
-                agreed: 'true',
-                needsScript: needsScript ? 'true' : 'false',
-                scriptNote: scriptNote.substring(0, 200)
-              })));
-        }
-      });
-      card.addSection(optSection);
-    }
-
-    // Correction fallback
-    var corrSection = CardService.newCardSection().setHeader('Or — enter your own correction:');
-    corrSection.addWidget(CardService.newTextInput()
-      .setFieldName('diagCorrection')
-      .setTitle('What should have happened?')
-      .setHint('e.g. "Should have been request_tp_500 — BCM5338 is in OEM EXCESS"')
-      .setMultiline(false));
-    corrSection.addWidget(CardService.newTextButton()
-      .setText('💬 Log Correction as Training')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#37474f')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonLogDiagnosis')
-        .setParameters({
-          subject: subject, fromH: fromH,
-          action: result.action_should_have_been || '',
-          trigger: result.trigger_responsible || '',
-          reason: (result.reason_missed || '').substring(0, 200),
-          agreed: 'false',
-          needsScript: needsScript ? 'true' : 'false',
-          scriptNote: scriptNote.substring(0, 200)
-        })));
-    card.addSection(corrSection);
-
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
-  } catch(err) { return notify('❌ Diagnose error: ' + err.toString()); }
-}
 
 
 function addonDismissCard(e) {
@@ -800,71 +383,6 @@ function addonFixDraft(e) {
 }
 
 
-function addonLogDiagnosis(e) {
-  try {
-    var params = e.commonEventObject.parameters;
-    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
-    var correction = (formInputs.diagCorrection && formInputs.diagCorrection.stringInputs && formInputs.diagCorrection.stringInputs.value && formInputs.diagCorrection.stringInputs.value[0] || '').trim();
-    var agreed = params.agreed === 'true';
-    var finalAction = agreed ? (params.action || '') : (correction || params.action || '');
-    var needsScript = params.needsScript === 'true';
-    var scriptNote = params.scriptNote || '';
-
-    var summary = agreed
-      ? 'Jiggle My Mind — AGREED: ' + params.action + ' missed'
-      : 'Jiggle My Mind — CORRECTION: ' + (correction || '(no text)');
-
-    // 1. Log to hub
-    UrlFetchApp.fetch(HUB_URL + '/api/logs', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({
-        app_name: 'email_automation', event_type: 'training',
-        summary: summary,
-        details: JSON.stringify({ subject: params.subject, from: params.fromH, action: finalAction, trigger: params.trigger, reason: params.reason, john_correction: correction || null, agreed: agreed, needs_script_change: needsScript })
-      }),
-      muteHttpExceptions: true
-    });
-
-    // 2. Save to worker AI memory so it applies on the next email decision
-    var memSlug = 'training-' + (finalAction || 'correction').replace(/[^a-z0-9]/gi, '-').toLowerCase() + '-' + new Date().getTime();
-    var memBody = 'John corrected the automation:\n'
-      + 'Subject: ' + (params.subject || '') + '\n'
-      + 'From: ' + (params.fromH || '') + '\n'
-      + 'Correct action: ' + finalAction + '\n'
-      + 'Why missed: ' + (params.reason || '') + '\n'
-      + (correction ? 'John\'s note: ' + correction : '');
-    UrlFetchApp.fetch(HUB_URL + '/api/memory', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({
-        slug: memSlug,
-        description: 'Training: ' + (params.subject || '').substring(0, 80) + ' → ' + finalAction,
-        type: 'training',
-        body: memBody
-      }),
-      muteHttpExceptions: true
-    });
-
-    var msg = '✅ Saved to worker memory — agent will use this on next email.';
-    if (needsScript && scriptNote) {
-      msg += '\n\n⚠️ Apps Script update also needed:\n' + scriptNote;
-    }
-    return notify(msg);
-  } catch(err) { return notify('❌ Error: ' + err.toString()); }
-}
-
-
-function addonManualFixDraftFromDiag(e) {
-  var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
-  var correction = (formInputs.draftDiagCorrection && formInputs.draftDiagCorrection.stringInputs && formInputs.draftDiagCorrection.stringInputs.value && formInputs.draftDiagCorrection.stringInputs.value[0] || '').trim();
-  if (!correction) return notify('Please type your correction first.');
-  var params = e.commonEventObject.parameters;
-  // Build a synthetic params with correction injected, reuse agreeAndFix logic
-  e.commonEventObject.parameters.correction = correction;
-  return addonAgreeAndFixDraft(e);
-}
-
 
 function addonProcessNext(e) {
   try {
@@ -902,60 +420,6 @@ function addonProcessNext(e) {
   }
 }
 
-
-function addonQuoteHistory(e) {
-  try {
-    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
-    var mpn = (formInputs.invMpn && formInputs.invMpn.stringInputs && formInputs.invMpn.stringInputs.value && formInputs.invMpn.stringInputs.value[0] || '').trim().toUpperCase();
-    if (!mpn) return notify('Enter an MPN first.');
-    var data = addonSheetLookup(mpn);
-    var forte = (data && data.forte_sheet) || [];
-    var oem   = (data && data.oem_excess)  || [];
-    var stock = (data && data.in_stock)    || [];
-    var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle('Quote History — ' + mpn)
-        .setSubtitle(forte.length + ' prior quote' + (forte.length !== 1 ? 's' : '') + ' in Forte'));
-    var stockParts = [];
-    if (oem.length)   stockParts.push('OEM: ' + oem.reduce(function(s,r){return s+(parseInt(r.qty)||0);},0).toLocaleString() + ' pcs');
-    if (stock.length) stockParts.push('InStock: ' + stock.reduce(function(s,r){return s+(parseInt(r.qty)||0);},0).toLocaleString() + ' pcs');
-    var stockSection = CardService.newCardSection().setHeader('Current Stock');
-    stockSection.addWidget(CardService.newTextParagraph().setText(stockParts.length ? stockParts.join(' · ') : 'Not in any sheet'));
-    card.addSection(stockSection);
-    if (!forte.length) {
-      var noSection = CardService.newCardSection();
-      noSection.addWidget(CardService.newTextParagraph().setText('No prior Forte entries found.'));
-      card.addSection(noSection);
-    } else {
-      var sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-      forte.forEach(function(r) {
-        var d = new Date(r.date); var stale = isNaN(d.getTime()) || d < sixMonthsAgo;
-        var pot = (r.qty && r.buyerTP) ? '$' + (parseFloat(r.qty) * parseFloat(r.buyerTP)).toFixed(2) : '—';
-        var entrySection = CardService.newCardSection().setHeader((stale ? '⚠ STALE — ' : '') + (r.date || '—') + ' · ' + (r.status || '—'));
-        entrySection.addWidget(CardService.newTextParagraph()
-          .setText('QTY: ' + (r.qty||'—') + '  TP: ' + (r.buyerTP?'$'+r.buyerTP:'—') + '  Potential: ' + pot + '  Country: ' + (r.country||'—')));
-        card.addSection(entrySection);
-      });
-    }
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
-  } catch(err) { return notify('❌ Error: ' + err.toString()); }
-}
-
-
-function addonRemoveOEM(e) {
-  try {
-    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
-    var mpn = (formInputs.invMpn && formInputs.invMpn.stringInputs && formInputs.invMpn.stringInputs.value && formInputs.invMpn.stringInputs.value[0] || '').trim().toUpperCase();
-    if (!mpn) return notify('Enter an MPN first.');
-    UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({ type: 'remove_oem_mpn', data: { mpn: mpn } }),
-      muteHttpExceptions: true
-    });
-    return notify('✅ Queued: removing ' + mpn + ' from OEM EXCESS (~5 min)');
-  } catch(err) { return notify('❌ Error: ' + err.toString()); }
-}
 
 
 function addonSaveStockPrice(e) {
@@ -1009,32 +473,6 @@ function addonClearStockPrice(e) {
   }
 }
 
-
-function addonRemoveStock(e) {
-  try {
-    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
-    var mpnField = formInputs.invMpn;
-    var mpn = (mpnField && mpnField.stringInputs && mpnField.stringInputs.value && mpnField.stringInputs.value[0] || '').trim().toUpperCase();
-    if (!mpn) {
-      return CardService.newActionResponseBuilder()
-        .setNotification(CardService.newNotification().setText('⚠️ Enter an MPN first.'))
-        .build();
-    }
-    UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({ type: 'remove_instock_mpn', data: { mpn: mpn } }),
-      muteHttpExceptions: true
-    });
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('✅ Queued: removing ' + mpn + ' from InStock (~5 min)'))
-      .build();
-  } catch(err) {
-    return CardService.newActionResponseBuilder()
-      .setNotification(CardService.newNotification().setText('❌ Error: ' + err.toString()))
-      .build();
-  }
-}
 
 
 function addonReportIssue(e) {
@@ -1212,124 +650,6 @@ function addonSheetLookup(mpn) {
 }
 
 
-function addonSmartReply(e) {
-  try {
-    var params   = e.commonEventObject.parameters;
-    var threadId = params.threadId || '';
-    var subject  = params.subject  || '';
-    var fromH    = params.fromH    || '';
-
-    // Read ALL messages in thread for full context
-    var threadContext = '';
-    if (threadId) {
-      try {
-        var thread = GmailApp.getThreadById(threadId);
-        var msgs = thread ? thread.getMessages() : [];
-        var parts = [];
-        msgs.forEach(function(msg) {
-          var from = msg.getFrom();
-          var body = msg.getPlainBody().substring(0, 600);
-          parts.push('FROM: ' + from + '\n' + body);
-        });
-        threadContext = parts.join('\n\n---\n\n').substring(0, 3000);
-      } catch(e2) {}
-    }
-
-    // Extract MPN — handle netCOMPONENTS pipe format too
-    var mpn = '';
-    var ncPipe = subject.match(/\|\s*([A-Z0-9][A-Z0-9\-\.\/]{3,})\s*\)/i);
-    if (ncPipe) mpn = ncPipe[1];
-    else mpn = extractMPNFromSubject(subject) || extractMPN(subject) || '';
-
-    var oem_results = [], in_stock_results = [], forte_results = [];
-    if (mpn) {
-      try {
-        var inv = addonSheetLookup(mpn);
-        oem_results      = (inv && inv.oem_excess)  || [];
-        in_stock_results = (inv && inv.in_stock)    || [];
-        forte_results    = (inv && inv.forte_sheet) || [];
-      } catch(e3) {}
-    }
-
-    // Call /api/smart-reply
-    var resp = UrlFetchApp.fetch(HUB_URL + '/api/smart-reply', {
-      method: 'POST', contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      payload: JSON.stringify({
-        subject: subject, sender: fromH,
-        thread_context: threadContext,
-        oem_results: oem_results, in_stock_results: in_stock_results, forte_results: forte_results
-      }),
-      muteHttpExceptions: true
-    });
-    var result = JSON.parse(resp.getContentText());
-    if (result.error) return notify('Smart Reply error: ' + result.error);
-
-    var replyText = result.reply_text || '';
-    var reasoning = result.reasoning || '';
-
-    var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader()
-        .setTitle('🤖 Smart Reply')
-        .setSubtitle((result.action || '') + (mpn ? ' — ' + mpn : '')));
-
-    if (reasoning) {
-      var reasonSection = CardService.newCardSection();
-      reasonSection.addWidget(CardService.newTextParagraph().setText('💡 ' + reasoning));
-      card.addSection(reasonSection);
-    }
-
-    var replySection = CardService.newCardSection().setHeader('Suggested reply — edit and copy:');
-    replySection.addWidget(CardService.newTextInput()
-      .setFieldName('smart_reply_body')
-      .setTitle('Reply text')
-      .setMultiline(true)
-      .setValue(replyText));
-    card.addSection(replySection);
-
-    var actSection = CardService.newCardSection();
-    actSection.addWidget(CardService.newTextButton()
-      .setText('✉ Create as Draft in Gmail')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#1a7340')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonSmartReplyCreateDraft')
-        .setParameters({ threadId: threadId, subject: subject, toEmail: extractBuyerEmail(fromH) })));
-    card.addSection(actSection);
-
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
-  } catch(err) { return notify('❌ Smart Reply error: ' + err.toString()); }
-}
-
-
-function addonSmartReplyCreateDraft(e) {
-  try {
-    var params     = e.commonEventObject.parameters;
-    var threadId   = params.threadId   || '';
-    var subject    = params.subject    || '';
-    var toEmail    = params.toEmail    || '';
-    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
-    var body = (formInputs.smart_reply_body && formInputs.smart_reply_body.stringInputs && formInputs.smart_reply_body.stringInputs.value && formInputs.smart_reply_body.stringInputs.value[0] || '').trim();
-    if (!body) return notify('No reply text — please type or generate a reply first.');
-
-    var thread = GmailApp.getThreadById(threadId);
-    if (!thread) return notify('Thread not found.');
-    var msgs = thread.getMessages();
-    var lastMsg = msgs[msgs.length - 1];
-    if (!toEmail) toEmail = extractBuyerEmail(lastMsg.getReplyTo() || lastMsg.getFrom());
-
-    var html = buildSimpleHTML(body.replace(/\n/g, '<br>'));
-    createThreadedDraft(toEmail, 'Re: ' + subject, html, lastMsg.getId(), threadId);
-    hubLog('run', 'addonSmartReplyCreateDraft: draft created for ' + subject, { to: toEmail });
-
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().popCard())
-      .setNotification(CardService.newNotification().setText('✅ Draft created — check Gmail!'))
-      .build();
-  } catch(err) { return notify('Error creating draft: ' + err.toString()); }
-}
-
 
 function addonSubmitFeedback(e) {
   try {
@@ -1403,101 +723,6 @@ function addonSubmitFeedback(e) {
   }
 }
 
-
-function addonUseReplyOption(e) {
-  try {
-    var params   = e.commonEventObject.parameters;
-    var threadId = params.threadId || '';
-    var subject  = params.subject  || '';
-    var fromH    = params.fromH    || '';
-    var draft    = params.draft    || '';
-    var action   = params.action   || '';
-    var optLabel = params.optLabel || action;
-
-    // Show preview card so John can edit before sending
-    var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle('📝 Preview Draft').setSubtitle(optLabel));
-
-    var previewSection = CardService.newCardSection().setHeader('Edit before sending:');
-    previewSection.addWidget(CardService.newTextInput()
-      .setFieldName('draftContent')
-      .setTitle('Draft body')
-      .setValue(draft)
-      .setMultiline(true));
-    previewSection.addWidget(CardService.newTextInput()
-      .setFieldName('editNote')
-      .setTitle('Why did you change it? (optional — saved as training)')
-      .setMultiline(false));
-    previewSection.addWidget(CardService.newTextButton()
-      .setText('✅ Create This Draft')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#1a7340')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonConfirmDraft')
-        .setParameters({
-          threadId: threadId, subject: subject, fromH: fromH,
-          action: action, optLabel: optLabel,
-          diagAction: params.diagAction || '',
-          diagReason: params.diagReason || '',
-          needsScript: params.needsScript || 'false',
-          scriptNote: params.scriptNote || ''
-        })));
-    card.addSection(previewSection);
-
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
-  } catch(err) { return notify('Error showing preview: ' + err.toString()); }
-}
-
-
-function addonVerifyInStockRemoved(e) {
-  try {
-    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
-    var mpn = (formInputs.invMpn && formInputs.invMpn.stringInputs && formInputs.invMpn.stringInputs.value && formInputs.invMpn.stringInputs.value[0] || '').trim().toUpperCase();
-    if (!mpn) return notify('Enter an MPN first.');
-    var data = addonSheetLookup(mpn);
-    var rows = (data && data.in_stock) || [];
-    var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle('IN STOCK — ' + mpn).setSubtitle(rows.length === 0 ? '✓ Removed' : '⚠ Still present'));
-    var section = CardService.newCardSection();
-    if (rows.length === 0) {
-      section.addWidget(CardService.newTextParagraph().setText('✅ ' + mpn + ' is NOT in IN STOCK. Successfully removed.'));
-    } else {
-      section.addWidget(CardService.newTextParagraph().setText('⚠️ ' + mpn + ' still found — ' + rows.length + ' row(s):'));
-      rows.forEach(function(r) {
-        section.addWidget(CardService.newTextParagraph().setText('Row ' + r.row + ': QTY=' + r.qty + (r.notes ? ' | Notes=' + r.notes : '')));
-      });
-    }
-    card.addSection(section);
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
-  } catch(err) { return notify('❌ Error: ' + err.toString()); }
-}
-
-
-function addonVerifyOEMRemoved(e) {
-  try {
-    var formInputs = (e.commonEventObject && e.commonEventObject.formInputs) || {};
-    var mpn = (formInputs.invMpn && formInputs.invMpn.stringInputs && formInputs.invMpn.stringInputs.value && formInputs.invMpn.stringInputs.value[0] || '').trim().toUpperCase();
-    if (!mpn) return notify('Enter an MPN first.');
-    var data = addonSheetLookup(mpn);
-    var rows = (data && data.oem_excess) || [];
-    var card = CardService.newCardBuilder()
-      .setHeader(CardService.newCardHeader().setTitle('OEM EXCESS — ' + mpn).setSubtitle(rows.length === 0 ? '✓ Removed' : '⚠ Still present'));
-    var section = CardService.newCardSection();
-    if (rows.length === 0) {
-      section.addWidget(CardService.newTextParagraph().setText('✅ ' + mpn + ' is NOT in OEM EXCESS. Successfully removed.'));
-    } else {
-      section.addWidget(CardService.newTextParagraph().setText('⚠️ ' + mpn + ' still found — ' + rows.length + ' row(s):'));
-      rows.forEach(function(r) {
-        section.addWidget(CardService.newTextParagraph().setText('Row ' + r.row + ': QTY=' + r.qty + ' | Notes=' + (r.notes || '—')));
-      });
-    }
-    card.addSection(section);
-    return CardService.newActionResponseBuilder()
-      .setNavigation(CardService.newNavigation().pushCard(card.build())).build();
-  } catch(err) { return notify('❌ Error: ' + err.toString()); }
-}
 
 
 function addonWrongDraftApply(e) {
@@ -1709,16 +934,6 @@ function addToStanSheet(mpn, country, qty, tp) {
 }
 
 
-function applyRemoteConfig(cfg) {
-  if (!cfg || typeof cfg !== 'object') return;
-  if (cfg.MSG_NEED_TP_500)  MSG_NEED_TP_500  = cfg.MSG_NEED_TP_500;
-  if (cfg.MSG_NEED_TP_2000) MSG_NEED_TP_2000 = cfg.MSG_NEED_TP_2000;
-  if (cfg.MSG_CHECKING)     MSG_CHECKING     = cfg.MSG_CHECKING;
-  if (cfg.MSG_BILL)         MSG_BILL         = cfg.MSG_BILL;
-  if (cfg.DAVID_EMAIL)      DAVID_EMAIL      = cfg.DAVID_EMAIL;
-  if (cfg.BILL_EMAIL)       BILL_EMAIL       = cfg.BILL_EMAIL;
-  if (cfg.DEB_EMAIL)        DEB_EMAIL        = cfg.DEB_EMAIL;
-}
 
 
 
@@ -1865,13 +1080,6 @@ function buildContextualCard(e) {
           .setParameters({ draftId: matchDraftId, threadId: gmailThreadId, hasAdvice: '0' })));
 
       var fixSection = CardService.newCardSection().setHeader('Something wrong?');
-      fixSection.addWidget(CardService.newTextButton()
-        .setText('🤔 Figure Out What\'s Wrong')
-        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-        .setBackgroundColor('#7b1fa2')
-        .setOnClickAction(CardService.newAction()
-          .setFunctionName('addonDiagnoseDraft')
-          .setParameters({ draftId: matchDraftId, threadId: gmailThreadId, subject: subject, fromH: fromH, toEmail: matchToH })));
       fixSection.addWidget(CardService.newTextInput()
         .setFieldName(fbField)
         .setTitle('Or type what was wrong:')
@@ -1902,20 +1110,8 @@ function buildContextualCard(e) {
       builder.addSection(infoSection).addSection(fixSection);
 
     } else {
-      var noSection = CardService.newCardSection().setHeader('📥 No draft — create one now');
+      var noSection = CardService.newCardSection().setHeader('📥 No draft yet');
       noSection.addWidget(CardService.newTextParagraph().setText('From: ' + (fromH || 'unknown')));
-      noSection.addWidget(CardService.newTextInput()
-        .setFieldName('draftInstruction')
-        .setTitle('Tell me what to draft')
-        .setHint('e.g. "MSG_CHECKING", "ask for TP $500 min", "David no stock removal for [MPN]"')
-        .setMultiline(false));
-      noSection.addWidget(CardService.newTextButton()
-        .setText('📤 Create draft now')
-        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-        .setBackgroundColor('#6a1b9a')
-        .setOnClickAction(CardService.newAction()
-          .setFunctionName('addonCreateDraft')
-          .setParameters({ threadId: gmailThreadId, subject: subject, fromEmail: fromH })));
       noSection.addWidget(CardService.newTextButton()
         .setText('📋 Missed Draft — Pick What Should Have Been Sent')
         .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
@@ -1958,41 +1154,6 @@ function buildContextualCard(e) {
       .setValue(invMpnHint)
       .setMultiline(false));
     invSection.addWidget(CardService.newTextButton()
-      .setText('🗑 Remove from InStock')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#7b1fa2')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonRemoveStock')
-        .setParameters({ threadId: gmailThreadId })));
-    invSection.addWidget(CardService.newTextButton()
-      .setText('🗑 Remove from OEM EXCESS')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#6a1b9a')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonRemoveOEM')
-        .setParameters({})));
-    invSection.addWidget(CardService.newTextButton()
-      .setText('✓ Verify OEM Removed')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#1b5e20')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonVerifyOEMRemoved')
-        .setParameters({})));
-    invSection.addWidget(CardService.newTextButton()
-      .setText('✓ Verify InStock Removed')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#1b5e20')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonVerifyInStockRemoved')
-        .setParameters({})));
-    invSection.addWidget(CardService.newTextButton()
-      .setText('📋 Quote History')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#37474f')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonQuoteHistory')
-        .setParameters({})));
-    invSection.addWidget(CardService.newTextButton()
       .setText('📤 Send to NetCOMPONENTS')
       .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
       .setBackgroundColor('#1565c0')
@@ -2000,32 +1161,6 @@ function buildContextualCard(e) {
         .setFunctionName('addonSendNetCom')
         .setParameters({})));
     builder.addSection(invSection);
-
-    // ── Jiggle My Mind — diagnose why this email was missed ────────────────
-    var jiggleSection = CardService.newCardSection().setHeader('🧠 Jiggle My Mind');
-    jiggleSection.addWidget(CardService.newTextParagraph()
-      .setText('Think this email should have been drafted? Let me diagnose what went wrong.'));
-    jiggleSection.addWidget(CardService.newTextButton()
-      .setText('🧠 Diagnose This Email')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#263238')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonDiagnoseEmail')
-        .setParameters({ threadId: gmailThreadId, subject: subject, fromH: fromH })));
-    builder.addSection(jiggleSection);
-
-    // ── Smart Reply ─────────────────────────────────────────────────────────
-    var smartSection = CardService.newCardSection().setHeader('🤖 Smart Reply');
-    smartSection.addWidget(CardService.newTextParagraph()
-      .setText('AI reads the full thread + your inventory and drafts the best reply. Review it, then copy or create as draft.'));
-    smartSection.addWidget(CardService.newTextButton()
-      .setText('🤖 Generate Smart Reply')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#0d47a1')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonSmartReply')
-        .setParameters({ threadId: gmailThreadId, subject: subject, fromH: fromH })));
-    builder.addSection(smartSection);
 
     // ── Stock Price ─────────────────────────────────────────────────────────
     // Remembers a per-MPN sell price so own_stock drafts auto-fill the price.
@@ -2291,41 +1426,6 @@ function buildHomepageCard() {
       .setTitle('Part Number (MPN)')
       .setHint('Used by all buttons below')
       .setMultiline(false));
-    invSectionHome.addWidget(CardService.newTextButton()
-      .setText('🗑 Remove from InStock')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#7b1fa2')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonRemoveStock')
-        .setParameters({ threadId: '' })));
-    invSectionHome.addWidget(CardService.newTextButton()
-      .setText('🗑 Remove from OEM EXCESS')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#6a1b9a')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonRemoveOEM')
-        .setParameters({})));
-    invSectionHome.addWidget(CardService.newTextButton()
-      .setText('✓ Verify OEM Removed')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#1b5e20')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonVerifyOEMRemoved')
-        .setParameters({})));
-    invSectionHome.addWidget(CardService.newTextButton()
-      .setText('✓ Verify InStock Removed')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#1b5e20')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonVerifyInStockRemoved')
-        .setParameters({})));
-    invSectionHome.addWidget(CardService.newTextButton()
-      .setText('📋 Quote History')
-      .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setBackgroundColor('#37474f')
-      .setOnClickAction(CardService.newAction()
-        .setFunctionName('addonQuoteHistory')
-        .setParameters({})));
     invSectionHome.addWidget(CardService.newTextButton()
       .setText('📤 Send to NetCOMPONENTS')
       .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
@@ -2919,56 +2019,6 @@ function findMatches(data, partNumber) {
 }
 
 
-function getBlockedDomains() {
-  var cache = CacheService.getScriptCache();
-  var cached = cache.get('blocked_domains');
-  if (cached) return JSON.parse(cached);
-  try {
-    var resp = UrlFetchApp.fetch(HUB_URL + '/api/rules?type=blocked_domain', {
-      headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
-    });
-    var data = JSON.parse(resp.getContentText());
-    var domains = (data.rules || []).map(function(r) { return r.key; });
-    if (domains.length) {
-      cache.put('blocked_domains', JSON.stringify(domains), 300);
-      return domains;
-    }
-  } catch(e) { Logger.log('getBlockedDomains error: ' + e); }
-  return BLOCKED_DOMAINS; // fallback to hardcoded
-}
-
-
-function getCachedRemoteConfig() {
-  var cache = CacheService.getScriptCache();
-  var cached = cache.get('remote_config_v2');
-  if (cached) try { return JSON.parse(cached); } catch(e) {}
-  var cfg = getRemoteConfig();
-  try { cache.put('remote_config_v2', JSON.stringify(cfg || {}), 300); } catch(e) {}
-  return cfg || {};
-}
-
-
-function getLabelId_(labelName) {
-  if (_gmailLabelCache_[labelName]) return _gmailLabelCache_[labelName];
-  var props = PropertiesService.getScriptProperties();
-  var key = 'lbl_' + labelName.replace(/[^a-zA-Z0-9]/g, '_');
-  var cached = props.getProperty(key);
-  if (cached) { _gmailLabelCache_[labelName] = cached; return cached; }
-  var all = gmailREST_('/labels');
-  (all.labels || []).forEach(function(l) {
-    var k = 'lbl_' + l.name.replace(/[^a-zA-Z0-9]/g, '_');
-    props.setProperty(k, l.id);
-    _gmailLabelCache_[l.name] = l.id;
-  });
-  if (_gmailLabelCache_[labelName]) return _gmailLabelCache_[labelName];
-  var created = gmailREST_('/labels', 'post', { name: labelName });
-  if (created.id) {
-    props.setProperty(key, created.id);
-    _gmailLabelCache_[labelName] = created.id;
-    return created.id;
-  }
-  return null;
-}
 
 
 function getOrCreateDeletedSheet(ss) {
@@ -3002,18 +2052,6 @@ function getRecentSentQuotesFull(mpn, maxThreads) {
 }
 
 
-function getRemoteConfig() {
-  try {
-    var resp = UrlFetchApp.fetch(HUB_URL + '/api/configs/email_automation', {
-      method: 'get',
-      headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      muteHttpExceptions: true,
-    });
-    if (resp.getResponseCode() !== 200) return {};
-    var row = JSON.parse(resp.getContentText());
-    return row.config ? JSON.parse(row.config) : {};
-  } catch(e) { Logger.log('getRemoteConfig error: ' + e); return {}; }
-}
 
 
 // ── Sidebar: "Fix Claude Drafts" ─────────────────────────────
@@ -3218,16 +2256,6 @@ function gmailArchiveThread_(threadId) {
 }
 
 
-function gmailGetThreadMeta_(threadId) {
-  var data = gmailREST_('/threads/' + threadId + '?format=METADATA&metadataHeaders=From');
-  var msgs = data.messages || [];
-  var senders = msgs.map(function(m) {
-    var h = ((m.payload || {}).headers || []).filter(function(h) { return h.name === 'From'; });
-    return h.length ? h[0].value : '';
-  });
-  var lastLabelIds = msgs.length ? (msgs[msgs.length - 1].labelIds || []) : [];
-  return { senders: senders, labelIds: lastLabelIds };
-}
 
 
 function gmailModifyThread_(threadId, addLabels, removeLabels) {
@@ -3254,7 +2282,6 @@ function gmailModifyThread_(threadId, addLabels, removeLabels) {
 // ── Gmail REST helpers — bypass premium GmailApp.search() quota ──
 // GmailApp.search() exhausts the Apps Script "premium gmail" daily quota.
 // These helpers use UrlFetchApp (100k calls/day quota) instead.
-var _gmailLabelCache_ = {};
 
 function gmailREST_(path, method, body) {
   var opts = {
@@ -3645,9 +2672,8 @@ function processNextEmailManual() {
     } catch(e2) { continue; }
   }
 
-  // ── 2. Process threads queued by fastScanInbox ──
+  // ── 2. Process threads queued for processing ──
   var pending = gmailSearchREST('label:' + PENDING_LABEL, 5);
-  if (!pending.length) { fastScanInbox(); pending = gmailSearchREST('label:' + PENDING_LABEL, 5); }
   if (pending.length) {
     var tid = pending[0];
     try {
