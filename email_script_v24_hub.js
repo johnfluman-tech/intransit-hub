@@ -1842,27 +1842,16 @@ function buildContextualCard(e) {
     var gmailThreadId = e.gmail && e.gmail.threadId;
     if (!gmailThreadId) return buildHomepageCard();
 
-    // Use GmailApp service instead of REST — avoids premium UrlFetch quota entirely
-    var gmailThread = GmailApp.getThreadById(gmailThreadId);
-    var subject = '', fromH = '', matchToH = '', matchDraftId = null;
-    if (gmailThread) {
-      subject = gmailThread.getFirstMessageSubject();
-      var threadMsgs = gmailThread.getMessages();
-      if (threadMsgs.length > 0) fromH = threadMsgs[0].getFrom();
-    }
-
-    // Find draft for this thread — GmailApp.getDrafts() uses Gmail service quota, not UrlFetch
-    var allDrafts = GmailApp.getDrafts();
-    for (var di = 0; di < allDrafts.length; di++) {
-      try {
-        var dm = allDrafts[di].getMessage();
-        if (dm.getThread().getId() === gmailThreadId) {
-          matchDraftId = allDrafts[di].getId();
-          matchToH = dm.getTo();
-          break;
-        }
-      } catch(de) { Logger.log('Draft scan error: ' + de); }
-    }
+    // Use worker REST API — zero GmailApp quota, sidebar always loads
+    var ctxResp = UrlFetchApp.fetch(HUB_URL + '/api/gmail/sidebar-context?thread_id=' + encodeURIComponent(gmailThreadId), {
+      headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+    });
+    var ctx = {};
+    try { ctx = JSON.parse(ctxResp.getContentText()); } catch(pe) {}
+    var subject = ctx.subject || '';
+    var fromH = ctx.fromH || '';
+    var matchDraftId = ctx.draftId || null;
+    var matchToH = ctx.toEmail || '';
 
     var label = (subject || 'Email').replace(/^Re:\s*/i, '').substring(0, 55);
     var builder = CardService.newCardBuilder()

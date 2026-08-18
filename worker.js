@@ -145,6 +145,7 @@ export default {
 
       // Gmail API endpoints
       if (p === '/api/gmail/whoami'  && m === 'GET')  { const d = await gmailGet(env, '/profile'); return json(d); }
+      if (p === '/api/gmail/sidebar-context' && m === 'GET') return handleGmailSidebarContext(url, env);
       if (p === '/api/gmail/search'  && m === 'GET')  return handleGmailSearch(url, env);
       if (p === '/api/gmail/draft'   && m === 'POST') return handleGmailDraft(request, env);
       if (p === '/api/gmail/drafts'  && m === 'GET')  return handleListGmailDrafts(url, env);
@@ -2266,6 +2267,30 @@ async function handleGetGmailMessage(env, msgId) {
   const headers = {};
   (data.payload?.headers || []).forEach(h => { headers[h.name] = h.value; });
   return json({ id: msgId, subject: headers['Subject'], from: headers['From'], date: headers['Date'], body });
+}
+
+// GET /api/gmail/sidebar-context?thread_id=X — returns thread + draft info for sidebar card
+// Replaces two GmailApp calls (getThreadById + getDrafts) with one REST call, no quota hit.
+async function handleGmailSidebarContext(url, env) {
+  const threadId = url.searchParams.get('thread_id');
+  if (!threadId) return json({ error: 'missing thread_id' }, 400);
+  const [threadData, draftsData] = await Promise.all([
+    gmailGet(env, '/threads/' + threadId + '?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject'),
+    gmailGet(env, '/drafts?maxResults=200'),
+  ]);
+  const msgs = threadData.messages || [];
+  const getHdr = (msg, name) => ((msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase()) || {}).value || '';
+  const subject = msgs.length ? getHdr(msgs[0], 'Subject') : '';
+  const fromH   = msgs.length ? getHdr(msgs[0], 'From') : '';
+  const draft = (draftsData.drafts || []).find(d => d.message?.threadId === threadId);
+  let draftId = null, toEmail = '';
+  if (draft) {
+    draftId = draft.id;
+    // Fetch draft metadata to get To header
+    const draftDetail = await gmailGet(env, '/drafts/' + draftId + '?format=metadata&metadataHeaders=To');
+    toEmail = getHdr(draftDetail.message || {}, 'To');
+  }
+  return json({ subject, fromH, draftId, toEmail });
 }
 
 // GET /api/gmail/thread/:id  — returns message metadata (senders, subjects, Message-IDs)
