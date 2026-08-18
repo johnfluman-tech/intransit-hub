@@ -1,6 +1,18 @@
 // ONE-TIME scripts — paste into Apps Script and run as needed
 
 // ─────────────────────────────────────────────────────────────────
+// addForteFromInboxAudit_Aug18() — adds 2 Forte rows from Aug 18 inbox audit
+// Run ONCE in Apps Script editor (uses addToForteSheet so dupe check is auto)
+// ─────────────────────────────────────────────────────────────────
+function addForteFromInboxAudit_Aug18() {
+  // EM7590: John Longo / commdevices.com, 796 pcs, TP $90, US
+  addToForteSheet('EM7590', 796, 90, 'US', '');
+  // LT1801CS8#PBF: Junior / noleadtime.com, 1500 pcs, TP $1.26, US
+  addToForteSheet('LT1801CS8#PBF', 1500, 1.26, 'US', '');
+  Logger.log('Done — 2 rows added (60-day dupe check ran automatically)');
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Run startAutoPopulateHistory() ONCE.
 // It clears col J, then auto-schedules itself every 90 seconds until
 // all rows are done — no manual re-running needed.
