@@ -152,7 +152,7 @@ export default {
       if (p === '/api/gmail/whoami'  && m === 'GET')  { const d = await gmailGet(env, '/profile'); return json(d); }
       if (p === '/api/gmail/sidebar-context' && m === 'GET') return handleGmailSidebarContext(url, env);
       if (p === '/api/gmail/sent-quotes'     && m === 'GET') return handleSentQuotes(url, env);
-      if (p === '/api/gmail/inbox-summary'   && m === 'GET') return handleGmailInboxSummary(env);
+      if (p === '/api/gmail/inbox-summary'   && m === 'GET') return handleGmailInboxSummary(env, url);
       if (p === '/api/gmail/search'  && m === 'GET')  return handleGmailSearch(url, env);
       if (p === '/api/gmail/draft'   && m === 'POST') return handleGmailDraft(request, env);
       if (p === '/api/gmail/drafts'  && m === 'GET')  return handleListGmailDrafts(url, env);
@@ -658,7 +658,22 @@ Only include ||ACTION|| when John has explicitly confirmed. Otherwise just advis
 }
 
 async function handleLearn(request, env) {
-  const { feedback, draft_body, corrected_body, thread_id, subject, sender, mpn, action } = await request.json();
+  const body = await request.json();
+  const { feedback, draft_body, corrected_body, thread_id, subject, sender, mpn, action } = body;
+  const type = body.type || null;
+  const key  = body.key  || null;
+
+  if (type === 'blocked_domain') {
+    if (!key) return json({ error: 'key required for blocked_domain' }, 400);
+    const slug = 'blocked_domain_' + key.replace(/[^a-zA-Z0-9]/g, '_');
+    await env.DB.prepare(
+      `INSERT INTO ai_memory (slug, description, type, body, updated_at)
+       VALUES (?, ?, 'blocked_domain', ?, datetime('now'))
+       ON CONFLICT(slug) DO UPDATE SET body=excluded.body, updated_at=datetime('now')`
+    ).bind(slug, 'Blocked domain: ' + key, 'Domain: ' + key).run();
+    return json({ ok: true, slug });
+  }
+
   if (!feedback) return json({ error: 'feedback required' }, 400);
 
   const extractPrompt = `You are a training system for an AI email agent at Intransit Technologies (OEM excess electronic component distributor).
@@ -3244,7 +3259,11 @@ async function cronProcessCommandQueue(env) {
         if (!inResp.ok)  throw new Error('IN STOCK export failed: ' + inResp.status);
         const oemBytes = new Uint8Array(await oemResp.arrayBuffer());
         const inBytes  = new Uint8Array(await inResp.arrayBuffer());
-        const toB64 = bytes => btoa(String.fromCharCode(...bytes));
+        const toB64 = bytes => {
+          let s = ''; const CHUNK = 8192;
+          for (let i = 0; i < bytes.length; i += CHUNK) s += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+          return btoa(s);
+        };
         const oemB64 = toB64(oemBytes);
         const inB64  = toB64(inBytes);
         const boundary = 'bnd' + Date.now().toString(36);
@@ -3312,15 +3331,20 @@ async function cronProcessCommandQueue(env) {
   }
 }
 
-// GET /api/gmail/inbox-summary — returns unread count + up to 10 recent inbox thread subjects
-async function handleGmailInboxSummary(env) {
+// GET /api/gmail/inbox-summary — returns unread count + recent inbox threads; supports ?pageToken=&maxResults=&q=
+async function handleGmailInboxSummary(env, url) {
+  const pageToken = url ? (url.searchParams.get('pageToken') || '') : '';
+  const maxResults = Math.min(parseInt(url?.searchParams.get('maxResults') || '25', 10), 100);
+  const extraQ = url ? (url.searchParams.get('q') || '') : '';
+  const baseQ = 'in:inbox' + (extraQ ? '+' + extraQ.replace(/ /g, '+') : '');
+  const ptParam = pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '';
   const [unreadRes, recentRes] = await Promise.all([
     gmailGet(env, '/threads?q=in:inbox+is:unread&maxResults=1'),
-    gmailGet(env, '/threads?q=in:inbox&maxResults=10&format=metadata'),
+    gmailGet(env, `/threads?q=${baseQ}&maxResults=${maxResults}${ptParam}`),
   ]);
   const unreadEst = unreadRes.resultSizeEstimate || 0;
   const threads = (recentRes.threads || []).map(t => ({ id: t.id, snippet: t.snippet || '' }));
-  return json({ unread: unreadEst, threads });
+  return json({ unread: unreadEst, threads, nextPageToken: recentRes.nextPageToken || null });
 }
 
 async function cronProcessFixQueue(env) {
