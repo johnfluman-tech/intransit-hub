@@ -59,6 +59,11 @@ export default {
       } catch(e) { return new Response(JSON.stringify({ error: String(e) }), { headers: { 'Content-Type': 'application/json', ...CORS } }); }
     }
 
+    // Sidebar routes use HMAC token auth — no HUB_SECRET header needed (browser requests)
+    if (url.pathname === '/sidebar' && request.method === 'GET') return handleSidebarPage(url, env);
+    const _sidebarApiM = url.pathname.match(/^\/sidebar\/api\/([a-z-]+)$/);
+    if (_sidebarApiM && request.method === 'POST') return handleSidebarApi(request, url, env, _sidebarApiM[1]);
+
     const auth = request.headers.get('Authorization') || '';
     if (auth !== `Bearer ${env.HUB_SECRET}`) return json({ error: 'Unauthorized' }, 401);
 
@@ -158,6 +163,12 @@ export default {
       if (gmailMsgM && m === 'GET') return handleGetGmailMessage(env, gmailMsgM[1]);
       const gmailDraftDelM = p.match(/^\/api\/gmail\/draft\/([^/]+)$/);
       if (gmailDraftDelM && m === 'DELETE') return handleDeleteGmailDraft(env, gmailDraftDelM[1]);
+
+      // Sidebar routes — auth via HMAC token, not HUB_SECRET header
+      if (p === '/api/sidebar/token' && m === 'POST') return handleSidebarToken(request, env);
+      if (p === '/sidebar'           && m === 'GET')  return handleSidebarPage(url, env);
+      const sidebarApiM = p.match(/^\/sidebar\/api\/([a-z-]+)$/);
+      if (sidebarApiM && m === 'POST') return handleSidebarApi(request, url, env, sidebarApiM[1]);
 
       return json({ error: 'Not found' }, 404);
     } catch (err) {
@@ -3405,4 +3416,371 @@ async function cronProcessFixQueue(env) {
       await hubLog(env, 'email_automation', 'error', `processFixQueue: error #${fix.id}: ${msg}`);
     }
   }
+}
+
+// ── Phase 7: Web Sidebar ───────────────────────────────────────────────────────
+
+async function makeSidebarToken(env, threadId) {
+  const exp = Date.now() + 4 * 3600 * 1000;
+  const payload = (threadId || '') + '|' + exp;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.HUB_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return { token: sigB64, tid: threadId || '', exp };
+}
+
+async function verifySidebarToken(env, token, tid, exp) {
+  if (!token || !exp || Date.now() > Number(exp)) return false;
+  const payload = (tid || '') + '|' + exp;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.HUB_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+  const expected = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return token === expected;
+}
+
+async function handleSidebarToken(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  if (auth !== `Bearer ${env.HUB_SECRET}`) return json({ error: 'Unauthorized' }, 401);
+  const { thread_id } = await request.json().catch(() => ({}));
+  const sess = await makeSidebarToken(env, thread_id || '');
+  const url = `https://intransit-hub.intransit-sales.workers.dev/sidebar?token=${sess.token}&tid=${encodeURIComponent(sess.tid)}&exp=${sess.exp}`;
+  return json({ ...sess, url });
+}
+
+async function handleSidebarPage(url, env) {
+  const token = url.searchParams.get('token') || '';
+  const tid   = url.searchParams.get('tid')   || '';
+  const exp   = url.searchParams.get('exp')   || '0';
+  const valid = await verifySidebarToken(env, token, tid, exp);
+  if (!valid) return new Response('<html><body style="font-family:sans-serif;padding:2rem;background:#0f1923;color:#e0e6ef"><h2 style="color:#ff6b6b">Session expired or invalid.</h2><p>Close this tab and click <b>Open Assistant</b> again in Gmail.</p></body></html>', { status: 401, headers: { 'Content-Type': 'text/html' } });
+
+  const sqs = `token=${encodeURIComponent(token)}&tid=${encodeURIComponent(tid)}&exp=${encodeURIComponent(exp)}`;
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Intransit Assistant</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1923;color:#e0e6ef;min-height:100vh;padding:12px}
+h1{font-size:1.1rem;font-weight:700;color:#4a9eff;margin-bottom:4px}
+.sub{font-size:.75rem;color:#7a8fa6;margin-bottom:12px}
+.card{background:#1e2d3d;border-radius:8px;padding:14px;margin-bottom:10px}
+.card h2{font-size:.8rem;font-weight:600;color:#7a8fa6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
+.thread-info{font-size:.82rem;color:#b0c4d8;margin-bottom:4px;word-break:break-word}
+.thread-info span{color:#4a9eff;font-weight:600}
+textarea{width:100%;background:#0f1923;border:1px solid #2a3f55;border-radius:6px;color:#e0e6ef;padding:8px;font-size:.82rem;resize:vertical;min-height:70px;outline:none}
+textarea:focus{border-color:#4a9eff}
+input[type=text]{width:100%;background:#0f1923;border:1px solid #2a3f55;border-radius:6px;color:#e0e6ef;padding:7px 10px;font-size:.82rem;outline:none}
+input[type=text]:focus{border-color:#4a9eff}
+.btn{display:inline-block;padding:7px 14px;border-radius:6px;border:none;font-size:.82rem;font-weight:600;cursor:pointer;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn-primary{background:#4a9eff;color:#fff}
+.btn-danger{background:#e05555;color:#fff}
+.btn-ghost{background:#2a3f55;color:#b0c4d8}
+.btn:disabled{opacity:.4;cursor:default}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.result{margin-top:10px;background:#0f1923;border:1px solid #2a3f55;border-radius:6px;padding:10px;font-size:.8rem;color:#c8daea;white-space:pre-wrap;word-break:break-word;max-height:280px;overflow-y:auto;display:none}
+.result.show{display:block}
+.tag{display:inline-block;background:#2a3f55;color:#7a8fa6;border-radius:4px;padding:2px 7px;font-size:.72rem;margin-left:6px}
+.draft-preview{font-size:.78rem;color:#8aa8c4;margin:6px 0;background:#0f1923;border-radius:5px;padding:8px;border-left:3px solid #4a9eff;max-height:80px;overflow-y:auto}
+.note{font-size:.74rem;color:#5a7a96;margin-top:6px}
+select{background:#0f1923;border:1px solid #2a3f55;border-radius:6px;color:#e0e6ef;padding:6px;font-size:.8rem;width:100%;outline:none}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid #2a3f55;border-top-color:#4a9eff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:5px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status-ok{color:#4caf50}
+.status-err{color:#ff6b6b}
+</style>
+</head>
+<body>
+<h1>Intransit Assistant</h1>
+<div class="sub" id="thread-sub">Loading thread info…</div>
+
+<!-- Thread info card -->
+<div class="card" id="thread-card" style="display:none">
+  <h2>Thread</h2>
+  <div class="thread-info" id="thread-subject"></div>
+  <div class="thread-info" id="thread-from"></div>
+</div>
+
+<!-- Draft card -->
+<div class="card" id="draft-card" style="display:none">
+  <h2>Current Draft <span class="tag" id="draft-label"></span></h2>
+  <div class="draft-preview" id="draft-preview"></div>
+  <div class="note">Use Gmail's Send button to send this draft.</div>
+  <div class="btn-row">
+    <button class="btn btn-ghost" id="wrong-btn" onclick="toggleWrongDraft()">Wrong Draft — Fix</button>
+  </div>
+  <div id="wrong-section" style="display:none;margin-top:10px">
+    <select id="wrong-reason">
+      <option value="">Select what's wrong…</option>
+      <option value="should_be_tp_request">Should be TP request</option>
+      <option value="should_be_msg_checking">Should be MSG_CHECKING</option>
+      <option value="should_be_decline">Should be polite decline</option>
+      <option value="wrong_mpn">Wrong MPN</option>
+      <option value="wrong_price">Wrong price</option>
+      <option value="other">Other</option>
+    </select>
+    <textarea id="wrong-detail" placeholder="Additional details (optional)" style="margin-top:6px;min-height:50px"></textarea>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="submitWrongDraft()">Submit Fix Request</button>
+      <button class="btn btn-ghost" onclick="toggleWrongDraft()">Cancel</button>
+    </div>
+    <div class="result" id="wrong-result"></div>
+  </div>
+</div>
+
+<!-- Ask Claude -->
+<div class="card">
+  <h2>Ask Claude</h2>
+  <textarea id="chat-input" placeholder="Ask about this thread, an MPN, pricing, what to do next…"></textarea>
+  <div class="btn-row">
+    <button class="btn btn-primary" onclick="askClaude()">Ask Claude</button>
+    <button class="btn btn-ghost" onclick="sheetLookup()">Sheet Lookup</button>
+  </div>
+  <div class="result" id="chat-result"></div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card">
+  <h2>Quick Actions</h2>
+  <div class="btn-row">
+    <button class="btn btn-ghost" onclick="processNext()">Process Next Email</button>
+    <button class="btn btn-ghost" onclick="sendNetComp()">Send to NetCOMPONENTS</button>
+  </div>
+  <div class="result" id="actions-result"></div>
+</div>
+
+<!-- Stock Price -->
+<div class="card" id="stock-card">
+  <h2>Stock Price <span class="tag" id="mpn-tag"></span></h2>
+  <input type="text" id="stock-price-input" placeholder="e.g. 0.45">
+  <div class="btn-row">
+    <button class="btn btn-primary" onclick="saveStockPrice()">Save Price</button>
+    <button class="btn btn-ghost" onclick="clearStockPrice()">Clear Price</button>
+  </div>
+  <div class="result" id="stock-result"></div>
+</div>
+
+<!-- Block Domain -->
+<div class="card">
+  <h2>Block Domain</h2>
+  <input type="text" id="block-domain-input" placeholder="e.g. spamchips.com">
+  <div class="btn-row">
+    <button class="btn btn-danger" onclick="blockDomain()">Block Domain</button>
+  </div>
+  <div class="result" id="block-result"></div>
+</div>
+
+<script>
+const TOKEN = ${JSON.stringify(token)};
+const TID   = ${JSON.stringify(tid)};
+const EXP   = ${JSON.stringify(exp)};
+const SQS   = ${JSON.stringify(sqs)};
+
+let currentDraftId = null;
+let currentMPN = null;
+
+async function sapi(action, body) {
+  const r = await fetch('/sidebar/api/' + action + '?' + SQS, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body || {})
+  });
+  return r.json();
+}
+
+function showResult(el, msg, isErr) {
+  el.textContent = typeof msg === 'object' ? JSON.stringify(msg, null, 2) : String(msg);
+  el.className = 'result show ' + (isErr ? 'status-err' : '');
+}
+
+function extractMPN(s) {
+  if (!s) return null;
+  const m = s.match(/\\b([A-Z0-9]{4,}(?:[-][A-Z0-9]+)*)\\b/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+async function init() {
+  if (!TID) { document.getElementById('thread-sub').textContent = 'No thread selected.'; return; }
+  try {
+    const ctx = await sapi('sidebar-context', { thread_id: TID });
+    if (ctx.subject) {
+      document.getElementById('thread-sub').textContent = '';
+      document.getElementById('thread-card').style.display = '';
+      document.getElementById('thread-subject').innerHTML = '<span>Subject:</span> ' + escHtml(ctx.subject);
+      document.getElementById('thread-from').innerHTML = '<span>From:</span> ' + escHtml(ctx.fromH || '');
+      currentMPN = extractMPN(ctx.subject);
+      if (currentMPN) {
+        document.getElementById('mpn-tag').textContent = currentMPN;
+        document.getElementById('chat-input').value = 'What should I do with this RFQ for ' + currentMPN + '?';
+      }
+    }
+    if (ctx.draftId) {
+      currentDraftId = ctx.draftId;
+      document.getElementById('draft-card').style.display = '';
+      document.getElementById('draft-label').textContent = ctx.draftId ? 'Draft exists' : '';
+      document.getElementById('draft-preview').textContent = ctx.draftPreview || '(draft on file — open Gmail to preview)';
+    }
+  } catch(e) { document.getElementById('thread-sub').textContent = 'Error loading thread.'; }
+}
+
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function askClaude() {
+  const msg = document.getElementById('chat-input').value.trim();
+  if (!msg) return;
+  const el = document.getElementById('chat-result');
+  showResult(el, '⏳ Asking Claude…');
+  try {
+    const r = await sapi('chat', { message: msg, thread_id: TID, mpn: currentMPN });
+    showResult(el, r.reply || r.response || r.answer || JSON.stringify(r));
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+async function sheetLookup() {
+  if (!currentMPN) { alert('No MPN detected in subject.'); return; }
+  const el = document.getElementById('chat-result');
+  showResult(el, '⏳ Looking up ' + currentMPN + '…');
+  try {
+    const r = await sapi('sheet-lookup', { mpn: currentMPN });
+    showResult(el, JSON.stringify(r, null, 2));
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+function toggleWrongDraft() {
+  const s = document.getElementById('wrong-section');
+  s.style.display = s.style.display === 'none' ? '' : 'none';
+}
+
+async function submitWrongDraft() {
+  const reason = document.getElementById('wrong-reason').value;
+  const detail = document.getElementById('wrong-detail').value.trim();
+  const el = document.getElementById('wrong-result');
+  if (!currentDraftId) { showResult(el, 'No draft on file for this thread.', true); return; }
+  showResult(el, '⏳ Submitting…');
+  try {
+    const r = await sapi('fix-queue', { type: 'wrong_draft', thread_id: TID, reason, detail, draft_id: currentDraftId });
+    showResult(el, r.ok ? '✓ Fix queued — draft will be corrected within 5 min.' : JSON.stringify(r), !r.ok);
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+async function processNext() {
+  const el = document.getElementById('actions-result');
+  showResult(el, '⏳ Triggering…');
+  try {
+    const r = await sapi('process-next', { thread_id: TID });
+    showResult(el, r.message || JSON.stringify(r));
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+async function sendNetComp() {
+  if (!confirm('Send OEM EXCESS + IN STOCK to NetCOMPONENTS now?')) return;
+  const el = document.getElementById('actions-result');
+  showResult(el, '⏳ Sending…');
+  try {
+    const r = await sapi('command-queue', { type: 'send_datamaster_email', data: {} });
+    showResult(el, r.ok ? '✓ Sent to NetCOMPONENTS.' : JSON.stringify(r), !r.ok);
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+async function saveStockPrice() {
+  const price = document.getElementById('stock-price-input').value.trim();
+  if (!currentMPN || !price) { alert('MPN and price required.'); return; }
+  const el = document.getElementById('stock-result');
+  showResult(el, '⏳ Saving…');
+  try {
+    const r = await sapi('stock-price-save', { mpn: currentMPN, price });
+    showResult(el, r.ok ? '✓ Price saved: ' + currentMPN + ' = $' + price : JSON.stringify(r), !r.ok);
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+async function clearStockPrice() {
+  if (!currentMPN) { alert('No MPN detected.'); return; }
+  const el = document.getElementById('stock-result');
+  showResult(el, '⏳ Clearing…');
+  try {
+    const r = await sapi('stock-price-clear', { mpn: currentMPN });
+    showResult(el, r.ok ? '✓ Price cleared for ' + currentMPN : JSON.stringify(r), !r.ok);
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+async function blockDomain() {
+  const domain = document.getElementById('block-domain-input').value.trim();
+  if (!domain) return;
+  if (!confirm('Block ' + domain + '? Emails from this domain will be ignored.')) return;
+  const el = document.getElementById('block-result');
+  showResult(el, '⏳ Blocking…');
+  try {
+    const r = await sapi('learn', { type: 'blocked_domain', key: domain });
+    showResult(el, r.ok ? '✓ ' + domain + ' blocked.' : JSON.stringify(r), !r.ok);
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+init();
+</script>
+</body>
+</html>`;
+
+  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Frame-Options': 'ALLOWALL' } });
+}
+
+async function handleSidebarApi(request, url, env, action) {
+  const token = url.searchParams.get('token') || '';
+  const tid   = url.searchParams.get('tid')   || '';
+  const exp   = url.searchParams.get('exp')   || '0';
+  const valid = await verifySidebarToken(env, token, tid, exp);
+  if (!valid) return json({ error: 'Session expired — refresh the sidebar.' }, 401);
+
+  const body = await request.json().catch(() => ({}));
+
+  if (action === 'chat') {
+    const fakeReq = new Request(request.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.HUB_SECRET}` }, body: JSON.stringify({ message: body.message, thread_id: body.thread_id || tid, mpn: body.mpn }) });
+    return handleChat(fakeReq, env);
+  }
+  if (action === 'sheet-lookup') {
+    const fakeUrl = new URL(request.url);
+    if (body.mpn) fakeUrl.searchParams.set('mpn', body.mpn);
+    return handleSheetLookup(fakeUrl, env);
+  }
+  if (action === 'sidebar-context') {
+    const fakeUrl = new URL(request.url);
+    fakeUrl.searchParams.set('thread_id', body.thread_id || tid);
+    return handleGmailSidebarContext(fakeUrl, env);
+  }
+  if (action === 'fix-queue') {
+    const fakeReq = new Request(request.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.HUB_SECRET}` }, body: JSON.stringify(body) });
+    return handlePostFixQueue(fakeReq, env);
+  }
+  if (action === 'command-queue') {
+    const cmdBody = { type: body.type, data: JSON.stringify(body.data || {}) };
+    await env.DB.prepare("INSERT INTO command_queue (type, data, status) VALUES (?, ?, 'pending')").bind(cmdBody.type, cmdBody.data).run();
+    await cronProcessCommandQueue(env);
+    return json({ ok: true });
+  }
+  if (action === 'process-next') {
+    await cronScanInbox(env);
+    return json({ ok: true, message: 'Inbox scan triggered — check Gmail in a moment.' });
+  }
+  if (action === 'stock-price-save') {
+    const fakeReq = new Request(request.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.HUB_SECRET}` }, body: JSON.stringify({ mpn: body.mpn, price: body.price }) });
+    return handlePostStockPrice(fakeReq, env);
+  }
+  if (action === 'stock-price-clear') {
+    const fakeUrl = new URL(request.url);
+    if (body.mpn) fakeUrl.searchParams.set('mpn', body.mpn);
+    return handleDeleteStockPrice(fakeUrl, env);
+  }
+  if (action === 'learn') {
+    const fakeReq = new Request(request.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.HUB_SECRET}` }, body: JSON.stringify(body) });
+    return handleLearn(fakeReq, env);
+  }
+  if (action === 'agent-decisions') {
+    const fakeUrl = new URL(request.url);
+    if (tid) fakeUrl.searchParams.set('thread_id', tid);
+    return handleGetAgentDecisions(fakeUrl, env);
+  }
+
+  return json({ error: 'Unknown sidebar action: ' + action }, 400);
 }
