@@ -162,7 +162,7 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(cronProcessFixQueue(env));
+    ctx.waitUntil(Promise.all([cronProcessFixQueue(env), cronScanInbox(env)]));
   }
 };
 
@@ -1400,9 +1400,21 @@ async function handlePatchAgentDecision(request, env, id) {
 
 async function handleGetFixQueue(url, env) {
   const status = url.searchParams.get('status') || 'pending';
-  const { results: rows } = await env.DB.prepare(
-    'SELECT * FROM fix_queue WHERE status = ? ORDER BY created_at ASC LIMIT 50'
-  ).bind(status).all();
+  const typeFilter = url.searchParams.get('type') || '';
+  let sql = 'SELECT * FROM fix_queue WHERE status = ?';
+  const binds = [status];
+  if (typeFilter) {
+    const types = typeFilter.split(',').map(t => t.trim()).filter(Boolean);
+    if (types.length === 1) {
+      sql += ' AND type = ?';
+      binds.push(types[0]);
+    } else if (types.length > 1) {
+      sql += ' AND type IN (' + types.map(() => '?').join(',') + ')';
+      binds.push(...types);
+    }
+  }
+  sql += ' ORDER BY created_at ASC LIMIT 50';
+  const { results: rows } = await env.DB.prepare(sql).bind(...binds).all();
   return json({ fixes: rows || [] });
 }
 
@@ -2313,10 +2325,256 @@ async function hubLog(env, appName, eventType, summary, details = null) {
 // ── Phase 2: Worker-native fix-queue processor ────────────────────────────────
 // Runs via Cloudflare Cron Trigger (every 5 min) AND via POST /api/fix-queue/process.
 // Uses Gmail REST API directly — never touches GmailApp, no daily quota issues.
+// ── Phase 3: Worker inbox scanner ─────────────────────────────────────────────
+
+function decodeGmailBase64(str) {
+  if (!str) return '';
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  try {
+    const binary = atob(b64 + pad);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  } catch(e) { return ''; }
+}
+
+function extractMimeText(payload, wantHtml = false) {
+  if (!payload) return '';
+  const plain = payload.mimeType === 'text/plain' && payload.body?.data;
+  const html  = payload.mimeType === 'text/html'  && payload.body?.data;
+  if (!wantHtml && plain) return decodeGmailBase64(payload.body.data);
+  if (wantHtml  && html)  return decodeGmailBase64(payload.body.data);
+  if (payload.parts) {
+    for (const p of payload.parts) { const t = extractMimeText(p, wantHtml); if (t) return t; }
+  }
+  return '';
+}
+
+function stripQuoted(text) {
+  if (!text) return '';
+  const lines = [], src = text.split('\n');
+  for (const ln of src) {
+    if (ln.trimStart().startsWith('>')) continue;
+    if (/^(From:|On .+ wrote:|-{3,}\s*Original)/i.test(ln.trim())) break;
+    lines.push(ln);
+  }
+  return lines.join('\n').trim();
+}
+
+function extractEmailAddr(raw) {
+  if (!raw) return '';
+  const m = raw.match(/<([^>]+)>/);
+  return m ? m[1] : raw.trim();
+}
+
+function extractMpnHint(subject) {
+  if (!subject) return null;
+  const tokens = subject.split(/[\s,;|\/\[\]()]+/);
+  const cands = tokens.filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 5 && !/^\d+(pcs?|k|m|units?)?$/i.test(t));
+  return cands[0] || null;
+}
+
+async function buildScanPayload(threadId, token, env) {
+  const gGet = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const thread = await gGet('/threads/' + threadId + '?format=full');
+  if (!thread.messages?.length) return null;
+  const msgs = thread.messages;
+  const lastMsg = msgs[msgs.length - 1];
+  const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+  const lastFrom = getHdr(lastMsg, 'From');
+  const lastFromEmail = extractEmailAddr(lastFrom).toLowerCase();
+  if (lastFromEmail.includes('intransittech.com')) return null; // John already replied last
+  const subject = getHdr(msgs[0], 'Subject');
+  const parts = ['Subject: ' + subject, ''];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    const body = stripQuoted(extractMimeText(m.payload)).substring(0, 2000);
+    parts.push('--- Msg ' + (i+1) + ' | From: ' + getHdr(m, 'From') + ' ---');
+    parts.push(body);
+  }
+  let content = parts.join('\n');
+  if (content.length > 8000) content = content.substring(0, 8000) + '\n[truncated]';
+  const firstBuyer = msgs.find(m => {
+    const f = getHdr(m, 'From').toLowerCase();
+    return !f.includes('intransittech.com') && !f.includes('fortetechno.com') && !f.includes('fortecomp.com');
+  });
+  const sender = firstBuyer ? extractEmailAddr(getHdr(firstBuyer, 'From')) : '';
+  const mpnHint = extractMpnHint(subject);
+  const isICS = lastFrom.toLowerCase().includes('icsource') || lastFrom.toLowerCase().includes('autosend');
+  const payload = {
+    thread_id:       threadId,
+    last_message_id: lastMsg.id,
+    _last_msg_id_hdr: getHdr(lastMsg, 'Message-ID'),
+    _last_refs:       getHdr(lastMsg, 'References'),
+    subject,
+    sender,
+    thread_content:  content,
+    current_labels:  thread.labelIds || [],
+    prior_quotes:    'None found',
+  };
+  if (mpnHint && /[A-Za-z]/.test(mpnHint) && /[0-9]/.test(mpnHint) && mpnHint.length >= 5) payload.mpn = mpnHint;
+  if (isICS) payload.icsource_html = extractMimeText(lastMsg.payload, true) || extractMimeText(lastMsg.payload);
+  return payload;
+}
+
+async function executeDecisionCron(decision, payload, token, env) {
+  const action = decision.action;
+  if (!action || action === 'no_action') return;
+
+  const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, {
+    method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(b)
+  }).then(r => r.json());
+
+  const threadId = payload.thread_id;
+
+  if (decision.draft_body) {
+    const replyTo = decision.buyer_email || payload.sender || '';
+    const isRelay = a => !a || a.toLowerCase().includes('intransittech.com') ||
+      a.includes('messagesend@netcomponents') || a.includes('autosend@icsource');
+    if (isRelay(replyTo)) {
+      await hubLog(env, 'email_automation', 'error', 'cronScanInbox: SAFETY ABORT no external replyTo for ' + threadId);
+      return;
+    }
+    const rawSubj = payload.subject || '';
+    const subject = rawSubj.match(/^re:/i) ? rawSubj : 'Re: ' + rawSubj;
+    const msgId = payload._last_msg_id_hdr;
+    const refs  = payload._last_refs;
+    const ccEmail = action === 'bill_handle' ? 'bill.pratt@intransittech.com' : null;
+    const htmlBody = '<div dir="ltr">' + String(decision.draft_body).replace(/\n/g, '<br>') + SIG_HTML + '</div>';
+    const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + replyTo];
+    if (ccEmail) mimeLines.push('Cc: ' + ccEmail);
+    mimeLines.push('Subject: ' + subject, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8');
+    if (msgId) {
+      mimeLines.push('In-Reply-To: ' + msgId);
+      mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim());
+    }
+    mimeLines.push('', htmlBody);
+    const raw = base64url(mimeLines.join('\r\n'));
+    const draft = await gPost('/drafts', { message: { threadId, raw } });
+    if (draft.error) throw new Error('Draft create: ' + JSON.stringify(draft.error));
+    await hubLog(env, 'email_automation', 'draft_created', 'cronScanInbox: draft (' + action + ') for ' + (decision.mpn || '?'), { threadId });
+  }
+
+  // Apply result label
+  await gPost('/threads/' + threadId + '/modify', { addLabelIds: ['Label_166'] });
+
+  // Queue sheet side-effects for Apps Script processSheetQueue
+  if (decision.forte_entry?.mpn && decision.forte_entry?.qty) {
+    await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
+      .bind('forte_add', threadId, payload.subject || null, JSON.stringify(decision.forte_entry)).run();
+  }
+  if (action === 'add_to_stan') {
+    const fe = decision.forte_entry || {};
+    const stanData = { mpn: fe.mpn || decision.mpn, country: fe.country || '', qty: fe.qty || decision.qty, target_price: fe.target_price || decision.target_price };
+    await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
+      .bind('stan_add', threadId, payload.subject || null, JSON.stringify(stanData)).run();
+  }
+  if (action === 'remove_oem' || action === 'david_nostock') {
+    await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
+      .bind('oem_remove', threadId, payload.subject || null, JSON.stringify({ mpn: decision.mpn, row: decision.oem_delete_row || null })).run();
+  }
+}
+
+async function cronScanInbox(env) {
+  // Check enabled flag
+  const cfgRow = await env.DB.prepare("SELECT value FROM rules WHERE type='config' AND key='enabled'").first().catch(() => null);
+  if (cfgRow && cfgRow.value === 'false') return;
+
+  const token = await getGmailToken(env);
+  const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, {
+    method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(b)
+  }).then(r => r.json());
+
+  // Get label IDs
+  const labelsRes = await gGet('/labels');
+  const allLabels = labelsRes.labels || [];
+  const getLblId = name => (allLabels.find(l => l.name === name) || {}).id;
+  const rfqLabelId   = getLblId('oem-rfq-incoming-processed'); // Label_167
+  const tpLabelId    = getLblId('oem-tp-processed');           // Label_166
+  const agentLabelId = getLblId('oem-agent-processed');
+
+  // Get blocked domains from D1
+  const { results: blockRows } = await env.DB.prepare("SELECT key FROM rules WHERE type='blocked_domain'").all();
+  const blockFilter = (blockRows || []).map(r => '-from:' + r.key).join(' ');
+
+  // Gmail search queries (keep short to stay under URL limits)
+  const rfqQ = encodeURIComponent(
+    'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -label:oem-rfq-incoming-processed newer_than:3d ' + blockFilter
+  );
+  const tpQ = encodeURIComponent(
+    'in:inbox (label:oem-rfq-incoming-processed OR from:messagesend@netcomponents.com) -label:oem-tp-processed newer_than:60d ' + blockFilter
+  );
+  const agentQ = encodeURIComponent(
+    'in:inbox -label:oem-agent-processed -label:oem-rfq-incoming-processed newer_than:3d -from:fortetechno.com -from:fortecomp.com ' + blockFilter + ' (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for" OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend OR subject:pcs OR subject:units OR quotation OR "please quote" OR "please check" OR "can you quote" OR "provide the price")'
+  );
+
+  const [rfqRes, tpRes, agentRes] = await Promise.all([
+    gGet('/messages?q=' + rfqQ   + '&maxResults=5'),
+    gGet('/messages?q=' + tpQ    + '&maxResults=5'),
+    gGet('/messages?q=' + agentQ + '&maxResults=5'),
+  ]);
+
+  const rfqThreads   = [...new Set((rfqRes.messages   || []).map(m => m.threadId))];
+  const tpThreads    = [...new Set((tpRes.messages    || []).map(m => m.threadId))];
+  const agentThreads = [...new Set((agentRes.messages || []).map(m => m.threadId))];
+
+  await hubLog(env, 'email_automation', 'run', `cronScanInbox: rfq=${rfqThreads.length} tp=${tpThreads.length} agent=${agentThreads.length}`);
+
+  // Mark threads as scanned immediately — prevents re-queuing on next cron run
+  const labelOps = [];
+  for (const tid of rfqThreads) {
+    const ids = [rfqLabelId].filter(Boolean);
+    if (ids.length) labelOps.push(gPost('/threads/' + tid + '/modify', { addLabelIds: ids }));
+  }
+  for (const tid of tpThreads) {
+    const ids = [tpLabelId].filter(Boolean);
+    if (ids.length) labelOps.push(gPost('/threads/' + tid + '/modify', { addLabelIds: ids }));
+  }
+  for (const tid of agentThreads.filter(t => !rfqThreads.includes(t) && !tpThreads.includes(t))) {
+    const ids = [agentLabelId, rfqLabelId].filter(Boolean);
+    if (ids.length) labelOps.push(gPost('/threads/' + tid + '/modify', { addLabelIds: ids }));
+  }
+  await Promise.all(labelOps);
+
+  // Process up to 3 threads through the email agent (cap for subrequest budget)
+  const toProcess = [
+    ...rfqThreads.map(t => ({ tid: t, source: 'rfq' })),
+    ...tpThreads.map(t => ({ tid: t, source: 'tp' })),
+    ...agentThreads.filter(t => !rfqThreads.includes(t) && !tpThreads.includes(t)).map(t => ({ tid: t, source: 'agent' })),
+  ].slice(0, 3);
+
+  for (const { tid, source } of toProcess) {
+    try {
+      const payload = await buildScanPayload(tid, token, env);
+      if (!payload) continue;
+
+      // Call handleEmailAgent directly (no HTTP round-trip) via fake Request
+      const fakeReq = new Request('https://x/api/email-agent', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + env.HUB_SECRET, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const agentResp = await handleEmailAgent(fakeReq, env);
+      const decision = await agentResp.json();
+
+      if (!decision || decision.error || decision.action === 'no_action') continue;
+      await executeDecisionCron(decision, payload, token, env);
+    } catch(e) {
+      await hubLog(env, 'email_automation', 'error', `cronScanInbox: error tid=${tid}: ${e.message}`);
+    }
+  }
+}
+
+// ── Phase 3 end ────────────────────────────────────────────────────────────────
+
 async function cronProcessFixQueue(env) {
-  // Limit 10 per invocation: each item needs ~3 subrequests + 2 shared = ~32 total, safely under Cloudflare's 50-subrequest cap
+  // Only handle replace_draft — forte_add/stan_add/oem_remove are handled by Apps Script processSheetQueue
   const { results: fixes } = await env.DB.prepare(
-    "SELECT * FROM fix_queue WHERE status='pending' ORDER BY created_at ASC LIMIT 10"
+    "SELECT * FROM fix_queue WHERE status='pending' AND type='replace_draft' ORDER BY created_at ASC LIMIT 10"
   ).all();
   if (!fixes?.length) return;
 

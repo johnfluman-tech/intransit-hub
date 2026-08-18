@@ -4334,20 +4334,74 @@ function sendReviewEmail(partNumber, emailSubject, matches) {
 
 
 
+// ── Phase 3: process Forte/Stan/OEM sheet ops queued by worker cron ──────────
+function processSheetQueue() {
+  var resp = UrlFetchApp.fetch(HUB_URL + '/api/fix-queue?status=pending&type=forte_add,stan_add,oem_remove', {
+    headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+  });
+  var fixes = JSON.parse(resp.getContentText()).fixes || [];
+  if (!fixes.length) return;
+  hubLog('run', 'processSheetQueue: ' + fixes.length + ' item(s)');
+  fixes.forEach(function(fix) {
+    try {
+      var data = JSON.parse(fix.draft_body || '{}');
+      if (fix.type === 'forte_add') {
+        if (data.mpn && data.qty) {
+          var existing = checkForteForMPN(data.mpn, 60);
+          var hasRecent = existing.some(function(r){ return r.recent && r.status.toLowerCase() !== 'closed'; });
+          if (!hasRecent) {
+            addToForteSheet(data.mpn, data.qty, data.target_price || '', data.country || '', '');
+            hubLog('run', 'processSheetQueue: forte_add ' + data.mpn);
+          } else {
+            hubLog('run', 'processSheetQueue: forte_add skipped (60-day dupe) ' + data.mpn);
+          }
+        }
+      } else if (fix.type === 'stan_add') {
+        if (data.mpn) {
+          addToStanSheet(data.mpn, data.country || 'USA', data.qty || '', data.target_price || '');
+          hubLog('run', 'processSheetQueue: stan_add ' + data.mpn);
+        }
+      } else if (fix.type === 'oem_remove') {
+        if (data.row) {
+          deleteOemRow(data.row);
+          hubLog('run', 'processSheetQueue: oem_remove row=' + data.row);
+        } else if (data.mpn) {
+          deletePart(data.mpn, fix.subject || '');
+          hubLog('run', 'processSheetQueue: oem_remove mpn=' + data.mpn);
+        }
+      }
+      UrlFetchApp.fetch(HUB_URL + '/api/fix-queue/' + fix.id, {
+        method: 'PATCH', contentType: 'application/json',
+        headers: { Authorization: 'Bearer ' + HUB_SECRET },
+        payload: JSON.stringify({ status: 'done' }),
+        muteHttpExceptions: true
+      });
+    } catch(e) {
+      hubLog('error', 'processSheetQueue error #' + fix.id + ': ' + e);
+      try {
+        UrlFetchApp.fetch(HUB_URL + '/api/fix-queue/' + fix.id, {
+          method: 'PATCH', contentType: 'application/json',
+          headers: { Authorization: 'Bearer ' + HUB_SECRET },
+          payload: JSON.stringify({ status: 'failed', error: String(e) }),
+          muteHttpExceptions: true
+        });
+      } catch(e2) {}
+    }
+  });
+}
+
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function(t){ScriptApp.deleteTrigger(t);});
-  // Two-phase architecture: fastScanInbox labels threads only (< 10s/run),
-  // processPendingThreads calls Claude API on a slower 5-min schedule.
-  // This prevents runEmailScan from exhausting the 6-hr daily execution quota.
-  ScriptApp.newTrigger('fastScanInbox').timeBased().everyMinutes(1).create();
-  ScriptApp.newTrigger('processPendingThreads').timeBased().everyMinutes(5).create();
+  // Phase 3: inbox scanning + thread processing moved to worker cron (no GmailApp quota).
+  // Apps Script only handles sheet side-effects (forte_add, stan_add, oem_remove).
+  ScriptApp.newTrigger('processSheetQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkDavidNoStockEmails').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processCommandQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('sendDailyCostReport').timeBased().atHour(8).everyDays(1).create();
-  Logger.log('8 triggers installed.');
+  Logger.log('7 triggers installed (fastScanInbox + processPendingThreads removed — now in worker cron).');
 }
 
 
