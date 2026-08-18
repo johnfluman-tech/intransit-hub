@@ -17,6 +17,9 @@ binding = "DB"
 database_name = "intransit-hub-db"
 database_id = "7060a513-ffb5-48b8-982c-dd8edc639b70"
 
+[triggers]
+crons = ["*/5 * * * *"]   # Phase 2: process fix-queue every 5 min via worker cron
+
 # Local dev — copy this block to .dev.vars (gitignored) with real values
 # HUB_SECRET     = "dev_secret"
 # CLAUDE_API_KEY = "sk-ant-..."

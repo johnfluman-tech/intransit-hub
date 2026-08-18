@@ -111,6 +111,12 @@ export default {
       if (p === '/api/fix-queue' && m === 'POST') return handlePostFixQueue(request, env);
       const fixId = p.match(/^\/api\/fix-queue\/(\d+)$/);
       if (fixId && m === 'PATCH') return handlePatchFixQueue(request, env, parseInt(fixId[1]));
+      if (p === '/api/fix-queue/process' && m === 'POST') { await cronProcessFixQueue(env); return json({ ok: true }); }
+      if (p === '/api/fix-queue/retry-failed' && m === 'POST') {
+        await env.DB.prepare("UPDATE fix_queue SET status='pending', error=null, updated_at=datetime('now') WHERE status='failed'").run();
+        await cronProcessFixQueue(env);
+        return json({ ok: true });
+      }
 
       if (p === '/api/stock-prices' && m === 'GET')    return handleGetStockPrice(url, env);
       if (p === '/api/stock-prices' && m === 'POST')   return handlePostStockPrice(request, env);
@@ -154,6 +160,9 @@ export default {
     } catch (err) {
       return json({ error: err.message }, 500);
     }
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(cronProcessFixQueue(env));
   }
 };
 
@@ -2292,4 +2301,93 @@ async function handleListGmailDrafts(url, env) {
   const qs = 'maxResults=' + max + (q ? '&q=' + encodeURIComponent(q) : '');
   const data = await gmailGet(env, '/drafts?' + qs);
   return json({ drafts: (data.drafts || []), total: data.resultSizeEstimate || 0 });
+}
+
+// ── Hub log helper ────────────────────────────────────────────────────────────
+async function hubLog(env, appName, eventType, summary, details = null) {
+  const d = details ? (typeof details === 'string' ? details : JSON.stringify(details)) : null;
+  await env.DB.prepare('INSERT INTO app_logs (app_name, event_type, summary, details) VALUES (?, ?, ?, ?)')
+    .bind(appName, eventType, summary || null, d).run();
+}
+
+// ── Phase 2: Worker-native fix-queue processor ────────────────────────────────
+// Runs via Cloudflare Cron Trigger (every 5 min) AND via POST /api/fix-queue/process.
+// Uses Gmail REST API directly — never touches GmailApp, no daily quota issues.
+async function cronProcessFixQueue(env) {
+  // Limit 10 per invocation: each item needs ~3 subrequests + 2 shared = ~32 total, safely under Cloudflare's 50-subrequest cap
+  const { results: fixes } = await env.DB.prepare(
+    "SELECT * FROM fix_queue WHERE status='pending' ORDER BY created_at ASC LIMIT 10"
+  ).all();
+  if (!fixes?.length) return;
+
+  await hubLog(env, 'email_automation', 'run', `processFixQueue (worker): ${fixes.length} pending`);
+
+  const token = await getGmailToken(env);
+  const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+  const gDel  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+
+  // Fetch existing drafts once to find ones to delete
+  const draftList = await gGet('/drafts?maxResults=200');
+  const allDrafts = draftList.drafts || [];
+
+  for (const fix of fixes) {
+    try {
+      if (fix.type !== 'replace_draft') {
+        await env.DB.prepare("UPDATE fix_queue SET status='done', updated_at=datetime('now') WHERE id=?").bind(fix.id).run();
+        continue;
+      }
+
+      // Delete any existing drafts for this thread
+      for (const d of allDrafts.filter(d => d.message?.threadId === fix.thread_id)) {
+        await gDel('/drafts/' + d.id);
+      }
+
+      // Get thread metadata: last message's Message-ID header + subject
+      const thread = await gGet(`/threads/${fix.thread_id}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=References`);
+      if (thread.error) throw new Error('Thread fetch: ' + JSON.stringify(thread.error));
+      const msgs = thread.messages || [];
+      if (!msgs.length) throw new Error('Thread has no messages');
+
+      const lastMsg = msgs[msgs.length - 1];
+      const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+      const rawSubj = getHdr(lastMsg, 'Subject') || fix.subject || '';
+      const subject = rawSubj.match(/^re:/i) ? rawSubj : 'Re: ' + rawSubj;
+      const msgId   = getHdr(lastMsg, 'Message-ID');
+      const refs    = getHdr(lastMsg, 'References');
+      const toEmail = fix.to_email || getHdr(msgs[0], 'From');
+
+      // Build MIME message
+      const htmlBody = '<div dir="ltr">' + String(fix.draft_body || '').replace(/\n/g, '<br>') + SIG_HTML + '</div>';
+      const mimeLines = [
+        'From: ' + JOHN_FROM,
+        'To: ' + toEmail,
+        'Subject: ' + subject,
+        'MIME-Version: 1.0',
+        'Content-Type: text/html; charset=utf-8'
+      ];
+      if (msgId) {
+        mimeLines.push('In-Reply-To: ' + msgId);
+        mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim());
+      }
+      mimeLines.push('', htmlBody);
+      const raw = base64url(mimeLines.join('\r\n'));
+
+      // Create draft
+      const draft = await gPost('/drafts', { message: { threadId: fix.thread_id, raw } });
+      if (draft.error) throw new Error('Draft create: ' + JSON.stringify(draft.error));
+
+      // Apply oem-tp-processed label (Label_166)
+      await gPost(`/threads/${fix.thread_id}/modify`, { addLabelIds: ['Label_166'] });
+
+      // Mark done in D1
+      await env.DB.prepare("UPDATE fix_queue SET status='done', updated_at=datetime('now') WHERE id=?").bind(fix.id).run();
+      await hubLog(env, 'email_automation', 'run', `processFixQueue: done #${fix.id} draft=${draft.id}`);
+
+    } catch(e) {
+      const msg = String(e?.message || e);
+      await env.DB.prepare("UPDATE fix_queue SET status='failed', error=?, updated_at=datetime('now') WHERE id=?").bind(msg, fix.id).run();
+      await hubLog(env, 'email_automation', 'error', `processFixQueue: error #${fix.id}: ${msg}`);
+    }
+  }
 }
