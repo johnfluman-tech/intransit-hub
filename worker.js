@@ -170,6 +170,7 @@ export default {
     } else {
       ctx.waitUntil(Promise.all([
         cronProcessFixQueue(env),
+        cronProcessCommandQueue(env),
         cronScanInbox(env),
         cronCheckPaymentAdvice(env),
         cronCheckBillRemovals(env),
@@ -2215,6 +2216,7 @@ async function getGmailToken(env) {
 const FORTE_SHEET_ID  = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
 const OEM_SHEET_ID    = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
 const STAN_SHEET_ID   = '1pGRDpkqftQNoEYna53MxRJfUY8jEf5_w32FNa56OUIM';
+const IN_STOCK_ID     = '1iOFHUBiWRgA6EjtO2ujoGpz-8v1qTRkgCXSvCa2Gf54';
 const OEM_SHEET_NAME  = 'sheet1';
 
 async function sheetsGet(env, spreadsheetId, range) {
@@ -3083,6 +3085,219 @@ async function cronSendDailyCostReport(env) {
     await hubLog(env, 'email_automation', 'run', 'cronSendDailyCostReport: sent $' + total.toFixed(4));
   } catch(e) {
     await hubLog(env, 'email_automation', 'error', 'cronSendDailyCostReport: ' + e.message);
+  }
+}
+
+// ── Phase 6: processCommandQueue in worker ────────────────────────────────────
+function normalizeMPN(s) { return String(s || '').trim().toLowerCase().replace(/[-\s]/g, ''); }
+
+async function cronProcessCommandQueue(env) {
+  const BASE = 'https://intransit-hub.intransit-sales.workers.dev';
+  const AUTH = { Authorization: 'Bearer ' + env.HUB_SECRET };
+  const resp = await fetch(BASE + '/api/command-queue?status=pending', { headers: AUTH });
+  const { commands } = await resp.json();
+  if (!commands?.length) return;
+  await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: ${commands.length} pending`);
+
+  const token = await getGmailToken(env);
+  const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const gDel  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+
+  for (const cmd of commands) {
+    try {
+      const data = JSON.parse(cmd.data || '{}');
+      const now = new Date();
+      const today = (now.getMonth()+1) + '/' + now.getDate() + '/' + now.getFullYear();
+
+      if (cmd.type === 'remove_instock_mpn') {
+        const mpn = (data.mpn || '').trim();
+        if (!mpn) throw new Error('No MPN provided');
+        const rows = await sheetsGetAllValues(env, IN_STOCK_ID, null);
+        const toDelete = [];
+        for (let i = 1; i < rows.length; i++) {
+          if (normalizeMPN(rows[i][0]) === normalizeMPN(mpn)) toDelete.push(i + 1);
+        }
+        if (!toDelete.length) throw new Error('MPN not found in InStock: ' + mpn);
+        const meta = await sheetsGetMeta(env, IN_STOCK_ID);
+        const sheetId = meta.sheets?.[0]?.properties?.sheetId ?? 0;
+        toDelete.sort((a,b) => b-a);
+        for (const rn of toDelete) {
+          await sheetsBatchUpdate(env, IN_STOCK_ID, [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rn-1, endIndex: rn } } }]);
+        }
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: remove_instock_mpn ${mpn} (${toDelete.length} rows)`);
+
+      } else if (cmd.type === 'remove_oem_mpn') {
+        const mpn = (data.mpn || '').trim();
+        if (!mpn) throw new Error('No MPN provided');
+        // Stamp col E + delete from OEM sheet
+        const oemRows = await sheetsGetAllValues(env, OEM_SHEET_ID, OEM_SHEET_NAME);
+        const oemMeta = await sheetsGetMeta(env, OEM_SHEET_ID);
+        const oemSheets = oemMeta.sheets || [];
+        const oemSheetMeta = oemSheets.find(s => (s.properties?.title||'').toLowerCase() === OEM_SHEET_NAME.toLowerCase()) || oemSheets[0];
+        const oemSheetId = oemSheetMeta?.properties?.sheetId ?? 0;
+        const toDelete = [];
+        for (let i = 1; i < oemRows.length; i++) {
+          if (normalizeMPN(oemRows[i][0]) === normalizeMPN(mpn)) toDelete.push(i + 1);
+        }
+        if (toDelete.length) {
+          // Stamp col E (index 4) for each matching row before deleting
+          const noStkStamp = 'NO STK ' + today;
+          const stamped = toDelete.map(rn => ({ range: `${OEM_SHEET_NAME}!E${rn}`, values: [[noStkStamp]] }));
+          const stampToken = await getGmailToken(env);
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${OEM_SHEET_ID}/values:batchUpdate`, {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + stampToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ valueInputOption: 'RAW', data: stamped }),
+          });
+          toDelete.sort((a,b) => b-a);
+          for (const rn of toDelete) {
+            await sheetsBatchUpdate(env, OEM_SHEET_ID, [{ deleteDimension: { range: { sheetId: oemSheetId, dimension: 'ROWS', startIndex: rn-1, endIndex: rn } } }]);
+          }
+        }
+        // Update Forte: set col K to "NO STK - today" for non-closed rows matching MPN
+        const forteRows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+        const forteUpdates = [];
+        for (let i = 1; i < forteRows.length; i++) {
+          if (normalizeMPN(forteRows[i][1]) === normalizeMPN(mpn)) {
+            const status = (forteRows[i][10] || '').trim().toUpperCase();
+            if (status !== 'CLOSED') forteUpdates.push({ range: `K${i+1}`, values: [['NO STK - ' + today]] });
+          }
+        }
+        if (forteUpdates.length) {
+          const ft = await getGmailToken(env);
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values:batchUpdate`, {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + ft, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ valueInputOption: 'RAW', data: forteUpdates }),
+          });
+        }
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: remove_oem_mpn ${mpn} (${toDelete.length} oem rows, ${forteUpdates.length} forte updates)`);
+
+      } else if (cmd.type === 'add_forte_entry') {
+        const mpn = (data.mpn || '').trim();
+        const qty = data.qty;
+        if (!mpn) throw new Error('add_forte_entry: mpn required');
+        if (!qty)  throw new Error('add_forte_entry: qty required — cardinal rule');
+        const existing = await workerCheckForteForMPN(env, mpn, 60);
+        const hasRecent = existing.some(r => r.recent && r.status.toLowerCase() !== 'closed');
+        if (hasRecent) {
+          await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: add_forte_entry 60-day skip ${mpn}`);
+        } else {
+          await workerAddToForteSheet(env, mpn, qty, data.tp || '', data.country || '');
+          await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: add_forte_entry ${mpn} qty=${qty}`);
+        }
+
+      } else if (cmd.type === 'delete_draft') {
+        const draftId = (data.draft_id || '').trim();
+        if (!draftId) throw new Error('No draft_id provided');
+        await gDel('/drafts/' + draftId);
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: delete_draft ${draftId}`);
+
+      } else if (cmd.type === 'delete_thread_drafts') {
+        const threadId = (data.thread_id || '').trim();
+        if (!threadId) throw new Error('No thread_id provided');
+        const draftList = await gGet('/drafts?maxResults=200');
+        const matches = (draftList.drafts || []).filter(d => d.message?.threadId === threadId);
+        for (const d of matches) await gDel('/drafts/' + d.id);
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: delete_thread_drafts ${threadId} (${matches.length} deleted)`);
+
+      } else if (cmd.type === 'delete_forte_row') {
+        const rowNum = parseInt(data.row, 10);
+        const expectedMpn = (data.mpn || '').trim();
+        if (!rowNum) throw new Error('No row number provided');
+        const meta = await sheetsGetMeta(env, FORTE_SHEET_ID);
+        const sheetId = meta.sheets?.[0]?.properties?.sheetId ?? 0;
+        if (expectedMpn) {
+          const cell = await sheetsGet(env, FORTE_SHEET_ID, `B${rowNum}`);
+          const actual = ((cell.values || [[]])[0] || [])[0] || '';
+          if (actual.trim().toUpperCase() !== expectedMpn.toUpperCase()) {
+            throw new Error(`delete_forte_row safety check failed: row ${rowNum} MPN is "${actual}" not "${expectedMpn}"`);
+          }
+        }
+        await sheetsBatchUpdate(env, FORTE_SHEET_ID, [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rowNum-1, endIndex: rowNum } } }]);
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: delete_forte_row ${rowNum} (${expectedMpn})`);
+
+      } else if (cmd.type === 'send_datamaster_email') {
+        const BCC = '5BDFA5@stkdst.com,datamaster@netcomponents.com,post@icsource.com,bill@intransittech.com,david@fortetechno.com,Stan@amorelectronics.com';
+        // Get sheet gids
+        const [oemMeta, inMeta] = await Promise.all([sheetsGetMeta(env, OEM_SHEET_ID), sheetsGetMeta(env, IN_STOCK_ID)]);
+        const oemGid = (oemMeta.sheets?.[0]?.properties?.sheetId ?? 0);
+        const inGid  = (inMeta.sheets?.[0]?.properties?.sheetId ?? 0);
+        // Export as XLSX
+        const dlToken = await getGmailToken(env);
+        const [oemResp, inResp] = await Promise.all([
+          fetch(`https://docs.google.com/spreadsheets/d/${OEM_SHEET_ID}/export?format=xlsx&gid=${oemGid}`, { headers: { Authorization: 'Bearer ' + dlToken } }),
+          fetch(`https://docs.google.com/spreadsheets/d/${IN_STOCK_ID}/export?format=xlsx&gid=${inGid}`, { headers: { Authorization: 'Bearer ' + dlToken } }),
+        ]);
+        if (!oemResp.ok) throw new Error('OEM EXCESS export failed: ' + oemResp.status);
+        if (!inResp.ok)  throw new Error('IN STOCK export failed: ' + inResp.status);
+        const oemBytes = new Uint8Array(await oemResp.arrayBuffer());
+        const inBytes  = new Uint8Array(await inResp.arrayBuffer());
+        const toB64 = bytes => btoa(String.fromCharCode(...bytes));
+        const oemB64 = toB64(oemBytes);
+        const inB64  = toB64(inBytes);
+        const boundary = 'bnd' + Date.now().toString(36);
+        const rawParts = [
+          'MIME-Version: 1.0',
+          'From: ' + JOHN_FROM,
+          'To: john.fluman@intransittech.com',
+          'Bcc: ' + BCC,
+          'Subject: Please post',
+          `Content-Type: multipart/mixed; boundary="${boundary}"`,
+          '',
+          '--' + boundary,
+          'Content-Type: text/plain; charset=UTF-8',
+          '',
+          '',
+          '--' + boundary,
+          'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Transfer-Encoding: base64',
+          'Content-Disposition: attachment; filename="OEM_EXCESS.xlsx"',
+          '',
+          oemB64,
+          '--' + boundary,
+          'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Transfer-Encoding: base64',
+          'Content-Disposition: attachment; filename="IN STOCK.xlsx"',
+          '',
+          inB64,
+          '--' + boundary + '--',
+        ].join('\r\n');
+        const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + dlToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ raw: base64url(rawParts) }),
+        });
+        const sendJson = await sendRes.json();
+        if (sendJson.error) throw new Error('send failed: ' + JSON.stringify(sendJson.error));
+        await hubLog(env, 'email_automation', 'run', 'cronProcessCommandQueue: send_datamaster_email sent');
+
+      } else if (cmd.type === 'read_sheet_rows') {
+        const sheetId = (data.sheet_id || '').trim();
+        const rangeName = (data.range || '').trim();
+        const sheetName = (data.sheet_name || '').trim();
+        if (!sheetId || !rangeName) throw new Error('read_sheet_rows: sheet_id and range required');
+        const result = await sheetsGet(env, sheetId, (sheetName ? sheetName + '!' : '') + rangeName);
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: read_sheet_rows ${rangeName} (${(result.values||[]).length} rows)`);
+
+      } else {
+        throw new Error('Unknown command type: ' + cmd.type);
+      }
+
+      await fetch(BASE + '/api/command-queue/' + cmd.id, {
+        method: 'PATCH',
+        headers: { ...AUTH, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'done' }),
+      });
+    } catch(e) {
+      const msg = String(e?.message || e);
+      await hubLog(env, 'email_automation', 'error', `cronProcessCommandQueue: error cmd#${cmd.id} type=${cmd.type}: ${msg}`);
+      await fetch(BASE + '/api/command-queue/' + cmd.id, {
+        method: 'PATCH',
+        headers: { ...AUTH, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'failed', error: msg }),
+      });
+    }
   }
 }
 
