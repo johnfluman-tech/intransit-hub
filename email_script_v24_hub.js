@@ -125,15 +125,17 @@ function addonChat(e) {
       mpn = msgMpn;
     }
 
-    // Full thread text (up to 5 messages, 600 chars each)
+    // Full thread text via worker REST API (no GmailApp quota)
     var fullThread = '';
     try {
-      var thread = GmailApp.getThreadById(threadId);
-      if (thread) {
-        var threadMsgs = thread.getMessages();
-        fullThread = threadMsgs.map(function(m, i) {
-          return 'Message ' + (i+1) + ' | From: ' + m.getFrom() + ' | ' + Utilities.formatDate(m.getDate(), Session.getScriptTimeZone(), 'MMM d, h:mm a') + '\n'
-            + m.getPlainBody().substring(0, 600);
+      var threadResp = UrlFetchApp.fetch(HUB_URL + '/api/gmail/thread/' + encodeURIComponent(threadId), {
+        headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+      });
+      if (threadResp.getResponseCode() === 200) {
+        var threadData = JSON.parse(threadResp.getContentText());
+        var msgs = threadData.messages || [];
+        fullThread = msgs.slice(0, 5).map(function(m, i) {
+          return 'Message ' + (i+1) + ' | From: ' + (m.from || '') + ' | ' + (m.date || '') + '\n' + (m.snippet || '').substring(0, 600);
         }).join('\n\n---\n\n');
       }
     } catch(e2) { fullThread = '(thread fetch error: ' + e2 + ')'; }
@@ -154,18 +156,19 @@ function addonChat(e) {
       } catch(e3) { Logger.log('addonChat web app error: ' + e3); }
     }
 
-    // Inbox summary — other threads needing attention (quick scan, not full content)
+    // Inbox summary via worker REST API (no GmailApp quota)
     var inboxSummary = '';
     try {
-      var inboxThreads = GmailApp.search('in:inbox -from:intransittech.com -label:oem-rfq-incoming-processed newer_than:3d', 0, 8);
-      if (inboxThreads.length) {
-        inboxSummary = inboxThreads.map(function(t) {
-          var m = t.getMessages();
-          var last = m[m.length - 1];
-          return Utilities.formatDate(last.getDate(), Session.getScriptTimeZone(), 'MMM d h:mm a')
-            + ' | From: ' + last.getFrom().replace(/<.*>/, '').trim()
-            + ' | ' + t.getFirstMessageSubject().substring(0, 80);
-        }).join('\n');
+      var inboxResp = UrlFetchApp.fetch(HUB_URL + '/api/gmail/inbox-summary', {
+        headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
+      });
+      if (inboxResp.getResponseCode() === 200) {
+        var inboxData = JSON.parse(inboxResp.getContentText());
+        var inboxThreads = inboxData.threads || [];
+        if (inboxThreads.length) {
+          inboxSummary = 'Unread: ~' + (inboxData.unread || 0) + '\n'
+            + inboxThreads.map(function(t) { return t.id + ': ' + (t.snippet || '').substring(0, 100); }).join('\n');
+        }
       }
     } catch(e4) { Logger.log('addonChat inbox scan error: ' + e4); }
 
@@ -882,8 +885,7 @@ function addonProcessNext(e) {
             .setText('This email is queued. Draft will appear in Drafts within ~1 minute.\nClose and reopen this panel to see results.')))
         .build();
     } else {
-      // Homepage: scan inbox for any new threads
-      fastScanInbox();
+      // Homepage: worker cron handles inbox scanning automatically
       statusCard = buildHomepageCard();
     }
     return CardService.newActionResponseBuilder()
@@ -1719,16 +1721,6 @@ function applyRemoteConfig(cfg) {
 }
 
 
-function archiveBlockedDomains() {
-  var BLOCKED_DOMAINS = getBlockedDomains();
-  BLOCKED_DOMAINS.forEach(function(domain) {
-    var ids = gmailSearchREST('in:inbox from:' + domain, 50);
-    if (!ids.length) return;
-    ids.forEach(function(tid) { gmailArchiveThread_(tid); });
-    hubLog('run', 'archiveBlockedDomains: archived ' + ids.length + ' from ' + domain);
-  });
-}
-
 
 function buildAddonError(msg) {
   return CardService.newCardBuilder()
@@ -2473,157 +2465,8 @@ function callWorker(payload) {
 }
 
 
-// ── Trigger 8 — Bill netcomp removals → delete from OEM EXCESS
-function checkBillNetcompRemovals() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'checkBillNetcompRemovals: disabled'); return; }
-  var BILL_EMAIL = 'bill.pratt@intransittech.com';
-  var DONE_LABEL = 'oem-bill-removal-processed';
-  var query = 'from:' + BILL_EMAIL +
-    ' (netcomp OR netcomponents) (remove OR removing OR removed)' +
-    ' -label:' + DONE_LABEL + ' newer_than:14d';
-  var threadIds = gmailSearchREST(query, 20);
-  hubLog('run', 'checkBillNetcompRemovals: ' + threadIds.length + ' thread(s)');
-  if (!threadIds.length) return;
-
-  threadIds.forEach(function(tid) {
-    var thread = GmailApp.getThreadById(tid);
-    if (!thread) return;
-    var msgs    = thread.getMessages();
-    var lastMsg = msgs[msgs.length - 1];
-    var subject = thread.getFirstMessageSubject();
-
-    // Primary: look for @John Fluman -MPN tag in the message body (most reliable)
-    var mpn = null;
-    try {
-      var bodyText = lastMsg.getPlainBody();
-      var tagMatch = bodyText.match(/@John\s+Fluman\s*[-–]\s*([A-Z0-9][A-Z0-9\-\.\/]{2,})/i);
-      if (tagMatch) mpn = tagMatch[1].trim();
-    } catch(e) {}
-
-    // Fallback 1: extract from subject using standard MPN parser
-    if (!mpn) mpn = extractMPNFromSubject(subject);
-    // Fallback 2: raw subject for all-digit/dash MPNs (e.g. 900-13448-0020-000).
-    // extractMPN() requires letters; Bill subjects are often just the bare part number.
-    // Spaces prevent descriptive subjects from matching; length cap rules out long garbage.
-    if (!mpn) {
-      var rawSubj = subject.replace(/^(RE|FW|FWD):\s*/gi, '').trim();
-      if (rawSubj.length >= 4 && rawSubj.length <= 40 && /^[A-Z0-9][A-Z0-9\-\.\/]{3,}$/i.test(rawSubj)) {
-        mpn = rawSubj;
-      }
-    }
-
-    if (mpn) {
-      var result = deletePart(mpn, subject);
-      var replyBody = buildSimpleHTML('Got it - removing ' + mpn + ' from OEM EXCESS now.');
-      // Reply in-thread to Bill's message
-      createThreadedDraft(BILL_EMAIL, 'Re: ' + subject, replyBody, lastMsg.getId(), thread.getId(), null);
-      hubLog('run', 'Bill netcomp removal [' + result + ']: ' + mpn, { mpn: mpn });
-      Logger.log('Bill removal [' + result + ']: ' + mpn);
-      gmailArchiveThread_(tid);
-    } else {
-      Logger.log('Bill removal: could not extract MPN from body or subject: ' + subject);
-      GmailApp.sendEmail(NOTIFY_EMAIL, 'OEM EXCESS: Bill removal — could not extract MPN',
-        'Subject: "' + subject + '"\nhttps://mail.google.com/mail/u/0/#inbox/' + thread.getId());
-    }
-    gmailModifyThread_(tid, [DONE_LABEL], []);
-  });
-}
 
 
-// ── Trigger 1 — David no-stock emails ────────────────────────
-function checkDavidNoStockEmails() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) return;
-  // Dual query: all-mail search (for Gmail-filtered/archived emails) + explicit inbox search
-  // (Gmail filter occasionally misses David emails, leaving them in inbox only).
-  // oem-rfq-incoming-processed is applied to ALL processed David threads (no-stk or not)
-  // so they're properly excluded on re-runs. oem-nostock-seen can't be used — Gmail filter
-  // auto-applies it to every David email regardless of processing status.
-  var seenIds = {};
-  var allIds = [];
-  // GmailApp.search() silently returns 0 results with parenthesized OR — split into separate calls per address
-  var q1a = 'from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed newer_than:14d';
-  var q1b = 'from:david@fortecomp.com -label:oem-rfq-incoming-processed newer_than:14d';
-  var q2a = 'in:inbox from:' + DAVID_EMAIL + ' -label:oem-rfq-incoming-processed';
-  var q2b = 'in:inbox from:david@fortecomp.com -label:oem-rfq-incoming-processed';
-  GmailApp.search(q1a, 0, 50).concat(GmailApp.search(q1b, 0, 50))
-    .concat(GmailApp.search(q2a, 0, 50)).concat(GmailApp.search(q2b, 0, 50))
-    .forEach(function(t) {
-    var tid = t.getId();
-    if (!seenIds[tid]) { seenIds[tid] = true; allIds.push(tid); }
-  });
-  hubLog('run', 'checkDavidNoStockEmails: ' + allIds.length + ' thread(s)');
-  if (!allIds.length) return;
-  var noStkKeywords = ['no stk', 'no stock', 'stk sold', 'stock sold', 'cant find', 'cant share', 'cannot find', 'removed', 'no inventory',
-                       'sold lying commie', 'soly lying commie', 'lying commie', 'sold out', 'all sold', 'no longer have'];
-  allIds.forEach(function(tid) {
-    try {
-      var thread = GmailApp.getThreadById(tid);
-      if (!thread) { gmailModifyThread_(tid, ['oem-rfq-incoming-processed'], []); return; }
-      var msg = thread.getMessages()[thread.getMessageCount() - 1];
-      var subject = msg.getSubject();
-      var subjectLower = subject.toLowerCase();
-      var bodySnippet = msg.getPlainBody().toLowerCase().substring(0, 300);
-      var isNoStk = noStkKeywords.some(function(kw) { return subjectLower.indexOf(kw) >= 0 || bodySnippet.indexOf(kw) >= 0; });
-      if (!isNoStk) {
-        // Not a no-stk — mark processed so it stops appearing in search results
-        gmailModifyThread_(tid, ['oem-rfq-incoming-processed'], []);
-        return;
-      }
-      // Stamp Forte col K directly by row number extracted from subject (#XXXX)
-      // This runs before processThread so it always fires even if worker decision fails
-      var rowMatch = subject.match(/#(\d{3,5})/);
-      if (rowMatch) {
-        var forteRow = parseInt(rowMatch[1], 10);
-        try {
-          var forteSheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
-          var statusCell = forteSheet.getRange(forteRow, FORTE_STATUS_COL + 1);
-          var currentVal = String(statusCell.getValue()).trim();
-          if (currentVal.toUpperCase().indexOf('NO STK') === -1 && currentVal.toUpperCase() !== 'CLOSED') {
-            var stamp = 'NO STK - ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
-            statusCell.clearDataValidations();
-            statusCell.setValue(stamp);
-            statusCell.setBackground('#000000'); statusCell.setFontColor('#FFFFFF'); statusCell.setFontWeight('bold');
-            hubLog('run', 'checkDavidNoStockEmails: stamped Forte row ' + forteRow + ' directly from subject', {});
-          }
-        } catch(e) {
-          hubLog('error', 'checkDavidNoStockEmails: Forte row stamp error row ' + forteRow + ': ' + e, {});
-        }
-      }
-      // Bypass worker for David no-stk — action is always "Ok, removed from listing."
-      // Using worker was causing timeouts/failures that left threads unlabeled.
-      try {
-        var replyMsg = thread.getMessages()[thread.getMessageCount() - 1];
-        var bodyText = 'Ok, removed from listing.';
-        var bodyHtml = '<p>' + bodyText + '</p>' + getSignatureHTML();
-        replyMsg.createDraftReply(bodyText, { htmlBody: bodyHtml });
-        hubLog('run', 'checkDavidNoStockEmails: draft created for ' + subject, {});
-      } catch(eDraft) {
-        hubLog('error', 'checkDavidNoStockEmails: draft creation error: ' + eDraft, {});
-      }
-      // Queue OEM EXCESS removal
-      try {
-        var mpnToRemove = extractMPNFromSubject(subject) || extractMPN(subject);
-        if (mpnToRemove) {
-          UrlFetchApp.fetch(HUB_URL + '/api/command-queue', {
-            method: 'post', contentType: 'application/json',
-            headers: { Authorization: 'Bearer ' + HUB_SECRET },
-            payload: JSON.stringify({ type: 'remove_oem_mpn', mpn: mpnToRemove }),
-            muteHttpExceptions: true
-          });
-          hubLog('run', 'checkDavidNoStockEmails: queued remove_oem_mpn for ' + mpnToRemove, {});
-        }
-      } catch(eOem) {
-        hubLog('error', 'checkDavidNoStockEmails: OEM queue error: ' + eOem, {});
-      }
-      gmailModifyThread_(tid, [INCOMING_LABEL, 'oem-rfq-incoming-processed'], []);
-      gmailArchiveThread_(tid);
-    } catch(e) {
-      hubLog('error', 'checkDavidNoStockEmails thread ' + tid + ' error: ' + e, {});
-    }
-  });
-}
 
 
 function checkForteForMPN(mpn, days) {
@@ -2643,44 +2486,6 @@ function checkForteForMPN(mpn, days) {
 }
 
 
-// ── Forte no-stock reply handler ──────────────────────────────
-
-
-
-// ── Trigger 6 — Payment Advice → forward to Deb ──────────────
-function checkInboxForPaymentAdvice() {
-  var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'checkInboxForPaymentAdvice: disabled via hub config'); return; }
-  var query = 'in:inbox subject:"payment advice" -label:oem-payment-forwarded';
-  var threadIds = gmailSearchREST(query, 10);
-  hubLog('run', 'checkInboxForPaymentAdvice: ' + threadIds.length + ' thread(s)');
-  if (!threadIds.length) return;
-  threadIds.forEach(function(tid) {
-    var thread = GmailApp.getThreadById(tid);
-    if (!thread) return;
-    var messages = thread.getMessages();
-    var firstMsg = messages[0];
-    if (firstMsg.getFrom().toLowerCase().indexOf('intransittech.com') >= 0) {
-      gmailModifyThread_(tid, ['oem-payment-forwarded'], []);
-      Logger.log('Payment advice skipped — internal sender: ' + firstMsg.getFrom());
-      return;
-    }
-    var recipients = (firstMsg.getTo() + ',' + (firstMsg.getCc() || '')).toLowerCase();
-    if (recipients.indexOf(DEB_EMAIL.toLowerCase()) >= 0) {
-      gmailModifyThread_(tid, ['oem-payment-forwarded'], []);
-      Logger.log('Payment advice skipped — Deb already a recipient: ' + firstMsg.getSubject());
-      return;
-    }
-    try {
-      firstMsg.forward(DEB_EMAIL);
-      hubLog('run', 'Payment advice forwarded: ' + firstMsg.getSubject());
-      Logger.log('Payment advice forwarded to Deb: ' + firstMsg.getSubject());
-    } catch(e) {
-      Logger.log('Forward error: ' + e.toString());
-    }
-    gmailModifyThread_(tid, ['oem-payment-forwarded'], []);
-  });
-}
 
 
 
@@ -3098,99 +2903,6 @@ function extractNetcompRFQ(messages) {
 }
 
 
-// ── Two-phase scanning: fastScanInbox (1 min, labels only) ────
-// ── + processPendingThreads (5 min, Claude calls) ─────────────
-// Root cause of quota exhaustion: runEmailScan calls Claude API
-// synchronously every minute. Each processThread() takes 30-60s,
-// so 10 threads/run = up to 10 min, blowing the 6-min exec limit
-// and consuming the 6-hr daily quota within hours. Fix: label-only
-// fast scan every minute, Claude calls on a slower 5-min trigger.
-
-function fastScanInbox() {
-  hubLog('run', 'fastScanInbox: starting');
-  try {
-  var _cfg = getCachedRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) { hubLog('run', 'fastScanInbox: disabled'); return; }
-  try { archiveBlockedDomains(); } catch(e) {}
-  var BLOCKED_DOMAINS = getBlockedDomains();
-  var blockFilter = BLOCKED_DOMAINS.map(function(d){ return '-from:' + d; }).join(' ');
-
-  // Pre-warm PENDING_LABEL via GmailApp so getLabelId_ always hits the in-memory cache.
-  // Without this: if gmailREST_('/labels') fails, getLabelId_(PENDING_LABEL) returns null,
-  // filter(Boolean) in gmailModifyThread_ silently drops it, and threads get
-  // oem-rfq-incoming-processed but NOT PENDING_LABEL — permanently orphaned.
-  var _plObj = GmailApp.getUserLabelByName(PENDING_LABEL) || GmailApp.createLabel(PENDING_LABEL);
-  _gmailLabelCache_[PENDING_LABEL] = _plObj.getId();
-
-  // All label lookups via REST (cached in Script Properties — zero premium gmail quota cost)
-  var rfqLabelId     = getLabelId_('oem-rfq-incoming-processed');
-  var tpLabelId      = getLabelId_('oem-tp-processed');
-  var agentLabelId   = getLabelId_(AGENT_LABEL);
-  var pendingLabelId = getLabelId_(PENDING_LABEL);
-
-  var rfqQ = 'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com OR to:rfq@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -label:oem-rfq-incoming-processed ' + blockFilter;
-  var rfqCount = 0;
-  // rfqQ is too long for URLFetch URL limit — use GmailApp.search() directly (no URL limit)
-  var rfqIds = [];
-  try { rfqIds = GmailApp.search(rfqQ, 0, 50).map(function(t){ return t.getId(); }); } catch(e) { hubLog('error', 'rfqQ search failed: ' + e); }
-  hubLog('run', 'fastScanInbox: rfqQ=' + rfqIds.length);
-  rfqIds.forEach(function(tid) {
-    var meta = gmailGetThreadMeta_(tid);
-    if (meta.senders.some(function(s){ return s.indexOf(JOHN_EMAIL) >= 0; })) return;
-    if (meta.senders.length && meta.senders[meta.senders.length-1].indexOf('intransittech.com') >= 0) return;
-    gmailModifyThread_(tid, ['oem-rfq-incoming-processed', PENDING_LABEL], []);
-    rfqCount++;
-  });
-
-  // Also catch netCOMPONENTS threads where John manually replied before automation labeled them
-  // (original tpQ requires label:oem-rfq-incoming-processed which never got applied in those cases)
-  var tpQ = 'in:inbox (label:oem-rfq-incoming-processed OR from:messagesend@netcomponents.com) -label:oem-tp-processed -label:' + PENDING_LABEL + ' newer_than:60d ' + blockFilter;
-  var tpCount = 0;
-  var tpIds = [];
-  try { tpIds = GmailApp.search(tpQ, 0, 50).map(function(t){ return t.getId(); }); } catch(e) { hubLog('error', 'tpQ search failed: ' + e); }
-  tpIds.forEach(function(tid) {
-    var meta = gmailGetThreadMeta_(tid);
-    if (meta.senders.length && meta.senders[meta.senders.length-1].indexOf(JOHN_EMAIL) >= 0) return;
-    var buyerCount = meta.senders.filter(function(s){ return s.indexOf(JOHN_EMAIL) < 0 && s.indexOf('intransittech') < 0; }).length;
-    if (buyerCount < 2) return;
-    // Must have at least one John message — confirms we already sent a TP request.
-    // Prevents threads with only the original buyer RFQ from being mis-routed as TP replies.
-    var hasJohnMsg = meta.senders.some(function(s){ return s.indexOf(JOHN_EMAIL) >= 0 || s.indexOf('intransittech') >= 0; });
-    if (!hasJohnMsg) return;
-    gmailModifyThread_(tid, ['oem-tp-processed', PENDING_LABEL], []);
-    tpCount++;
-  });
-
-  // Bug 24 fix: require subject/sender keyword so consumer notification emails
-  // (receipts, order confirmations, restaurant alerts) are not sent to the AI worker.
-  var agentQ = 'in:inbox -label:' + AGENT_LABEL + ' -label:oem-rfq-incoming-processed -label:' + PENDING_LABEL +
-    ' newer_than:3d -from:fortetechno.com -from:fortecomp.com ' + blockFilter +
-    ' (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for"' +
-    ' OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts' +
-    ' OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend' +
-    ' OR subject:pcs OR subject:units' +
-    ' OR quotation OR "looking for" OR "please quote" OR "please check" OR "can you quote" OR "provide the price")';
-  var agentCount = 0;
-  var agentIds = [];
-  try { agentIds = GmailApp.search(agentQ, 0, 50).map(function(t){ return t.getId(); }); } catch(e) { hubLog('error', 'agentQ search failed: ' + e); }
-  agentIds.forEach(function(tid) {
-    var meta = gmailGetThreadMeta_(tid);
-    var firstSender = (meta.senders[0] || '').toLowerCase();
-    if (firstSender.indexOf('intransittech.com') >= 0 || firstSender.indexOf('fortetechno.com') >= 0 || firstSender.indexOf('fortecomp.com') >= 0) {
-      gmailModifyThread_(tid, [AGENT_LABEL], []);
-      return;
-    }
-    if (rfqLabelId && meta.labelIds.indexOf(rfqLabelId) >= 0) {
-      gmailModifyThread_(tid, [AGENT_LABEL], []);
-      return;
-    }
-    gmailModifyThread_(tid, [AGENT_LABEL, 'oem-rfq-incoming-processed', PENDING_LABEL], []);
-    agentCount++;
-  });
-
-  hubLog('run', 'fastScanInbox: done rfq:' + rfqCount + ' tp:' + tpCount + ' agent:' + agentCount);
-  } catch(e) { hubLog('error', 'fastScanInbox CRASHED: ' + e.toString()); }
-}
 
 
 // ── OEM EXCESS delete ─────────────────────────────────────────
@@ -3276,35 +2988,14 @@ function getOrCreateDeletedSheet(ss) {
 function getRecentSentQuotesFull(mpn, maxThreads) {
   if (!mpn) return 'No MPN provided.';
   try {
-    var max = maxThreads || 5;
-    // Multi-strategy: subject search first (more precise), then full-text phrase, then loose (Gmail tokenizes hyphens)
-    var threads = GmailApp.search('in:sent subject:"' + mpn + '"', 0, max);
-    if (!threads.length) threads = GmailApp.search('in:sent "' + mpn + '"', 0, max);
-    if (!threads.length) {
-      var loose = mpn.replace(/-/g, ' ');
-      threads = GmailApp.search('in:sent subject:(' + loose + ')', 0, max);
-    }
-    if (!threads.length) return 'No prior sent emails found for ' + mpn + '.';
-    var out = [];
-    threads.forEach(function(thread) {
-      var msgs = thread.getMessages();
-      // Collect all John messages; prefer the most recent one with a dollar price,
-      // fall back to the most recent John message without one.
-      var withPrice = null, withoutPrice = null;
-      for (var i = msgs.length - 1; i >= 0; i--) {
-        var msg = msgs[i];
-        if (msg.getFrom().indexOf(JOHN_EMAIL) < 0) continue;
-        var body = stripQuotedLines(msg.getPlainBody()).substring(0, 350);
-        var dateStr = Utilities.formatDate(msg.getDate(), Session.getScriptTimeZone(), 'MMM d, yyyy');
-        var entry = '[Sent ' + dateStr + ' to ' + msg.getTo() + ']\n' + body;
-        if (!withPrice && /\$\s*\d/.test(body)) { withPrice = entry; }
-        if (!withoutPrice) { withoutPrice = entry; }
-        if (withPrice && withoutPrice) break;
-      }
-      var best = withPrice || withoutPrice;
-      if (best) out.push(best);
+    var resp = UrlFetchApp.fetch(HUB_URL + '/api/gmail/sent-quotes?mpn=' + encodeURIComponent(mpn) + '&max=' + (maxThreads || 5), {
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      muteHttpExceptions: true
     });
-    return out.length ? out.join('\n\n') : 'No sent messages from John found for ' + mpn + '.';
+    if (resp.getResponseCode() !== 200) return 'Email search error: HTTP ' + resp.getResponseCode();
+    var data = JSON.parse(resp.getContentText());
+    var quotes = data.quotes || [];
+    return quotes.length ? quotes.join('\n\n') : 'No prior sent emails found for ' + mpn + '.';
   } catch(e) {
     return 'Email search error: ' + e.toString();
   }
@@ -3988,38 +3679,6 @@ function processNextEmailManual() {
 }
 
 
-function processPendingThreads() {
-  var _cfg = getCachedRemoteConfig(); applyRemoteConfig(_cfg);
-  if (_cfg.enabled === false) return;
-  // Use GmailApp label lookup (always authorized) instead of gmailSearchREST
-  // which silently returns [] when ScriptApp.getOAuthToken() lacks Gmail REST scope.
-  var threadIds = [];
-  try {
-    var _lbl = GmailApp.getUserLabelByName(PENDING_LABEL);
-    if (_lbl) threadIds = _lbl.getThreads(0, 10).map(function(t){ return t.getId(); });
-  } catch(e) {
-    hubLog('error', 'processPendingThreads: label lookup failed: ' + e);
-    return;
-  }
-  hubLog('run', 'processPendingThreads: found ' + threadIds.length + ' pending');
-  if (!threadIds.length) return;
-  hubLog('run', 'processPendingThreads: processing ' + threadIds.length + ' thread(s)');
-  threadIds.forEach(function(tid) {
-    var t = GmailApp.getThreadById(tid);
-    if (!t) { gmailModifyThread_(tid, [], [PENDING_LABEL]); return; }
-    var msgs = t.getMessages();
-    var lastMsg = msgs[msgs.length - 1];
-    if (lastMsg.getFrom().indexOf(JOHN_EMAIL) >= 0) { gmailModifyThread_(tid, [], [PENDING_LABEL]); return; }
-    if (lastMsg.getFrom().indexOf('intransittech.com') >= 0) { gmailModifyThread_(tid, [], [PENDING_LABEL]); return; }
-    try {
-      processThread(t);
-      gmailModifyThread_(tid, [], [PENDING_LABEL]); // only remove label on success — keeps retry on failure
-    } catch(e) {
-      hubLog('error', 'processPendingThreads error (will retry next run): ' + e);
-      // PENDING_LABEL stays → processPendingThreads will retry on next trigger fire
-    }
-  });
-}
 
 
 function processThread(thread) {
@@ -4174,45 +3833,6 @@ function searchStanSheet(mpn) {
 
 
 
-function sendDailyCostReport() {
-  try {
-    var resp = UrlFetchApp.fetch(HUB_URL + '/api/cost-report?days=1', {
-      method: 'GET', headers: { Authorization: 'Bearer ' + HUB_SECRET },
-      muteHttpExceptions: true
-    });
-    if (resp.getResponseCode() !== 200) { Logger.log('cost-report HTTP ' + resp.getResponseCode()); return; }
-    var data = JSON.parse(resp.getContentText());
-    var rows = data.rows || [];
-    var total = data.total_cost_usd || 0;
-
-    var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMMM d, yyyy');
-    var lines = ['Intransit Hub — Daily API Cost Report', 'Date: ' + today, ''];
-
-    if (!rows.length) {
-      lines.push('No API calls recorded in the last 24 hours.');
-    } else {
-      lines.push('TOTAL COST: $' + total.toFixed(4));
-      lines.push('');
-      lines.push('Breakdown:');
-      rows.forEach(function(r) {
-        var modelShort = r.model.indexOf('haiku') >= 0 ? 'Haiku' : 'Sonnet';
-        lines.push('  ' + r.endpoint + ' [' + modelShort + ']');
-        lines.push('    Calls:  ' + r.calls);
-        lines.push('    Tokens: ' + Number(r.total_input).toLocaleString() + ' in / ' + Number(r.total_output).toLocaleString() + ' out');
-        lines.push('    Cost:   $' + (r.total_cost || 0).toFixed(4));
-        lines.push('');
-      });
-    }
-    lines.push('—');
-    lines.push('Intransit Hub Automation');
-
-    var subject = 'Intransit Hub — Daily Cost ($' + total.toFixed(4) + ') ' + today;
-    GmailApp.sendEmail('john.fluman@intransittech.com', subject, lines.join('\n'));
-    Logger.log('Daily cost report sent: $' + total.toFixed(4));
-  } catch(e) {
-    Logger.log('sendDailyCostReport error: ' + e);
-  }
-}
 
 
 // Run this NOW to send the Please Post email immediately (bypasses command queue).
@@ -4323,72 +3943,16 @@ function sendReviewEmail(partNumber, emailSubject, matches) {
 
 
 
-// ── Phase 3: process Forte/Stan/OEM sheet ops queued by worker cron ──────────
-function processSheetQueue() {
-  var resp = UrlFetchApp.fetch(HUB_URL + '/api/fix-queue?status=pending&type=forte_add,stan_add,oem_remove', {
-    headers: { Authorization: 'Bearer ' + HUB_SECRET }, muteHttpExceptions: true
-  });
-  var fixes = JSON.parse(resp.getContentText()).fixes || [];
-  if (!fixes.length) return;
-  hubLog('run', 'processSheetQueue: ' + fixes.length + ' item(s)');
-  fixes.forEach(function(fix) {
-    try {
-      var data = JSON.parse(fix.draft_body || '{}');
-      if (fix.type === 'forte_add') {
-        if (data.mpn && data.qty) {
-          var existing = checkForteForMPN(data.mpn, 60);
-          var hasRecent = existing.some(function(r){ return r.recent && r.status.toLowerCase() !== 'closed'; });
-          if (!hasRecent) {
-            addToForteSheet(data.mpn, data.qty, data.target_price || '', data.country || '', '');
-            hubLog('run', 'processSheetQueue: forte_add ' + data.mpn);
-          } else {
-            hubLog('run', 'processSheetQueue: forte_add skipped (60-day dupe) ' + data.mpn);
-          }
-        }
-      } else if (fix.type === 'stan_add') {
-        if (data.mpn) {
-          addToStanSheet(data.mpn, data.country || 'USA', data.qty || '', data.target_price || '');
-          hubLog('run', 'processSheetQueue: stan_add ' + data.mpn);
-        }
-      } else if (fix.type === 'oem_remove') {
-        if (data.row) {
-          deleteOemRow(data.row);
-          hubLog('run', 'processSheetQueue: oem_remove row=' + data.row);
-        } else if (data.mpn) {
-          deletePart(data.mpn, fix.subject || '');
-          hubLog('run', 'processSheetQueue: oem_remove mpn=' + data.mpn);
-        }
-      }
-      UrlFetchApp.fetch(HUB_URL + '/api/fix-queue/' + fix.id, {
-        method: 'PATCH', contentType: 'application/json',
-        headers: { Authorization: 'Bearer ' + HUB_SECRET },
-        payload: JSON.stringify({ status: 'done' }),
-        muteHttpExceptions: true
-      });
-    } catch(e) {
-      hubLog('error', 'processSheetQueue error #' + fix.id + ': ' + e);
-      try {
-        UrlFetchApp.fetch(HUB_URL + '/api/fix-queue/' + fix.id, {
-          method: 'PATCH', contentType: 'application/json',
-          headers: { Authorization: 'Bearer ' + HUB_SECRET },
-          payload: JSON.stringify({ status: 'failed', error: String(e) }),
-          muteHttpExceptions: true
-        });
-      } catch(e2) {}
-    }
-  });
-}
 
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function(t){ScriptApp.deleteTrigger(t);});
-  // Phase 3: inbox scanning + thread processing moved to worker cron (no GmailApp quota).
-  // Apps Script only handles sheet side-effects (forte_add, stan_add, oem_remove).
-  // Phase 4: checkDavidNoStockEmails, checkBillNetcompRemovals, checkInboxForPaymentAdvice moved to worker cron.
-  ScriptApp.newTrigger('processSheetQueue').timeBased().everyMinutes(5).create();
+  // Phase 3: inbox scanning + thread processing → worker cron
+  // Phase 4: David/Bill/PaymentAdvice → worker cron
+  // Phase 5: forte_add/stan_add/oem_remove/daily cost report → worker cron (Sheets API)
+  // Apps Script: processFixQueue (replace_draft backup) + processCommandQueue (inventory commands)
   ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processCommandQueue').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('sendDailyCostReport').timeBased().atHour(8).everyDays(1).create();
-  Logger.log('4 triggers installed. David/Bill/PaymentAdvice/Inbox scanning all run in worker cron.');
+  Logger.log('2 triggers installed. All sheet/email/cost-report automation runs in worker cron.');
 }
 
 

@@ -146,6 +146,8 @@ export default {
       // Gmail API endpoints
       if (p === '/api/gmail/whoami'  && m === 'GET')  { const d = await gmailGet(env, '/profile'); return json(d); }
       if (p === '/api/gmail/sidebar-context' && m === 'GET') return handleGmailSidebarContext(url, env);
+      if (p === '/api/gmail/sent-quotes'     && m === 'GET') return handleSentQuotes(url, env);
+      if (p === '/api/gmail/inbox-summary'   && m === 'GET') return handleGmailInboxSummary(env);
       if (p === '/api/gmail/search'  && m === 'GET')  return handleGmailSearch(url, env);
       if (p === '/api/gmail/draft'   && m === 'POST') return handleGmailDraft(request, env);
       if (p === '/api/gmail/drafts'  && m === 'GET')  return handleListGmailDrafts(url, env);
@@ -163,13 +165,17 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(Promise.all([
-      cronProcessFixQueue(env),
-      cronScanInbox(env),
-      cronCheckPaymentAdvice(env),
-      cronCheckBillRemovals(env),
-      cronCheckDavidNoStock(env),
-    ]));
+    if (event.cron === '0 8 * * *') {
+      ctx.waitUntil(cronSendDailyCostReport(env));
+    } else {
+      ctx.waitUntil(Promise.all([
+        cronProcessFixQueue(env),
+        cronScanInbox(env),
+        cronCheckPaymentAdvice(env),
+        cronCheckBillRemovals(env),
+        cronCheckDavidNoStock(env),
+      ]));
+    }
   }
 };
 
@@ -2203,6 +2209,149 @@ async function getGmailToken(env) {
   return d.access_token;
 }
 
+// ── Phase 5: Sheets API helpers ────────────────────────────────────────────────
+// Requires GMAIL_REFRESH_TOKEN to have been authorized with spreadsheets scope.
+// To enable: re-run OAuth with scope=gmail+spreadsheets, save new refresh token as GMAIL_REFRESH_TOKEN secret.
+const FORTE_SHEET_ID  = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+const OEM_SHEET_ID    = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+const STAN_SHEET_ID   = '1pGRDpkqftQNoEYna53MxRJfUY8jEf5_w32FNa56OUIM';
+const OEM_SHEET_NAME  = 'sheet1';
+
+async function sheetsGet(env, spreadsheetId, range) {
+  const token = await getGmailToken(env);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  return r.json();
+}
+
+async function sheetsAppend(env, spreadsheetId, range, values) {
+  const token = await getGmailToken(env);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ range, values }),
+  });
+  return r.json();
+}
+
+async function sheetsBatchUpdate(env, spreadsheetId, requests) {
+  const token = await getGmailToken(env);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests }),
+  });
+  return r.json();
+}
+
+async function sheetsGetAllValues(env, spreadsheetId, sheetName) {
+  const range = (sheetName ? sheetName + '!' : '') + 'A1:Z';
+  const d = await sheetsGet(env, spreadsheetId, range);
+  return d.values || [];
+}
+
+// Returns sheet metadata (sheetId for batchUpdate)
+async function sheetsGetMeta(env, spreadsheetId) {
+  const token = await getGmailToken(env);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`;
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  return r.json();
+}
+
+async function workerCheckForteForMPN(env, mpn, days) {
+  const rows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+  const cutoff = Date.now() - (days || 60) * 86400000;
+  const matches = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r[1] || r[1].trim().toLowerCase() !== mpn.trim().toLowerCase()) continue;
+    const d = r[0] ? new Date(r[0]).getTime() : 0;
+    const status = (r[10] || '').trim();
+    matches.push({ row: i + 1, date: r[0], status, recent: d >= cutoff });
+  }
+  return matches;
+}
+
+async function workerBuildForteHistory(env, mpn) {
+  const rows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+  const entries = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r[1] || r[1].trim().toLowerCase() !== mpn.trim().toLowerCase()) continue;
+    const dt = r[0] ? new Date(r[0]) : null;
+    const dateStr = dt ? (dt.getMonth()+1) + '/' + dt.getDate() + '/' + dt.getFullYear() : '?';
+    let line = dateStr;
+    if (r[2]) line += ' | Qty: ' + r[2];
+    if (r[3]) line += ' | TP: ' + r[3];
+    if (r[7]) line += ' | Quoted: ' + r[7];
+    const status = (r[10] || '').trim();
+    if (status && status.toLowerCase() !== 'open') line += ' | ' + status;
+    if (r[8]) line += ' | ' + r[8];
+    entries.push({ ts: dt ? dt.getTime() : 0, text: line });
+  }
+  entries.sort((a, b) => b.ts - a.ts);
+  return entries.map(e => e.text).join('\n');
+}
+
+async function workerAddToForteSheet(env, mpn, qty, targetPrice, country) {
+  const history = await workerBuildForteHistory(env, mpn);
+  const now = new Date();
+  const today = (now.getMonth()+1) + '/' + now.getDate() + '/' + now.getFullYear();
+  // Get current row count to build =C{n}*D{n} formula
+  const existing = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+  const nextRow = existing.length + 1;
+  const row = [today, mpn, qty || '', targetPrice || '', '', country || '', `=C${nextRow}*D${nextRow}`, '', '', history, 'Open'];
+  const res = await sheetsAppend(env, FORTE_SHEET_ID, 'A1', [row]);
+  if (res.error) throw new Error('Forte append error: ' + JSON.stringify(res.error));
+}
+
+async function workerAddToStanSheet(env, mpn, country, qty, tp) {
+  // Check for existing entry first
+  const existing = await sheetsGetAllValues(env, STAN_SHEET_ID, null);
+  const alreadyThere = existing.slice(1).some(r => r[4] && r[4].trim().toLowerCase() === mpn.trim().toLowerCase());
+  if (alreadyThere) return;
+  const now = new Date();
+  const today = (now.getMonth()+1) + '/' + now.getDate() + '/' + now.getFullYear();
+  const row = ['', '', '', today, mpn, country || 'USA', qty || '', tp || ''];
+  const res = await sheetsAppend(env, STAN_SHEET_ID, 'A1', [row]);
+  if (res.error) throw new Error('Stan append error: ' + JSON.stringify(res.error));
+}
+
+// Delete a row from OEM_EXCESS by row number (1-based) or by MPN search
+async function workerDeleteOemRow(env, mpn, rowNum) {
+  const meta = await sheetsGetMeta(env, OEM_SHEET_ID);
+  const sheets = (meta.sheets || []);
+  const sheetMeta = sheets.find(s => (s.properties?.title || '').toLowerCase() === OEM_SHEET_NAME.toLowerCase()) || sheets[0];
+  const sheetId = sheetMeta?.properties?.sheetId ?? 0;
+
+  if (rowNum) {
+    // Delete by exact row number (0-based index = rowNum - 1)
+    const res = await sheetsBatchUpdate(env, OEM_SHEET_ID, [{
+      deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rowNum - 1, endIndex: rowNum } }
+    }]);
+    if (res.error) throw new Error('OEM delete row error: ' + JSON.stringify(res.error));
+    return;
+  }
+
+  // Find by MPN (col A, index 0) and delete
+  const rows = await sheetsGetAllValues(env, OEM_SHEET_ID, OEM_SHEET_NAME);
+  const matches = [];
+  for (let i = 1; i < rows.length; i++) {
+    const cell = (rows[i][0] || '').trim().toLowerCase();
+    if (cell === mpn.trim().toLowerCase()) matches.push(i + 1); // 1-based
+  }
+  if (!matches.length) throw new Error('OEM remove: MPN not found: ' + mpn);
+  // Delete from bottom up so row indices stay valid
+  matches.sort((a, b) => b - a);
+  for (const rn of matches) {
+    await sheetsBatchUpdate(env, OEM_SHEET_ID, [{
+      deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rn - 1, endIndex: rn } }
+    }]);
+  }
+}
+
 async function gmailGet(env, path) {
   const token = await getGmailToken(env);
   const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me' + path, {
@@ -2297,6 +2446,54 @@ async function handleGmailSidebarContext(url, env) {
     toEmail = getHdr(draftDetail.message || {}, 'To');
   }
   return json({ subject, fromH, draftId, toEmail });
+}
+
+// GET /api/gmail/sent-quotes?mpn=X&max=5 — searches sent mail for prior quotes, no GmailApp quota
+async function handleSentQuotes(url, env) {
+  const mpn = url.searchParams.get('mpn');
+  const max = Math.min(parseInt(url.searchParams.get('max') || '5', 10), 10);
+  if (!mpn) return json({ error: 'mpn required' }, 400);
+
+  const JOHN_EMAIL = 'john.fluman@intransittech.com';
+  let threadIds = [];
+  const queries = [
+    `in:sent subject:"${mpn}"`,
+    `in:sent "${mpn}"`,
+    `in:sent subject:(${mpn.replace(/-/g, ' ')})`,
+  ];
+  for (const q of queries) {
+    if (threadIds.length) break;
+    try {
+      const data = await gmailGet(env, `/threads?q=${encodeURIComponent(q)}&maxResults=${max}`);
+      threadIds = (data.threads || []).map(t => t.id);
+    } catch(e) { /* try next query */ }
+  }
+
+  if (!threadIds.length) return json({ quotes: [] });
+
+  const quotes = [];
+  for (const tid of threadIds.slice(0, max)) {
+    try {
+      const tData = await gmailGet(env, `/threads/${tid}?format=full`);
+      const msgs = tData.messages || [];
+      let withPrice = null, withoutPrice = null;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        const from = getHdr(m, 'From');
+        if (!from.includes(JOHN_EMAIL)) continue;
+        const to   = getHdr(m, 'To');
+        const date = new Date(parseInt(m.internalDate || '0', 10)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const body = extractMimeText(m.payload, false).replace(/^>.*$/gm, '').trim().substring(0, 350);
+        const entry = `[Sent ${date} to ${to}]\n${body}`;
+        if (!withPrice && /\$\s*\d/.test(body)) withPrice = entry;
+        if (!withoutPrice) withoutPrice = entry;
+        if (withPrice && withoutPrice) break;
+      }
+      const best = withPrice || withoutPrice;
+      if (best) quotes.push(best);
+    } catch(e) { /* skip thread */ }
+  }
+  return json({ quotes });
 }
 
 // GET /api/gmail/thread/:id  — returns message metadata (senders, subjects, Message-IDs)
@@ -2827,10 +3024,83 @@ async function cronCheckDavidNoStock(env) {
 
 // ── Phase 4 end ────────────────────────────────────────────────────────────────
 
+// ── Daily cost report cron ─────────────────────────────────────────────────────
+async function cronSendDailyCostReport(env) {
+  try {
+    const { results: rows } = await env.DB.prepare(`
+      SELECT model, endpoint,
+             COUNT(*) as calls,
+             SUM(input_tokens) as total_input, SUM(output_tokens) as total_output,
+             SUM(cost_usd) as total_cost
+      FROM api_costs
+      WHERE created_at >= datetime('now', '-1 days')
+      GROUP BY model, endpoint
+      ORDER BY model, endpoint
+    `).all();
+    const total = (rows || []).reduce((s, r) => s + (r.total_cost || 0), 0);
+
+    const now = new Date();
+    const today = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/Los_Angeles' });
+    const lines = ['Intransit Hub — Daily API Cost Report', 'Date: ' + today, ''];
+    if (!rows || !rows.length) {
+      lines.push('No API calls recorded in the last 24 hours.');
+    } else {
+      lines.push('TOTAL COST: $' + total.toFixed(4));
+      lines.push('');
+      lines.push('Breakdown:');
+      for (const r of rows) {
+        const modelShort = r.model.indexOf('haiku') >= 0 ? 'Haiku' : 'Sonnet';
+        lines.push('  ' + r.endpoint + ' [' + modelShort + ']');
+        lines.push('    Calls:  ' + r.calls);
+        lines.push('    Tokens: ' + Number(r.total_input).toLocaleString() + ' in / ' + Number(r.total_output).toLocaleString() + ' out');
+        lines.push('    Cost:   $' + (r.total_cost || 0).toFixed(4));
+        lines.push('');
+      }
+    }
+    lines.push('—');
+    lines.push('Intransit Hub Automation');
+
+    const subject = 'Intransit Hub — Daily Cost ($' + total.toFixed(4) + ') ' + today;
+    const bodyText = lines.join('\n');
+    const mimeLines = [
+      'From: ' + JOHN_FROM,
+      'To: john.fluman@intransittech.com',
+      'Subject: ' + subject,
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      bodyText,
+    ];
+
+    const token = await getGmailToken(env);
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw: base64url(mimeLines.join('\r\n')) }),
+    });
+    const resJson = await res.json();
+    if (resJson.error) throw new Error(JSON.stringify(resJson.error));
+    await hubLog(env, 'email_automation', 'run', 'cronSendDailyCostReport: sent $' + total.toFixed(4));
+  } catch(e) {
+    await hubLog(env, 'email_automation', 'error', 'cronSendDailyCostReport: ' + e.message);
+  }
+}
+
+// GET /api/gmail/inbox-summary — returns unread count + up to 10 recent inbox thread subjects
+async function handleGmailInboxSummary(env) {
+  const [unreadRes, recentRes] = await Promise.all([
+    gmailGet(env, '/threads?q=in:inbox+is:unread&maxResults=1'),
+    gmailGet(env, '/threads?q=in:inbox&maxResults=10&format=metadata'),
+  ]);
+  const unreadEst = unreadRes.resultSizeEstimate || 0;
+  const threads = (recentRes.threads || []).map(t => ({ id: t.id, snippet: t.snippet || '' }));
+  return json({ unread: unreadEst, threads });
+}
+
 async function cronProcessFixQueue(env) {
-  // Only handle replace_draft — forte_add/stan_add/oem_remove are handled by Apps Script processSheetQueue
+  // Phase 5: handles all types — replace_draft (Gmail) + forte_add/stan_add/oem_remove (Sheets API)
   const { results: fixes } = await env.DB.prepare(
-    "SELECT * FROM fix_queue WHERE status='pending' AND type='replace_draft' ORDER BY created_at ASC LIMIT 10"
+    "SELECT * FROM fix_queue WHERE status='pending' ORDER BY created_at ASC LIMIT 10"
   ).all();
   if (!fixes?.length) return;
 
@@ -2841,62 +3111,78 @@ async function cronProcessFixQueue(env) {
   const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
   const gDel  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
 
-  // Fetch existing drafts once to find ones to delete
-  const draftList = await gGet('/drafts?maxResults=200');
-  const allDrafts = draftList.drafts || [];
+  // Fetch existing drafts once (only needed for replace_draft)
+  let allDrafts = null;
+  const getDrafts = async () => { if (!allDrafts) { const r = await gGet('/drafts?maxResults=200'); allDrafts = r.drafts || []; } return allDrafts; };
 
   for (const fix of fixes) {
     try {
-      if (fix.type !== 'replace_draft') {
-        await env.DB.prepare("UPDATE fix_queue SET status='done', updated_at=datetime('now') WHERE id=?").bind(fix.id).run();
-        continue;
+      const data = JSON.parse(fix.draft_body || '{}');
+
+      if (fix.type === 'forte_add') {
+        if (!data.mpn || !data.qty) throw new Error('forte_add: missing mpn or qty');
+        const existing = await workerCheckForteForMPN(env, data.mpn, 60);
+        const hasRecent = existing.some(r => r.recent && r.status.toLowerCase() !== 'closed');
+        if (hasRecent) {
+          await hubLog(env, 'email_automation', 'run', `processFixQueue: forte_add skipped (60-day dupe) ${data.mpn}`);
+        } else {
+          await workerAddToForteSheet(env, data.mpn, data.qty, data.target_price || '', data.country || '');
+          await hubLog(env, 'email_automation', 'run', `processFixQueue: forte_add ${data.mpn}`);
+        }
+
+      } else if (fix.type === 'stan_add') {
+        if (!data.mpn) throw new Error('stan_add: missing mpn');
+        await workerAddToStanSheet(env, data.mpn, data.country || 'USA', data.qty || '', data.target_price || '');
+        await hubLog(env, 'email_automation', 'run', `processFixQueue: stan_add ${data.mpn}`);
+
+      } else if (fix.type === 'oem_remove') {
+        if (!data.mpn && !data.row) throw new Error('oem_remove: missing mpn and row');
+        await workerDeleteOemRow(env, data.mpn || '', data.row || 0);
+        await hubLog(env, 'email_automation', 'run', `processFixQueue: oem_remove mpn=${data.mpn} row=${data.row}`);
+
+      } else if (fix.type === 'replace_draft') {
+        // Delete any existing drafts for this thread
+        const drafts = await getDrafts();
+        for (const d of drafts.filter(d => d.message?.threadId === fix.thread_id)) {
+          await gDel('/drafts/' + d.id);
+        }
+
+        const thread = await gGet(`/threads/${fix.thread_id}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=References`);
+        if (thread.error) throw new Error('Thread fetch: ' + JSON.stringify(thread.error));
+        const msgs = thread.messages || [];
+        if (!msgs.length) throw new Error('Thread has no messages');
+
+        const lastMsg = msgs[msgs.length - 1];
+        const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+        const rawSubj = getHdr(lastMsg, 'Subject') || fix.subject || '';
+        const subject = rawSubj.match(/^re:/i) ? rawSubj : 'Re: ' + rawSubj;
+        const msgId   = getHdr(lastMsg, 'Message-ID');
+        const refs    = getHdr(lastMsg, 'References');
+        const toEmail = fix.to_email || getHdr(msgs[0], 'From');
+
+        const htmlBody = '<div dir="ltr">' + String(fix.draft_body || '').replace(/\n/g, '<br>') + SIG_HTML + '</div>';
+        const mimeLines = [
+          'From: ' + JOHN_FROM,
+          'To: ' + toEmail,
+          'Subject: ' + subject,
+          'MIME-Version: 1.0',
+          'Content-Type: text/html; charset=utf-8'
+        ];
+        if (msgId) {
+          mimeLines.push('In-Reply-To: ' + msgId);
+          mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim());
+        }
+        mimeLines.push('', htmlBody);
+        const draft = await gPost('/drafts', { message: { threadId: fix.thread_id, raw: base64url(mimeLines.join('\r\n')) } });
+        if (draft.error) throw new Error('Draft create: ' + JSON.stringify(draft.error));
+        await gPost(`/threads/${fix.thread_id}/modify`, { addLabelIds: ['Label_166'] });
+        await hubLog(env, 'email_automation', 'run', `processFixQueue: replace_draft done #${fix.id} draft=${draft.id}`);
+
+      } else {
+        await hubLog(env, 'email_automation', 'run', `processFixQueue: unknown type ${fix.type} #${fix.id} — skipping`);
       }
 
-      // Delete any existing drafts for this thread
-      for (const d of allDrafts.filter(d => d.message?.threadId === fix.thread_id)) {
-        await gDel('/drafts/' + d.id);
-      }
-
-      // Get thread metadata: last message's Message-ID header + subject
-      const thread = await gGet(`/threads/${fix.thread_id}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=References`);
-      if (thread.error) throw new Error('Thread fetch: ' + JSON.stringify(thread.error));
-      const msgs = thread.messages || [];
-      if (!msgs.length) throw new Error('Thread has no messages');
-
-      const lastMsg = msgs[msgs.length - 1];
-      const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
-      const rawSubj = getHdr(lastMsg, 'Subject') || fix.subject || '';
-      const subject = rawSubj.match(/^re:/i) ? rawSubj : 'Re: ' + rawSubj;
-      const msgId   = getHdr(lastMsg, 'Message-ID');
-      const refs    = getHdr(lastMsg, 'References');
-      const toEmail = fix.to_email || getHdr(msgs[0], 'From');
-
-      // Build MIME message
-      const htmlBody = '<div dir="ltr">' + String(fix.draft_body || '').replace(/\n/g, '<br>') + SIG_HTML + '</div>';
-      const mimeLines = [
-        'From: ' + JOHN_FROM,
-        'To: ' + toEmail,
-        'Subject: ' + subject,
-        'MIME-Version: 1.0',
-        'Content-Type: text/html; charset=utf-8'
-      ];
-      if (msgId) {
-        mimeLines.push('In-Reply-To: ' + msgId);
-        mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim());
-      }
-      mimeLines.push('', htmlBody);
-      const raw = base64url(mimeLines.join('\r\n'));
-
-      // Create draft
-      const draft = await gPost('/drafts', { message: { threadId: fix.thread_id, raw } });
-      if (draft.error) throw new Error('Draft create: ' + JSON.stringify(draft.error));
-
-      // Apply oem-tp-processed label (Label_166)
-      await gPost(`/threads/${fix.thread_id}/modify`, { addLabelIds: ['Label_166'] });
-
-      // Mark done in D1
       await env.DB.prepare("UPDATE fix_queue SET status='done', updated_at=datetime('now') WHERE id=?").bind(fix.id).run();
-      await hubLog(env, 'email_automation', 'run', `processFixQueue: done #${fix.id} draft=${draft.id}`);
 
     } catch(e) {
       const msg = String(e?.message || e);
