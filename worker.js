@@ -42,7 +42,7 @@ async function logApiCost(env, model, endpoint, usage, mpn, action) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
@@ -66,7 +66,7 @@ export default {
     }
     const _sidebarApiM = url.pathname.match(/^\/sidebar\/api\/([a-z-]+)$/);
     if (_sidebarApiM && request.method === 'POST') {
-      try { return await handleSidebarApi(request, url, env, _sidebarApiM[1]); }
+      try { return await handleSidebarApi(request, url, env, _sidebarApiM[1], ctx); }
       catch(e) { return json({ error: 'Sidebar API error: ' + e.message }, 500); }
     }
 
@@ -135,6 +135,7 @@ export default {
 
       if (p === '/api/command-queue' && m === 'GET')  return handleGetCommandQueue(url, env);
       if (p === '/api/command-queue' && m === 'POST') return handlePostCommandQueue(request, env);
+      if (p === '/api/command-queue/process' && m === 'POST') { ctx.waitUntil(cronProcessCommandQueue(env).catch(() => {})); return json({ ok: true }); }
       const cmdId = p.match(/^\/api\/command-queue\/(\d+)$/);
       if (cmdId && m === 'GET')   return handleGetCommandById(env, parseInt(cmdId[1]));
       if (cmdId && m === 'PATCH') return handlePatchCommandQueue(request, env, parseInt(cmdId[1]));
@@ -174,7 +175,7 @@ export default {
       if (p === '/api/sidebar/token' && m === 'POST') return handleSidebarToken(request, env);
       if (p === '/sidebar'           && m === 'GET')  return handleSidebarPage(url, env);
       const sidebarApiM = p.match(/^\/sidebar\/api\/([a-z-]+)$/);
-      if (sidebarApiM && m === 'POST') return handleSidebarApi(request, url, env, sidebarApiM[1]);
+      if (sidebarApiM && m === 'POST') return handleSidebarApi(request, url, env, sidebarApiM[1], ctx);
 
       return json({ error: 'Not found' }, 404);
     } catch (err) {
@@ -3124,10 +3125,10 @@ async function cronSendDailyCostReport(env) {
 function normalizeMPN(s) { return String(s || '').trim().toLowerCase().replace(/[-\s]/g, ''); }
 
 async function cronProcessCommandQueue(env) {
-  const BASE = 'https://intransit-hub.intransit-sales.workers.dev';
-  const AUTH = { Authorization: 'Bearer ' + env.HUB_SECRET };
-  const resp = await fetch(BASE + '/api/command-queue?status=pending', { headers: AUTH });
-  const { commands } = await resp.json();
+  // Query D1 directly — avoids timeout/network issues from self-HTTP calls in cron context
+  const { results: commands } = await env.DB.prepare(
+    "SELECT * FROM command_queue WHERE status='pending' ORDER BY created_at ASC LIMIT 10"
+  ).all();
   if (!commands?.length) return;
   await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: ${commands.length} pending`);
 
@@ -3320,19 +3321,11 @@ async function cronProcessCommandQueue(env) {
         throw new Error('Unknown command type: ' + cmd.type);
       }
 
-      await fetch(BASE + '/api/command-queue/' + cmd.id, {
-        method: 'PATCH',
-        headers: { ...AUTH, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'done' }),
-      });
+      await env.DB.prepare("UPDATE command_queue SET status='done', updated_at=datetime('now') WHERE id=?").bind(cmd.id).run();
     } catch(e) {
       const msg = String(e?.message || e);
       await hubLog(env, 'email_automation', 'error', `cronProcessCommandQueue: error cmd#${cmd.id} type=${cmd.type}: ${msg}`);
-      await fetch(BASE + '/api/command-queue/' + cmd.id, {
-        method: 'PATCH',
-        headers: { ...AUTH, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'failed', error: msg }),
-      });
+      await env.DB.prepare("UPDATE command_queue SET status='failed', error=?, updated_at=datetime('now') WHERE id=?").bind(msg, cmd.id).run();
     }
   }
 }
@@ -3709,10 +3702,13 @@ async function processNext() {
 async function sendNetComp() {
   if (!confirm('Send OEM EXCESS + IN STOCK to NetCOMPONENTS now?')) return;
   const el = document.getElementById('actions-result');
-  showResult(el, '⏳ Sending…');
+  showResult(el, '⏳ Sending… (may take ~60 seconds)');
   try {
     const r = await sapi('command-queue', { type: 'send_datamaster_email', data: {} });
-    showResult(el, r.ok ? '✓ Sent to NetCOMPONENTS.' : JSON.stringify(r), !r.ok);
+    if (!r.ok) { showResult(el, JSON.stringify(r), true); return; }
+    // Trigger immediate processing (non-blocking — runs in background)
+    sapi('process-commands', {}).catch(() => {});
+    showResult(el, '✓ Sending in background — you will receive a copy in your inbox within ~60 seconds.');
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
 
@@ -3757,7 +3753,7 @@ init();
   return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Frame-Options': 'ALLOWALL' } });
 }
 
-async function handleSidebarApi(request, url, env, action) {
+async function handleSidebarApi(request, url, env, action, ctx) {
   const token = url.searchParams.get('token') || '';
   const tid   = url.searchParams.get('tid')   || '';
   const exp   = url.searchParams.get('exp')   || '0';
@@ -3793,6 +3789,13 @@ async function handleSidebarApi(request, url, env, action) {
   if (action === 'process-next') {
     await cronScanInbox(env);
     return json({ ok: true, message: 'Inbox scan triggered — check Gmail in a moment.' });
+  }
+  if (action === 'process-commands') {
+    // Use ctx.waitUntil so the Worker stays alive after response is sent
+    // send_datamaster_email takes ~30-60s (XLSX download + Gmail send)
+    if (ctx?.waitUntil) ctx.waitUntil(cronProcessCommandQueue(env).catch(() => {}));
+    else cronProcessCommandQueue(env).catch(() => {});
+    return json({ ok: true, message: 'Command queue processing started in background.' });
   }
   if (action === 'stock-price-save') {
     const fakeReq = new Request(request.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.HUB_SECRET}` }, body: JSON.stringify({ mpn: body.mpn, price: body.price }) });
