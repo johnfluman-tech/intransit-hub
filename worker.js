@@ -60,9 +60,15 @@ export default {
     }
 
     // Sidebar routes use HMAC token auth — no HUB_SECRET header needed (browser requests)
-    if (url.pathname === '/sidebar' && request.method === 'GET') return handleSidebarPage(url, env);
+    if (url.pathname === '/sidebar' && request.method === 'GET') {
+      try { return await handleSidebarPage(url, env); }
+      catch(e) { return json({ error: 'Sidebar page error: ' + e.message }, 500); }
+    }
     const _sidebarApiM = url.pathname.match(/^\/sidebar\/api\/([a-z-]+)$/);
-    if (_sidebarApiM && request.method === 'POST') return handleSidebarApi(request, url, env, _sidebarApiM[1]);
+    if (_sidebarApiM && request.method === 'POST') {
+      try { return await handleSidebarApi(request, url, env, _sidebarApiM[1]); }
+      catch(e) { return json({ error: 'Sidebar API error: ' + e.message }, 500); }
+    }
 
     const auth = request.headers.get('Authorization') || '';
     if (auth !== `Bearer ${env.HUB_SECRET}`) return json({ error: 'Unauthorized' }, 401);
@@ -3781,8 +3787,8 @@ async function handleSidebarApi(request, url, env, action) {
   if (action === 'command-queue') {
     const cmdBody = { type: body.type, data: JSON.stringify(body.data || {}) };
     await env.DB.prepare("INSERT INTO command_queue (type, data, status) VALUES (?, ?, 'pending')").bind(cmdBody.type, cmdBody.data).run();
-    await cronProcessCommandQueue(env);
-    return json({ ok: true });
+    // Don't run synchronously — large ops (send_datamaster_email) timeout the Worker. Cron picks it up within 5 min.
+    return json({ ok: true, message: 'Queued — will process within 5 minutes.' });
   }
   if (action === 'process-next') {
     await cronScanInbox(env);
