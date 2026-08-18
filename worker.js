@@ -3343,9 +3343,8 @@ async function cronProcessFixQueue(env) {
 
   for (const fix of fixes) {
     try {
-      const data = JSON.parse(fix.draft_body || '{}');
-
       if (fix.type === 'forte_add') {
+        const data = JSON.parse(fix.draft_body || '{}');
         if (!data.mpn || !data.qty) throw new Error('forte_add: missing mpn or qty');
         const existing = await workerCheckForteForMPN(env, data.mpn, 60);
         const hasRecent = existing.some(r => r.recent && r.status.toLowerCase() !== 'closed');
@@ -3357,11 +3356,13 @@ async function cronProcessFixQueue(env) {
         }
 
       } else if (fix.type === 'stan_add') {
+        const data = JSON.parse(fix.draft_body || '{}');
         if (!data.mpn) throw new Error('stan_add: missing mpn');
         await workerAddToStanSheet(env, data.mpn, data.country || 'USA', data.qty || '', data.target_price || '');
         await hubLog(env, 'email_automation', 'run', `processFixQueue: stan_add ${data.mpn}`);
 
       } else if (fix.type === 'oem_remove') {
+        const data = JSON.parse(fix.draft_body || '{}');
         if (!data.mpn && !data.row) throw new Error('oem_remove: missing mpn and row');
         await workerDeleteOemRow(env, data.mpn || '', data.row || 0);
         await hubLog(env, 'email_automation', 'run', `processFixQueue: oem_remove mpn=${data.mpn} row=${data.row}`);
