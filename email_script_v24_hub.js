@@ -4383,14 +4383,12 @@ function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function(t){ScriptApp.deleteTrigger(t);});
   // Phase 3: inbox scanning + thread processing moved to worker cron (no GmailApp quota).
   // Apps Script only handles sheet side-effects (forte_add, stan_add, oem_remove).
+  // Phase 4: checkDavidNoStockEmails, checkBillNetcompRemovals, checkInboxForPaymentAdvice moved to worker cron.
   ScriptApp.newTrigger('processSheetQueue').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('checkDavidNoStockEmails').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('checkBillNetcompRemovals').timeBased().everyMinutes(5).create();
-  ScriptApp.newTrigger('checkInboxForPaymentAdvice').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processFixQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('processCommandQueue').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('sendDailyCostReport').timeBased().atHour(8).everyDays(1).create();
-  Logger.log('7 triggers installed (fastScanInbox + processPendingThreads removed — now in worker cron).');
+  Logger.log('4 triggers installed. David/Bill/PaymentAdvice/Inbox scanning all run in worker cron.');
 }
 
 

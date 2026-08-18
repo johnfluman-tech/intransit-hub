@@ -163,7 +163,13 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(Promise.all([cronProcessFixQueue(env), cronScanInbox(env)]));
+    ctx.waitUntil(Promise.all([
+      cronProcessFixQueue(env),
+      cronScanInbox(env),
+      cronCheckPaymentAdvice(env),
+      cronCheckBillRemovals(env),
+      cronCheckDavidNoStock(env),
+    ]));
   }
 };
 
@@ -2650,6 +2656,176 @@ async function cronScanInbox(env) {
 }
 
 // ── Phase 3 end ────────────────────────────────────────────────────────────────
+
+// ── Phase 4: remaining GmailApp trigger replacements ─────────────────────────
+
+async function cronCheckPaymentAdvice(env) {
+  const token = await getGmailToken(env);
+  const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+
+  const search = await gGet('/threads?q=' + encodeURIComponent('in:inbox subject:"payment advice" -label:oem-payment-forwarded') + '&maxResults=10');
+  const threads = search.threads || [];
+  if (!threads.length) return;
+
+  await hubLog(env, 'email_automation', 'run', `cronCheckPaymentAdvice: ${threads.length} thread(s)`);
+  const labelsRes = await gGet('/labels');
+  const fwdLabelId = (labelsRes.labels || []).find(l => l.name === 'oem-payment-forwarded')?.id;
+
+  for (const t of threads) {
+    try {
+      const thread = await gGet('/threads/' + t.id + '?format=full');
+      const msgs = thread.messages || [];
+      if (!msgs.length) continue;
+      const firstMsg = msgs[0];
+      const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+      const senderEmail = extractEmailAddr(getHdr(firstMsg, 'From')).toLowerCase();
+      if (senderEmail.includes('intransittech.com') || senderEmail === 'deb@intransittech.com') {
+        if (fwdLabelId) await gPost('/threads/' + t.id + '/modify', { addLabelIds: [fwdLabelId] });
+        continue;
+      }
+      const subject = getHdr(firstMsg, 'Subject');
+      const fwdSubject = /^fwd:/i.test(subject) ? subject : 'Fwd: ' + subject;
+      const msgId = getHdr(firstMsg, 'Message-ID');
+      const body = extractMimeText(firstMsg.payload) || '';
+      const htmlBody = '<div dir="ltr">---------- Forwarded message ---------<br>' +
+        'From: ' + getHdr(firstMsg, 'From') + '<br>' +
+        'Subject: ' + subject + '<br><br>' +
+        body.replace(/\n/g, '<br>') + '</div>';
+      const mimeLines = ['From: ' + JOHN_FROM, 'To: deb@intransittech.com', 'Subject: ' + fwdSubject, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+      if (msgId) mimeLines.push('References: ' + msgId);
+      mimeLines.push('', htmlBody);
+      const sent = await gPost('/messages/send', { raw: base64url(mimeLines.join('\r\n')) });
+      if (sent.error) throw new Error('Send error: ' + JSON.stringify(sent.error));
+      const addLabels = fwdLabelId ? [fwdLabelId] : [];
+      await gPost('/threads/' + t.id + '/modify', { addLabelIds: addLabels, removeLabelIds: ['INBOX'] });
+      await hubLog(env, 'email_automation', 'run', 'cronCheckPaymentAdvice: forwarded "' + subject + '"');
+    } catch(e) {
+      await hubLog(env, 'email_automation', 'error', 'cronCheckPaymentAdvice: error tid=' + t.id + ': ' + e.message);
+    }
+  }
+}
+
+async function cronCheckBillRemovals(env) {
+  const token = await getGmailToken(env);
+  const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+
+  const q = 'from:bill.pratt@intransittech.com (netcomp OR netcomponents) (remove OR removing OR removed) -label:oem-bill-removal-processed newer_than:14d';
+  const search = await gGet('/threads?q=' + encodeURIComponent(q) + '&maxResults=10');
+  const threads = search.threads || [];
+  if (!threads.length) return;
+
+  await hubLog(env, 'email_automation', 'run', `cronCheckBillRemovals: ${threads.length} thread(s)`);
+  const labelsRes = await gGet('/labels');
+  const doneLabel = (labelsRes.labels || []).find(l => l.name === 'oem-bill-removal-processed')?.id;
+
+  for (const t of threads) {
+    try {
+      const thread = await gGet('/threads/' + t.id + '?format=full');
+      const msgs = thread.messages || [];
+      if (!msgs.length) continue;
+      const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+      const lastMsg = msgs[msgs.length - 1];
+      const subject = getHdr(msgs[0], 'Subject');
+      let mpn = null;
+      for (const msg of msgs) {
+        const body = extractMimeText(msg.payload);
+        const m = body.match(/@John(?:\s+Fluman)?\s*[-–—:]\s*([A-Z0-9][A-Z0-9\-\.\/]{3,})/i);
+        if (m) { mpn = m[1].trim(); break; }
+      }
+      if (!mpn) mpn = extractMpnHint(subject);
+      if (!mpn) {
+        await hubLog(env, 'email_automation', 'error', 'cronCheckBillRemovals: no MPN found tid=' + t.id);
+        if (doneLabel) await gPost('/threads/' + t.id + '/modify', { addLabelIds: [doneLabel] });
+        continue;
+      }
+      const msgId = getHdr(lastMsg, 'Message-ID');
+      const refs  = getHdr(lastMsg, 'References');
+      const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
+      const htmlBody = '<div dir="ltr">Got it - removing ' + mpn + ' from OEM EXCESS now.' + SIG_HTML + '</div>';
+      const mimeLines = ['From: ' + JOHN_FROM, 'To: bill.pratt@intransittech.com', 'Subject: ' + replySubj, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+      if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
+      mimeLines.push('', htmlBody);
+      const draft = await gPost('/drafts', { message: { threadId: t.id, raw: base64url(mimeLines.join('\r\n')) } });
+      if (draft.error) throw new Error('Draft error: ' + JSON.stringify(draft.error));
+      await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
+        .bind('oem_remove', t.id, subject, JSON.stringify({ mpn })).run();
+      const addLabels = doneLabel ? [doneLabel] : [];
+      await gPost('/threads/' + t.id + '/modify', { addLabelIds: addLabels, removeLabelIds: ['INBOX'] });
+      await hubLog(env, 'email_automation', 'run', 'cronCheckBillRemovals: queued removal mpn=' + mpn);
+    } catch(e) {
+      await hubLog(env, 'email_automation', 'error', 'cronCheckBillRemovals: error tid=' + t.id + ': ' + e.message);
+    }
+  }
+}
+
+async function cronCheckDavidNoStock(env) {
+  const token = await getGmailToken(env);
+  const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+
+  const NO_STK = ['no stk','no stock','stk sold','stock sold','cant find','cant share','cannot find','removed','no inventory','sold lying commie','soly lying commie','lying commie','sold out','all sold','no longer have'];
+  const searches = await Promise.all([
+    'from:david@fortetechno.com -label:oem-rfq-incoming-processed newer_than:14d',
+    'from:david@fortecomp.com -label:oem-rfq-incoming-processed newer_than:14d',
+    'in:inbox from:david@fortetechno.com -label:oem-rfq-incoming-processed',
+    'in:inbox from:david@fortecomp.com -label:oem-rfq-incoming-processed',
+  ].map(q => gGet('/threads?q=' + encodeURIComponent(q) + '&maxResults=10')));
+
+  const seen = new Set();
+  const threadIds = searches.flatMap(r => (r.threads || []).map(t => t.id)).filter(id => { if (seen.has(id)) return false; seen.add(id); return true; });
+  if (!threadIds.length) return;
+
+  await hubLog(env, 'email_automation', 'run', `cronCheckDavidNoStock: ${threadIds.length} thread(s)`);
+  const labelsRes = await gGet('/labels');
+  const nostockLabelId    = (labelsRes.labels || []).find(l => l.name === 'oem-nostock-seen')?.id;
+  const processedLabelId  = (labelsRes.labels || []).find(l => l.name === 'oem-rfq-incoming-processed')?.id;
+
+  for (const tid of threadIds) {
+    try {
+      const thread = await gGet('/threads/' + tid + '?format=full');
+      const msgs = thread.messages || [];
+      if (!msgs.length) continue;
+      const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+      const lastMsg = msgs[msgs.length - 1];
+      const subject = getHdr(msgs[0], 'Subject');
+      const bodyAll = msgs.map(m => extractMimeText(m.payload)).join('\n').toLowerCase();
+      const isNoStk = NO_STK.some(kw => bodyAll.includes(kw));
+      const addLabels = processedLabelId ? [processedLabelId] : [];
+
+      if (!isNoStk) {
+        await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
+        continue;
+      }
+
+      if (nostockLabelId) addLabels.push(nostockLabelId);
+      const mpn = extractMpnHint(subject);
+      const rowMatch = subject.match(/#(\d+)/);
+      const row = rowMatch ? parseInt(rowMatch[1], 10) : null;
+
+      const msgId = getHdr(lastMsg, 'Message-ID');
+      const refs  = getHdr(lastMsg, 'References');
+      const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
+      const toAddr = extractEmailAddr(getHdr(lastMsg, 'From'));
+      const htmlBody = '<div dir="ltr">Ok, removed from listing.' + SIG_HTML + '</div>';
+      const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + toAddr, 'Subject: ' + replySubj, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+      if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
+      mimeLines.push('', htmlBody);
+      const draft = await gPost('/drafts', { message: { threadId: tid, raw: base64url(mimeLines.join('\r\n')) } });
+      if (draft.error) throw new Error('Draft error: ' + JSON.stringify(draft.error));
+
+      await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
+        .bind('oem_remove', tid, subject, JSON.stringify({ mpn, row })).run();
+      await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels, removeLabelIds: ['INBOX'] });
+      await hubLog(env, 'email_automation', 'run', 'cronCheckDavidNoStock: queued removal mpn=' + mpn + ' row=' + row);
+    } catch(e) {
+      await hubLog(env, 'email_automation', 'error', 'cronCheckDavidNoStock: error tid=' + tid + ': ' + e.message);
+    }
+  }
+}
+
+// ── Phase 4 end ────────────────────────────────────────────────────────────────
 
 async function cronProcessFixQueue(env) {
   // Only handle replace_draft — forte_add/stan_add/oem_remove are handled by Apps Script processSheetQueue
