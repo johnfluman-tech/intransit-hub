@@ -704,6 +704,7 @@ Payment advice / remittance → forward_deb
 
 ## STEP 2 — SIMILAR MPN ([SIMILAR_MPN: ...] prefix present)
 Ask buyer before quoting: "We have [INVENTORY_MPN] available — would you be able to use this part number? Please let us know and we will get back to you right away." → ask_similar_mpn, forte_entry: null
+CRITICAL: [INVENTORY_MPN] in the draft MUST be our inventory part number (from the [SIMILAR_MPN: ...] tag), NOT the buyer's requested MPN. If they are the same part number, ask_similar_mpn is WRONG — skip to STEP 3 and apply OEM/stock rules normally.
 
 ## STEP 3 — NO INVENTORY
 oem_results, in_stock_results, and stan_results all empty → no_bid
@@ -750,6 +751,7 @@ TP given:
 
 No TP: any non-BILL-EXT row has "$2,000 MIN" in notes → request_tp_2000; otherwise → request_tp_500
 Buyers often say "no target" on first email — always ask anyway. When uncertain, default to request_tp_500.
+EXCEPTION — buyer explicitly refuses TP after we already asked: if thread_content shows John already sent a TP request ("We need a target price to proceed") AND buyer's latest reply explicitly declines to give a TP (says things like "give me your best price", "provide your lowest price", "I can't share a target", "no target available", "end customer's budget is limited, just quote me", "please quote your best price") → action=decline, draft: "Unfortunately, without a target price we are unable to assist with this request. Thank you for the opportunity." (do NOT send another TP request)
 
 Buyer follow-up with no new TP (e.g. "any update?", "please quote", "how much?"): if thread shows MSG_CHECKING was sent and forte_results has an Open entry → still_checking. If no prior MSG_CHECKING → request_tp_500.
 
@@ -1100,7 +1102,7 @@ async function handleEmailAgent(request, env) {
   const KNOWN_ACTIONS = new Set([
     'msg_checking','request_tp_500','request_tp_2000','request_qty','bill_handle',
     'own_stock','stan_quoted','add_to_stan','no_bid','no_action','remove_oem',
-    'david_nostock','forward_deb','listing_removed','ask_similar_mpn','below_min_line','still_checking'
+    'david_nostock','forward_deb','listing_removed','ask_similar_mpn','below_min_line','still_checking','decline'
   ]);
   if (!KNOWN_ACTIONS.has(decision.action)) {
     const hasOwnStock   = (in_stock_results || []).some(r => !/Warehouse#/i.test(r.notes || ''));
