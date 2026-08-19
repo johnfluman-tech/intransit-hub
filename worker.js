@@ -2819,6 +2819,17 @@ async function cronScanInbox(env) {
   const { results: blockRows } = await env.DB.prepare("SELECT key FROM rules WHERE type='blocked_domain'").all();
   const blockFilter = (blockRows || []).map(r => '-from:' + r.key).join(' ');
 
+  // Auto-archive blocked domain emails from inbox
+  if (blockRows?.length) {
+    const blockedQ = encodeURIComponent('in:inbox (' + blockRows.map(r => 'from:' + r.key).join(' OR ') + ')');
+    const blockedRes = await gGet('/threads?q=' + blockedQ + '&maxResults=20');
+    const blockedThreads = (blockedRes.threads || []).map(t => t.id);
+    if (blockedThreads.length) {
+      await Promise.all(blockedThreads.map(tid => gPost('/threads/' + tid + '/modify', { removeLabelIds: ['INBOX'] })));
+      await hubLog(env, 'email_automation', 'run', `cronScanInbox: archived ${blockedThreads.length} blocked domain threads`);
+    }
+  }
+
   // Gmail search queries (keep short to stay under URL limits)
   const rfqQ = encodeURIComponent(
     'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -label:oem-rfq-incoming-processed newer_than:3d ' + blockFilter
