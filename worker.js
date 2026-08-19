@@ -992,6 +992,23 @@ async function handleEmailAgent(request, env) {
     inventoryLookupSucceeded = true;
   }
 
+  // Augment in_stock_results with price_to_quote (col F) — the OEM web app omits this column.
+  // Batch-fetch col F directly from the IN STOCK sheet for any own-stock rows with a row number.
+  if (Array.isArray(in_stock_results) && in_stock_results.length > 0) {
+    const toFetch = in_stock_results.filter(r => r.row && !/Warehouse#/i.test(r.notes || ''));
+    if (toFetch.length) {
+      try {
+        const ptok = await getGmailToken(env);
+        const qr = toFetch.map(r => 'ranges=' + encodeURIComponent('F' + r.row)).join('&');
+        const br = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${IN_STOCK_ID}/values:batchGet?${qr}`, { headers: { Authorization: 'Bearer ' + ptok } }).then(r => r.json());
+        (br.valueRanges || []).forEach((vr, i) => {
+          const val = ((vr.values || [[]])[0] || [])[0];
+          if (val) toFetch[i].price_to_quote = val;
+        });
+      } catch(e) { /* price_to_quote stays null, fall through to D1 / FILL IN */ }
+    }
+  }
+
   // Filter oem_results to exact/close MPN matches — removes fuzzy hits like "MPM" matching
   // "MPM3650GQW-P" or concatenated rows like "MPM3650GQW-PMPM3650GQW-Z" that wrongly trigger
   // the OEM override and force msg_checking on warehouse-only inventory.
