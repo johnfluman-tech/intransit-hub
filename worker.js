@@ -3023,7 +3023,8 @@ async function cronCheckDavidNoStock(env) {
       const lastMsg = msgs[msgs.length - 1];
       const subject = getHdr(msgs[0], 'Subject');
       const bodyAll = msgs.map(m => extractMimeText(m.payload)).join('\n').toLowerCase();
-      const isNoStk = NO_STK.some(kw => bodyAll.includes(kw));
+      const checkText = subject.toLowerCase() + '\n' + bodyAll;
+      const isNoStk = NO_STK.some(kw => checkText.includes(kw));
       const addLabels = processedLabelId ? [processedLabelId] : [];
 
       if (!isNoStk) {
@@ -3047,10 +3048,12 @@ async function cronCheckDavidNoStock(env) {
       const draft = await gPost('/drafts', { message: { threadId: tid, raw: base64url(mimeLines.join('\r\n')) } });
       if (draft.error) throw new Error('Draft error: ' + JSON.stringify(draft.error));
 
+      // row from subject (#XXXX) is the Forte row number — NOT the OEM EXCESS row.
+      // Pass only mpn so workerDeleteOemRow searches OEM EXCESS by MPN instead of deleting the wrong row.
       await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
-        .bind('oem_remove', tid, subject, JSON.stringify({ mpn, row })).run();
+        .bind('oem_remove', tid, subject, JSON.stringify({ mpn })).run();
       await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels, removeLabelIds: ['INBOX'] });
-      await hubLog(env, 'email_automation', 'run', 'cronCheckDavidNoStock: queued removal mpn=' + mpn + ' row=' + row);
+      await hubLog(env, 'email_automation', 'run', 'cronCheckDavidNoStock: queued removal mpn=' + mpn + ' forte_row=' + row);
     } catch(e) {
       await hubLog(env, 'email_automation', 'error', 'cronCheckDavidNoStock: error tid=' + tid + ': ' + e.message);
     }
