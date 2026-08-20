@@ -3714,9 +3714,17 @@ async function submitWrongDraft() {
   const detail = document.getElementById('wrong-detail').value.trim();
   const el = document.getElementById('wrong-result');
   if (!currentDraftId) { showResult(el, 'No draft on file for this thread.', true); return; }
+  if (!reason) { showResult(el, 'Please select what is wrong.', true); return; }
+  const TEMPLATES = {
+    should_be_tp_request: 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
+    should_be_msg_checking: 'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.',
+    should_be_decline: 'Thank you for your inquiry. Unfortunately, we are not able to provide a quote for this item at this time. Thank you for the opportunity.'
+  };
+  const draft_body = TEMPLATES[reason] || detail;
+  if (!draft_body) { showResult(el, 'Please add the corrected draft text in the details box.', true); return; }
   showResult(el, '⏳ Submitting…');
   try {
-    const r = await sapi('fix-queue', { type: 'wrong_draft', thread_id: TID, reason, detail, draft_id: currentDraftId });
+    const r = await sapi('fix-queue', { type: 'replace_draft', thread_id: TID, draft_body });
     showResult(el, r.ok ? '✓ Fix queued — draft will be corrected within 5 min.' : JSON.stringify(r), !r.ok);
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
