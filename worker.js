@@ -784,7 +784,7 @@ BILL EXT: A row is BILL EXT if notes contain "BILL EXT" anywhere (e.g. "BILL EXT
 If at least ONE exact-match row has no BILL EXT:
 
 Extract TP first:
-- Valid TP: explicit dollar amount buyer states they will pay per unit. Examples: "TP $2.50", "target $X", "$X/ea", "TP 4U" / "tp4u" = $4/unit (number+U shorthand, any case, space optional), "last PO was $X" (prior PO price counts as TP signal). European: "0,18$/each" = $0.18.
+- Valid TP: explicit dollar amount buyer states they will pay per unit. Examples: "TP $2.50", "target $X", "target price is $X", "our target price is $X USD per unit", "$X/ea", "TP 4U" / "tp4u" = $4/unit (number+U shorthand, any case, space optional), "last PO was $X" (prior PO price counts as TP signal). European: "0,18$/each" = $0.18. Key: ANY sentence where buyer states a specific dollar figure as their price — even with phrasing like "is", "will be", "can offer" — is a valid TP.
 - NOT a TP: "please quote", "what is your price?", "offer pls", "how much?" — requests for our price, not buyer's target.
 - [PARSED_RFQ: QtyReq=N, TgtPrice=X] = authoritative extracted data, use directly. TgtPrice absent from [PARSED_RFQ] = look at full thread (buyer may have since replied with TP, do not assume no TP).
 - netCOMPONENTS TgtPrice column: positive number = valid TP. Blank/0/NA = no TP.

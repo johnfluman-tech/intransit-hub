@@ -28,16 +28,35 @@ function runEmailAgent() {
   var _cfg = getRemoteConfig(); applyRemoteConfig(_cfg);
   if (_cfg.enabled === false) { hubLog('run', 'runEmailAgent: disabled via hub config'); return; }
 
+  // Fetch live blocked domain list from D1 via worker
+  var blockedDomains = [];
+  try {
+    var rulesResp = UrlFetchApp.fetch(HUB_URL + '/api/rules?type=blocked_domain', {
+      method: 'get',
+      headers: { Authorization: 'Bearer ' + HUB_SECRET },
+      muteHttpExceptions: true,
+    });
+    if (rulesResp.getResponseCode() === 200) {
+      var rulesData = JSON.parse(rulesResp.getContentText());
+      blockedDomains = (rulesData.rules || []).map(function(r) { return r.key.toLowerCase(); });
+    }
+  } catch(e) {
+    hubLog('error', 'runEmailAgent: failed to fetch blocked domains: ' + e.toString());
+  }
+  if (!blockedDomains.length) {
+    blockedDomains = ['sourceschip.com', 'bulechip.com', 'feelchips.com', 'chip-wintrading.com', 'qizhongsmart.com'];
+  }
+
   var label   = GmailApp.getUserLabelByName(AGENT_LABEL) || GmailApp.createLabel(AGENT_LABEL);
   var query   = 'in:inbox -label:' + AGENT_LABEL + ' newer_than:2d';
   var threads = GmailApp.search(query, 0, 15);
 
-  hubLog('run', 'runEmailAgent: ' + threads.length + ' thread(s) to evaluate');
+  hubLog('run', 'runEmailAgent: ' + threads.length + ' thread(s) to evaluate (' + blockedDomains.length + ' blocked domains loaded)');
   if (!threads.length) return;
 
   threads.forEach(function(thread) {
     try {
-      processThreadWithAgent(thread, label);
+      processThreadWithAgent(thread, label, blockedDomains);
     } catch(e) {
       hubLog('error', 'runEmailAgent error on thread: ' + e.toString());
     }
@@ -46,25 +65,28 @@ function runEmailAgent() {
 }
 
 // ── Process one thread ───────────────────────────────────────
-function processThreadWithAgent(thread, agentLabel) {
+function processThreadWithAgent(thread, agentLabel, blockedDomains) {
   var messages = thread.getMessages();
   var firstMsg = messages[0];
   var lastMsg  = messages[messages.length - 1];
   var subject  = thread.getFirstMessageSubject();
   var threadId = thread.getId();
   var sender   = firstMsg.getFrom();
+  var senderLC = sender.toLowerCase();
 
-  // Skip blocked domains
-  var BLOCKED = ['sourceschip.com', 'bulechip.com'];
-  for (var b = 0; b < BLOCKED.length; b++) {
-    if (sender.toLowerCase().indexOf(BLOCKED[b]) >= 0) {
+  // Archive blocked domains (fetch live from D1 via caller)
+  var blocked = blockedDomains || ['sourceschip.com', 'bulechip.com'];
+  for (var b = 0; b < blocked.length; b++) {
+    if (senderLC.indexOf(blocked[b]) >= 0) {
       thread.addLabel(agentLabel);
+      thread.moveToArchive();
+      hubLog('run', 'runEmailAgent: archived blocked domain thread: ' + subject + ' from ' + sender);
       return;
     }
   }
 
   // Skip internal emails
-  if (sender.toLowerCase().indexOf('intransittech.com') >= 0) {
+  if (senderLC.indexOf('intransittech.com') >= 0) {
     thread.addLabel(agentLabel);
     return;
   }
