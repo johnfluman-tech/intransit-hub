@@ -439,7 +439,7 @@ function executeDecision(decision, thread) {
       }
     }
     var ccEmail = (action === 'bill_handle') ? BILL_EMAIL : null;
-    var htmlBody = origMsg ? buildDraftHTML(bodyText, origMsg) : buildSimpleHTML(bodyText);
+    var htmlBody = buildSimpleHTML(bodyText);
     var draftId = createThreadedDraft(replyTo, 'Re: ' + subject, htmlBody, lastMsg.getId(), threadId, ccEmail);
     hubPostDraft(threadId, decision.mpn || '', replyTo, 'Re: ' + subject, bodyText, draftId, decision.reasoning || action);
     hubLog('draft_created', 'Worker draft (' + action + '): ' + (decision.mpn || '?'), {mpn: decision.mpn, type: action});
@@ -971,7 +971,7 @@ function processFixQueue() {
             : lastMsg;
           // Use pre-built HTML if provided; otherwise build from plain draft_body
           var htmlBody = fix.html || (fix.draft_body != null
-            ? buildDraftHTML(String(fix.draft_body), firstMsg)
+            ? buildSimpleHTML(String(fix.draft_body))
             : null);
           if (!htmlBody) throw new Error('fix-queue #' + fix.id + ': no html or draft_body');
           var draftId = createThreadedDraft(
