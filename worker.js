@@ -786,9 +786,9 @@ If at least ONE exact-match row has no BILL EXT:
 Extract TP first:
 - Valid TP: explicit dollar amount buyer states they will pay per unit. Examples: "TP $2.50", "target $X", "target price is $X", "our target price is $X USD per unit", "$X/ea", "TP 4U" / "tp4u" = $4/unit (number+U shorthand, any case, space optional), "last PO was $X" (prior PO price counts as TP signal). European: "0,18$/each" = $0.18. Key: ANY sentence where buyer states a specific dollar figure as their price — even with phrasing like "is", "will be", "can offer" — is a valid TP.
 - NOT a TP: "please quote", "what is your price?", "offer pls", "how much?" — requests for our price, not buyer's target.
-- [PARSED_RFQ: QtyReq=N, TgtPrice=X] = authoritative extracted data, use directly. TgtPrice absent from [PARSED_RFQ] = look at full thread (buyer may have since replied with TP, do not assume no TP).
+- [PARSED_RFQ: QtyReq=N, TgtPrice=X] = authoritative extracted data, use directly. TgtPrice absent from [PARSED_RFQ]: for single-message threads (initial RFQ only), no TgtPrice in the table = no TP — do NOT scan Description text for TP signals. For multi-message threads, scan only the BUYER'S OWN reply messages for a stated TP.
 - netCOMPONENTS TgtPrice column: positive number = valid TP. Blank/0/NA = no TP.
-- Description field ("OEM EXCESS! $500 MIN TP REQUIRED") is our listing label, not a TP.
+- Description field = OUR listing label (text Intransit put in its listing), NEVER the buyer's target price. Ignore any dollar signs, "target", or numbers that appear in the Description column — e.g. "OEM EXCESS! $500 MIN TP REQUIRED", "This is Our Stock! PO target $ yields best price" are listing labels, not buyer TPs.
 
 TP given:
 - No qty from buyer → request_qty: "We need a quantity to proceed. Once you provide the quantity you are looking for, we will get back to you right away."
@@ -1271,6 +1271,18 @@ async function handleEmailAgent(request, env) {
     }
   }
 
+  // Code-level guard: add_to_stan but Stan sheet already has QUOTED entry → use stan_quoted.
+  // Haiku sometimes misses the QUOTED status and defaults to add_to_stan.
+  if (decision.action === 'add_to_stan' && Array.isArray(stan_results) && stan_results.length > 0) {
+    const stanQuotedRow = stan_results.find(r => r.status === 'QUOTED' && r.colB);
+    if (stanQuotedRow) {
+      decision._corrected_from    = 'add_to_stan';
+      decision._correction_reason = 'Stan already has QUOTED entry — corrected to stan_quoted';
+      decision.action     = 'stan_quoted';
+      decision.draft_body = buildStanQuotedBody(stanQuotedRow);
+    }
+  }
+
   // Code-level guard: request_tp_* should never fire when own physical stock exists
   // (in_stock rows with no Warehouse# in notes). Haiku sometimes returns request_tp instead
   // of own_stock for these. Force to own_stock so Apps Script builds a proper quote draft.
@@ -1302,6 +1314,29 @@ async function handleEmailAgent(request, env) {
       decision.action     = 'request_tp_500';
       decision.draft_body = DRAFT_TEMPLATES.request_tp_500;
     }
+  }
+
+  // Code-level guard: own_stock has highest priority. If any non-Warehouse# IN STOCK row exists
+  // and the AI returned something other than own_stock, force own_stock.
+  if (decision.action !== 'own_stock' && decision.action !== 'no_action') {
+    const hasOwnStock3 = (in_stock_results || []).some(r => !/Warehouse#/i.test(r.notes || ''));
+    if (hasOwnStock3) {
+      decision._corrected_from    = decision._corrected_from || decision.action;
+      decision._correction_reason = 'own IN STOCK exists — own_stock takes highest priority';
+      decision.action      = 'own_stock';
+      decision.forte_entry = null;
+    }
+  }
+
+  // Code-level guard: msg_checking requires an explicit buyer TP. If AI chose msg_checking
+  // with no TP (target_price null/0), force request_tp_500 (or 2000 if $2k MIN in notes).
+  if (decision.action === 'msg_checking' && !(decision.target_price && decision.target_price > 0)) {
+    const has2kMin = (oem_results || []).some(function(r) { return /\$2,000 MIN|2000 MIN/i.test(r.notes || ''); });
+    decision._corrected_from    = decision._corrected_from || decision.action;
+    decision._correction_reason = 'msg_checking chosen but buyer gave no explicit TP — must ask for TP first';
+    decision.action      = has2kMin ? 'request_tp_2000' : 'request_tp_500';
+    decision.draft_body  = DRAFT_TEMPLATES[decision.action];
+    decision.forte_entry = null;
   }
 
   // Code-level guard: bill_handle requires an explicit buyer TP. If Haiku chose bill_handle
@@ -1434,6 +1469,18 @@ async function handleEmailAgent(request, env) {
     const totalQty2 = ownRows2.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
     const priceStr2 = storedPrice2 != null ? `$${Number(storedPrice2).toFixed(2)} each` : '$[FILL IN]';
     decision.draft_body = `This is our stock\n\nMPN: ${mpnKey2}${dc2 ? '\nDC: ' + dc2 : ''}\nQTY available: ${totalQty2 || '?'}\nPrice: ${priceStr2}\n\nThere is a $100 minimum on stock items`;
+  }
+
+  // Post-audit Fix C enforcement: audit may revert add_to_stan→stan_quoted correction.
+  // Re-apply after audit so it cannot be overridden.
+  if ((decision.action === 'add_to_stan' || decision.action === 'stan_quoted') && Array.isArray(stan_results) && stan_results.length > 0) {
+    const stanQuotedRowPost = stan_results.find(r => r.status === 'QUOTED' && r.colB);
+    if (stanQuotedRowPost && decision.action !== 'stan_quoted') {
+      decision._corrected_from    = decision._corrected_from || decision.action;
+      decision._correction_reason = 'Post-audit: Stan has QUOTED entry — enforcing stan_quoted';
+      decision.action     = 'stan_quoted';
+      decision.draft_body = buildStanQuotedBody(stanQuotedRowPost);
+    }
   }
 
   // Bug 4 / Bug 23 fix: same THREAD+MPN actioned within 30 min → no_action.
@@ -2362,7 +2409,7 @@ async function workerAddToForteSheet(env, mpn, qty, targetPrice, country) {
 async function workerAddToStanSheet(env, mpn, country, qty, tp) {
   // Check for existing entry first
   const existing = await sheetsGetAllValues(env, STAN_SHEET_ID, null);
-  const alreadyThere = existing.slice(1).some(r => r[4] && r[4].trim().toLowerCase() === mpn.trim().toLowerCase());
+  const alreadyThere = existing.slice(2).some(r => r[4] && r[4].trim().toLowerCase() === mpn.trim().toLowerCase());
   if (alreadyThere) return;
   const now = new Date();
   const today = (now.getMonth()+1) + '/' + now.getDate() + '/' + now.getFullYear();
@@ -3422,9 +3469,13 @@ async function cronProcessFixQueue(env) {
         await hubLog(env, 'email_automation', 'run', `processFixQueue: oem_remove mpn=${data.mpn} row=${data.row}`);
 
       } else if (fix.type === 'replace_draft') {
-        // Delete any existing drafts for this thread
+        // Delete any existing drafts for this thread.
+        // Draft stubs from the list API don't include threadId — match by message ID instead:
+        // fetch the thread's message list, then delete any draft whose message.id is in it.
         const drafts = await getDrafts();
-        for (const d of drafts.filter(d => d.message?.threadId === fix.thread_id)) {
+        const threadData = await gGet(`/threads/${fix.thread_id}?format=minimal`);
+        const threadMsgIds = new Set((threadData.messages || []).map(m => m.id));
+        for (const d of drafts.filter(d => d.message?.id && threadMsgIds.has(d.message.id))) {
           await gDel('/drafts/' + d.id);
         }
 
