@@ -117,6 +117,8 @@ export default {
       if (p === '/api/self-heal'   && m === 'POST') return handleSelfHeal(request, env);
       if (p === '/api/audit-draft' && m === 'POST') return handleAuditDraft(request, env);
       if (p === '/api/cost-report' && m === 'GET')  return handleCostReport(url, env);
+      if (p === '/api/stan-sheet'  && m === 'GET')  return handleGetStanSheet(env);
+      if (p === '/api/fix-stan-rows' && m === 'POST') return handleFixStanRows(env);
 
       if (p === '/api/fix-queue' && m === 'GET')  return handleGetFixQueue(url, env);
       if (p === '/api/fix-queue' && m === 'POST') return handlePostFixQueue(request, env);
@@ -1746,6 +1748,49 @@ async function handleAuditDraft(request, env) {
   return json(audit);
 }
 
+async function handleFixStanRows(env) {
+  const rows = await sheetsGetAllValues(env, STAN_SHEET_ID, null);
+  if (!rows || rows.length < 2) return json({ error: 'Sheet too short' }, 400);
+  const r1 = rows[0], r2 = rows[1];
+  const mpn1 = (r1[4] || '').trim(), mpn2 = (r2[4] || '').trim();
+  if (mpn1 !== 'LCMXO2-7000HC-4BG256I') return json({ error: `Row 1 MPN is "${mpn1}", expected LCMXO2-7000HC-4BG256I` }, 400);
+  if (mpn2 !== 'MC68HC000FN16')         return json({ error: `Row 2 MPN is "${mpn2}", expected MC68HC000FN16` }, 400);
+  // Get sheet tab ID for batchUpdate
+  const meta = await sheetsGetMeta(env, STAN_SHEET_ID);
+  const sheetId = meta?.sheets?.[0]?.properties?.sheetId ?? 0;
+  // Delete rows 0 and 1 (0-indexed) in one request (delete row 0 twice — after first delete, old row 1 becomes row 0)
+  const del = await sheetsBatchUpdate(env, STAN_SHEET_ID, [
+    { deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: 0, endIndex: 2 } } }
+  ]);
+  if (del.error) return json({ error: 'Delete failed: ' + JSON.stringify(del.error) }, 500);
+  // Re-read to find new last row, then append both
+  const rows2 = await sheetsGetAllValues(env, STAN_SHEET_ID, null);
+  let lastRow = 0;
+  for (let i = rows2.length - 1; i >= 0; i--) {
+    if (rows2[i].some(c => c && String(c).trim() !== '')) { lastRow = i + 1; break; }
+  }
+  const nextRow = lastRow + 1;
+  const app = await sheetsAppend(env, STAN_SHEET_ID, `A${nextRow}`, [r1, r2]);
+  if (app.error) return json({ error: 'Append failed: ' + JSON.stringify(app.error) }, 500);
+  return json({ ok: true, deleted: [mpn1, mpn2], appendedAtRow: nextRow });
+}
+
+async function handleGetStanSheet(env) {
+  const rows = await sheetsGetAllValues(env, STAN_SHEET_ID, null);
+  const data = (rows || []).map((r, i) => ({
+    sheetRow: i + 1,
+    status: r[0] || '',
+    colB: r[1] || '',
+    colC: r[2] || '',
+    date: r[3] || '',
+    mpn: r[4] || '',
+    country: r[5] || '',
+    qty: r[6] || '',
+    tp: r[7] || '',
+  }));
+  return json({ rows: data, total: data.length });
+}
+
 async function handleCostReport(url, env) {
   const days = Math.min(parseInt(url.searchParams.get('days') || '1'), 30);
   const { results: rows } = await env.DB.prepare(`
@@ -2414,7 +2459,13 @@ async function workerAddToStanSheet(env, mpn, country, qty, tp) {
   const now = new Date();
   const today = (now.getMonth()+1) + '/' + now.getDate() + '/' + now.getFullYear();
   const row = ['', '', '', today, mpn, country || 'USA', qty || '', tp || ''];
-  const res = await sheetsAppend(env, STAN_SHEET_ID, 'A1', [row]);
+  // Find actual last non-empty row and append after it (A1 writes to top when rows 1-2 are blank)
+  let lastDataRow = 0;
+  for (let i = existing.length - 1; i >= 0; i--) {
+    if (existing[i].some(c => c && String(c).trim() !== '')) { lastDataRow = i + 1; break; }
+  }
+  const nextRow = lastDataRow + 1;
+  const res = await sheetsAppend(env, STAN_SHEET_ID, `A${nextRow}`, [row]);
   if (res.error) throw new Error('Stan append error: ' + JSON.stringify(res.error));
 }
 
