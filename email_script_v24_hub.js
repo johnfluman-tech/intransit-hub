@@ -1270,6 +1270,63 @@ function sendReviewEmail(partNumber, emailSubject, matches) {
 
 
 
+// ── Forte bulk import ─────────────────────────────────────────────────────────
+// Run manually after process_forte_david_v3.py has written forte_processed_output.csv.
+// Reads the CSV from Google Drive, preserves BILL EXT rows, replaces all other OEM EXCESS rows.
+function importForteBulk() {
+  var START = new Date();
+  Logger.log('importForteBulk: starting...');
+
+  // 1. Find the processed CSV in Drive
+  var files = DriveApp.getFilesByName('forte_processed_output.csv');
+  if (!files.hasNext()) {
+    Logger.log('importForteBulk ERROR: forte_processed_output.csv not found in Drive');
+    return;
+  }
+  var csvText = files.next().getBlob().getDataAsString('UTF-8');
+  var csvRows = Utilities.parseCsv(csvText);
+  var dataRows = csvRows.slice(1);  // skip header row
+  Logger.log('importForteBulk: CSV parsed — ' + dataRows.length + ' data rows');
+
+  // 2. Open OEM EXCESS sheet and snapshot current data
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ws = ss.getSheetByName(MAIN_SHEET_NAME);
+  var currentData = ws.getDataRange().getValues();
+  var headerRow = currentData[0];
+
+  // 3. Extract BILL EXT rows to preserve (col E = index 4)
+  var billRows = [];
+  for (var i = 1; i < currentData.length; i++) {
+    if (String(currentData[i][4] || '').toUpperCase().indexOf('BILL EXT') >= 0) {
+      billRows.push(currentData[i]);
+    }
+  }
+  Logger.log('importForteBulk: preserving ' + billRows.length + ' BILL EXT rows');
+
+  // 4. Convert CSV rows to sheet format [MPN, Man, DC, QTY, Notes]
+  var newRows = dataRows.map(function(r) {
+    return [r[0] || '', r[1] || '', '', parseInt(r[3], 10) || 0, r[4] || ''];
+  });
+
+  // 5. Build final data: header + BILL EXT + new Forte rows
+  var allRows = [headerRow].concat(billRows).concat(newRows);
+
+  // 6. Clear and rewrite in chunks of 5000 rows to avoid timeout
+  ws.clearContents();
+  var CHUNK = 5000;
+  var numCols = allRows[0].length;
+  for (var start = 0; start < allRows.length; start += CHUNK) {
+    var chunk = allRows.slice(start, start + CHUNK);
+    ws.getRange(start + 1, 1, chunk.length, numCols).setValues(chunk);
+  }
+
+  var elapsed = Math.round((new Date() - START) / 1000);
+  Logger.log('importForteBulk: DONE in ' + elapsed + 's | ' +
+    'Total rows: ' + allRows.length + ' | BILL EXT kept: ' + billRows.length +
+    ' | New Forte rows: ' + newRows.length);
+}
+
+
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function(t){ScriptApp.deleteTrigger(t);});
   // Phase 3: inbox scanning + thread processing → worker cron
