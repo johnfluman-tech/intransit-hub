@@ -2971,10 +2971,9 @@ async function cronScanInbox(env) {
     const ids = [rfqLabelId].filter(Boolean);
     if (ids.length) labelOps.push(gPost('/threads/' + tid + '/modify', { addLabelIds: ids }));
   }
-  for (const tid of tpThreads) {
-    const ids = [tpLabelId].filter(Boolean);
-    if (ids.length) labelOps.push(gPost('/threads/' + tid + '/modify', { addLabelIds: ids }));
-  }
+  // tpThreads: do NOT pre-label with oem-tp-processed here.
+  // executeDecisionCron applies Label_166 only after a final action (msg_checking etc.).
+  // Pre-labeling here permanently blocks buyer TP replies from being re-caught.
   for (const tid of agentThreads.filter(t => !rfqThreads.includes(t) && !tpThreads.includes(t))) {
     const ids = [agentLabelId, rfqLabelId].filter(Boolean);
     if (ids.length) labelOps.push(gPost('/threads/' + tid + '/modify', { addLabelIds: ids }));
