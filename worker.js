@@ -879,11 +879,22 @@ function parseICSourceHTML(html) {
   while ((m = thRe.exec(html)) !== null) {
     headers.push(m[1].replace(/<[^>]+>/g, '').trim().toLowerCase());
   }
-  if (!headers.length) return null;
+  // Extract buyer email from mailto links — pick first that isn't intransittech.com or icsource
+  let buyerEmail = null;
+  const mailtoRe = /href="mailto:([^"@\s]+@[^"@\s]+)"/gi;
+  let em;
+  while ((em = mailtoRe.exec(html)) !== null) {
+    const addr = em[1].toLowerCase();
+    if (!addr.includes('intransittech.com') && !addr.includes('icsource.com')) {
+      buyerEmail = em[1];
+      break;
+    }
+  }
+  if (!headers.length) return buyerEmail ? { qtyReq: null, mpn: null, tgtPrice: null, buyerEmail } : null;
   const qtyIdx = headers.findIndex(h => h === 'quantity' || h === 'qty');
   const mpnIdx = headers.findIndex(h => h === 'part number' || h === 'part no.' || (h.includes('part') && !h.includes('price')));
   const tpIdx  = headers.findIndex(h => h.includes('req unit price') || h.includes('target price'));
-  if (qtyIdx < 0) return null;
+  if (qtyIdx < 0) return buyerEmail ? { qtyReq: null, mpn: null, tgtPrice: null, buyerEmail } : null;
   const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
   const rows = [];
   while ((m = rowRe.exec(html)) !== null) {
@@ -897,14 +908,15 @@ function parseICSourceHTML(html) {
   }
   const maxIdx = Math.max(qtyIdx, mpnIdx >= 0 ? mpnIdx : 0, tpIdx >= 0 ? tpIdx : 0);
   const dataRow = rows.find(r => r.length > maxIdx);
-  if (!dataRow) return null;
+  if (!dataRow) return buyerEmail ? { qtyReq: null, mpn: null, tgtPrice: null, buyerEmail } : null;
   const qty = parseInt((dataRow[qtyIdx] || '').replace(/,/g, ''), 10);
   const mpn = mpnIdx >= 0 ? dataRow[mpnIdx] : null;
   const tp  = tpIdx  >= 0 ? parseFloat((dataRow[tpIdx] || '').replace(/[$,]/g, '')) : NaN;
   return {
-    qtyReq:   isNaN(qty) ? null : qty,
-    mpn:      mpn || null,
-    tgtPrice: isNaN(tp) || tp <= 0 ? null : tp,
+    qtyReq:    isNaN(qty) ? null : qty,
+    mpn:       mpn || null,
+    tgtPrice:  isNaN(tp) || tp <= 0 ? null : tp,
+    buyerEmail: buyerEmail,
   };
 }
 
@@ -2784,7 +2796,8 @@ async function buildScanPayload(threadId, token, env) {
   if (content.length > 8000) content = content.substring(0, 8000) + '\n[truncated]';
   const firstBuyer = msgs.find(m => {
     const f = getHdr(m, 'From').toLowerCase();
-    return !f.includes('intransittech.com') && !f.includes('fortetechno.com') && !f.includes('fortecomp.com');
+    return !f.includes('intransittech.com') && !f.includes('fortetechno.com') && !f.includes('fortecomp.com')
+      && !f.includes('autosend@icsource') && !f.includes('messagesend@netcomponents');
   });
   const sender = firstBuyer ? extractEmailAddr(getHdr(firstBuyer, 'From')) : '';
   const mpnHint = extractMpnHint(subject);
@@ -2801,7 +2814,15 @@ async function buildScanPayload(threadId, token, env) {
     prior_quotes:    'None found',
   };
   if (mpnHint && /[A-Za-z]/.test(mpnHint) && /[0-9]/.test(mpnHint) && mpnHint.length >= 5) payload.mpn = mpnHint;
-  if (isICS) payload.icsource_html = extractMimeText(lastMsg.payload, true) || extractMimeText(lastMsg.payload);
+  if (isICS) {
+    const icsHtml = extractMimeText(lastMsg.payload, true) || extractMimeText(lastMsg.payload);
+    payload.icsource_html = icsHtml;
+    // Pre-extract buyer email at code level — don't rely on AI to avoid SAFETY ABORT
+    if (icsHtml) {
+      const icParsed = parseICSourceHTML(icsHtml);
+      if (icParsed && icParsed.buyerEmail) payload.ics_buyer_email = icParsed.buyerEmail;
+    }
+  }
 
   // Inject [PARSED_RFQ] for netCOMPONENTS emails — gives agent authoritative QtyReq/TgtPrice
   const isNetComp = msgs[0] && getHdr(msgs[0], 'From').toLowerCase().includes('messagesend@netcomponents.com');
@@ -2835,7 +2856,7 @@ async function executeDecisionCron(decision, payload, token, env) {
   const threadId = payload.thread_id;
 
   if (decision.draft_body) {
-    const replyTo = decision.buyer_email || payload.sender || '';
+    const replyTo = payload.ics_buyer_email || decision.buyer_email || payload.sender || '';
     const isRelay = a => !a || a.toLowerCase().includes('intransittech.com') ||
       a.includes('messagesend@netcomponents') || a.includes('autosend@icsource');
     if (isRelay(replyTo)) {
@@ -2862,8 +2883,12 @@ async function executeDecisionCron(decision, payload, token, env) {
     await hubLog(env, 'email_automation', 'draft_created', 'cronScanInbox: draft (' + action + ') for ' + (decision.mpn || '?'), { threadId });
   }
 
-  // Apply result label
-  await gPost('/threads/' + threadId + '/modify', { addLabelIds: ['Label_166'] });
+  // Apply oem-tp-processed only for final response actions — NOT for request_tp_*
+  // (request_tp threads must stay catchable by tpQ so buyer TP replies get processed)
+  const FINAL_ACTIONS = ['msg_checking','bill_handle','own_stock','stan_quoted','add_to_stan','remove_oem','david_nostock','no_bid','listing_removed'];
+  if (FINAL_ACTIONS.includes(action)) {
+    await gPost('/threads/' + threadId + '/modify', { addLabelIds: ['Label_166'] });
+  }
 
   // Queue sheet side-effects for Apps Script processSheetQueue
   if (decision.forte_entry?.mpn && decision.forte_entry?.qty) {
@@ -3095,7 +3120,7 @@ async function cronCheckDavidNoStock(env) {
   const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
   const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
 
-  const NO_STK = ['no stk','no stock','stk sold','stock sold','cant find','cant share','cannot find','removed','no inventory','sold lying commie','soly lying commie','lying commie','sold out','all sold','no longer have'];
+  const NO_STK = ['no stk','no stock','stk sold','stock sold','cant find','cant share','cannot find','removed','no inventory','sold lying commie','soly lying commie','lying commie','sold out','all sold','no longer have','sold'];
   const searches = await Promise.all([
     'from:david@fortetechno.com -label:oem-rfq-incoming-processed newer_than:14d',
     'from:david@fortecomp.com -label:oem-rfq-incoming-processed newer_than:14d',
