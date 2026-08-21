@@ -2931,13 +2931,32 @@ async function cronScanInbox(env) {
   const { results: blockRows } = await env.DB.prepare("SELECT key FROM rules WHERE type='blocked_domain'").all();
   const blockFilter = (blockRows || []).map(r => '-from:' + r.key).join(' ');
 
-  // Auto-archive blocked domain emails from inbox
+  // Auto-archive blocked domain emails from inbox + create "blocked sender" draft
   if (blockRows?.length) {
     const blockedQ = encodeURIComponent('in:inbox (' + blockRows.map(r => 'from:' + r.key).join(' OR ') + ')');
     const blockedRes = await gGet('/threads?q=' + blockedQ + '&maxResults=20');
     const blockedThreads = (blockedRes.threads || []).map(t => t.id);
     if (blockedThreads.length) {
-      await Promise.all(blockedThreads.map(tid => gPost('/threads/' + tid + '/modify', { removeLabelIds: ['INBOX'] })));
+      await Promise.all(blockedThreads.map(async tid => {
+        try {
+          const tData = await gGet('/threads/' + tid + '?format=metadata&metadataHeaders=From,Subject,Message-ID,To,References');
+          const msgs = tData.messages || [];
+          const lastMsg = msgs[msgs.length - 1] || {};
+          const subject = getHdr(lastMsg, 'Subject') || '(no subject)';
+          const fromHdr = getHdr(lastMsg, 'From') || '';
+          const msgId   = getHdr(lastMsg, 'Message-ID') || '';
+          const refs    = getHdr(lastMsg, 'References') || '';
+          const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
+          const toAddr = fromHdr.match(/<([^>]+)>/) ? fromHdr.match(/<([^>]+)>/)[1] : fromHdr;
+          const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + toAddr, 'Subject: ' + replySubj, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8'];
+          if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
+          mimeLines.push('', 'This is a blocked sender');
+          await gPost('/drafts', { message: { threadId: tid, raw: base64url(mimeLines.join('\r\n')) } });
+        } catch (e) {
+          await hubLog(env, 'email_automation', 'error', `cronScanInbox: blocked draft error tid=${tid}: ${e.message}`);
+        }
+        await gPost('/threads/' + tid + '/modify', { removeLabelIds: ['INBOX'] });
+      }));
       await hubLog(env, 'email_automation', 'run', `cronScanInbox: archived ${blockedThreads.length} blocked domain threads`);
     }
   }
