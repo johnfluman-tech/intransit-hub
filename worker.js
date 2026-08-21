@@ -3065,10 +3065,46 @@ async function cronCheckPaymentAdvice(env) {
         'From: ' + getHdr(firstMsg, 'From') + '<br>' +
         'Subject: ' + subject + '<br><br>' +
         body.replace(/\n/g, '<br>') + '</div>';
-      const mimeLines = ['From: ' + JOHN_FROM, 'To: deb@intransittech.com', 'Subject: ' + fwdSubject, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
-      if (msgId) mimeLines.push('References: ' + msgId);
-      mimeLines.push('', htmlBody);
-      const sent = await gPost('/messages/send', { raw: base64url(mimeLines.join('\r\n')) });
+
+      // Collect attachments from the message payload
+      const attachments = [];
+      const collectAttachments = (part) => {
+        if (!part) return;
+        if (part.filename && part.body?.attachmentId) {
+          attachments.push({ filename: part.filename, mimeType: part.mimeType || 'application/octet-stream', attachmentId: part.body.attachmentId });
+        }
+        (part.parts || []).forEach(collectAttachments);
+      };
+      collectAttachments(firstMsg.payload);
+
+      let raw;
+      if (attachments.length) {
+        // Fetch each attachment and build multipart/mixed MIME
+        const boundary = 'fwd_boundary_' + Date.now();
+        const parts = ['--' + boundary, 'Content-Type: text/html; charset=utf-8', '', htmlBody];
+        for (const att of attachments) {
+          const attData = await gGet('/messages/' + firstMsg.id + '/attachments/' + att.attachmentId);
+          const b64 = (attData.data || '').replace(/-/g, '+').replace(/_/g, '/'); // url-safe → standard base64
+          parts.push('--' + boundary);
+          parts.push('Content-Type: ' + att.mimeType + '; name="' + att.filename + '"');
+          parts.push('Content-Disposition: attachment; filename="' + att.filename + '"');
+          parts.push('Content-Transfer-Encoding: base64');
+          parts.push('');
+          // Split base64 into 76-char lines per MIME spec
+          parts.push(b64.match(/.{1,76}/g).join('\r\n'));
+        }
+        parts.push('--' + boundary + '--');
+        const mimeLines = ['From: ' + JOHN_FROM, 'To: deb@intransittech.com', 'Subject: ' + fwdSubject, 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary="' + boundary + '"'];
+        if (msgId) mimeLines.push('References: ' + msgId);
+        mimeLines.push('', parts.join('\r\n'));
+        raw = base64url(mimeLines.join('\r\n'));
+      } else {
+        const mimeLines = ['From: ' + JOHN_FROM, 'To: deb@intransittech.com', 'Subject: ' + fwdSubject, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+        if (msgId) mimeLines.push('References: ' + msgId);
+        mimeLines.push('', htmlBody);
+        raw = base64url(mimeLines.join('\r\n'));
+      }
+      const sent = await gPost('/messages/send', { raw });
       if (sent.error) throw new Error('Send error: ' + JSON.stringify(sent.error));
       const addLabels = fwdLabelId ? [fwdLabelId] : [];
       await gPost('/threads/' + t.id + '/modify', { addLabelIds: addLabels, removeLabelIds: ['INBOX'] });
