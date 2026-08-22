@@ -133,6 +133,7 @@ export default {
       if (p === '/api/stock-prices' && m === 'GET')    return handleGetStockPrice(url, env);
       if (p === '/api/stock-prices' && m === 'POST')   return handlePostStockPrice(request, env);
       if (p === '/api/stock-prices' && m === 'DELETE') return handleDeleteStockPrice(url, env);
+      if (p === '/api/instock-row'  && m === 'GET')    return handleGetInstockRow(url, env);
 
       if (p === '/api/command-queue' && m === 'GET')  return handleGetCommandQueue(url, env);
       if (p === '/api/command-queue' && m === 'POST') return handlePostCommandQueue(request, env);
@@ -1408,10 +1409,11 @@ async function handleEmailAgent(request, env) {
       const priceRow = sheetPrice == null ? await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(mpnKey).first() : null;
       const storedPrice = sheetPrice != null ? sheetPrice : (priceRow != null ? priceRow.price : null);
       if (!decision.draft_body) {
-        const dc = (ownRows[0] && ownRows[0].dc) ? ownRows[0].dc : '';
+        const dc  = (ownRows[0] && ownRows[0].dc)  ? ownRows[0].dc  : '';
+        const man = (ownRows[0] && ownRows[0].man) ? ownRows[0].man : '';
         const totalQty = ownRows.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
         const priceStr = storedPrice != null ? `$${Number(storedPrice).toFixed(2)} each` : '$[FILL IN]';
-        decision.draft_body = `This is our stock\n\nMPN: ${mpnKey}${dc ? '\nDC: ' + dc : ''}\nQTY available: ${totalQty || '?'}\nPrice: ${priceStr}\n\nThere is a $100 minimum on stock items`;
+        decision.draft_body = `We have the following available:\n\nMPN: ${mpnKey}${man ? '\nManufacturer: ' + man : ''}${dc ? '\nDC: ' + dc : ''}\nQTY: ${totalQty || '?'}\nPrice: ${priceStr}\n\nPlease let us know if you would like to proceed.`;
       } else if (storedPrice != null && decision.draft_body.includes('[FILL IN]')) {
         decision.draft_body = decision.draft_body.replace(/\$\[FILL IN\]/g, `$${Number(storedPrice).toFixed(2)} each`);
       }
@@ -1478,10 +1480,11 @@ async function handleEmailAgent(request, env) {
     const sheetPrice2 = ownRows2.length > 0 && ownRows2[0].price_to_quote ? Number(ownRows2[0].price_to_quote) : null;
     const priceRow2 = sheetPrice2 == null ? await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(mpnKey2).first() : null;
     const storedPrice2 = sheetPrice2 != null ? sheetPrice2 : (priceRow2 != null ? priceRow2.price : null);
-    const dc2 = (ownRows2[0] && ownRows2[0].dc) ? ownRows2[0].dc : '';
+    const dc2  = (ownRows2[0] && ownRows2[0].dc)  ? ownRows2[0].dc  : '';
+    const man2 = (ownRows2[0] && ownRows2[0].man) ? ownRows2[0].man : '';
     const totalQty2 = ownRows2.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
     const priceStr2 = storedPrice2 != null ? `$${Number(storedPrice2).toFixed(2)} each` : '$[FILL IN]';
-    decision.draft_body = `This is our stock\n\nMPN: ${mpnKey2}${dc2 ? '\nDC: ' + dc2 : ''}\nQTY available: ${totalQty2 || '?'}\nPrice: ${priceStr2}\n\nThere is a $100 minimum on stock items`;
+    decision.draft_body = `We have the following available:\n\nMPN: ${mpnKey2}${man2 ? '\nManufacturer: ' + man2 : ''}\nDC: ${dc2 || '?'}\nQTY: ${totalQty2 || '?'}\nPrice: ${priceStr2}\n\nPlease let us know if you would like to proceed.`;
   }
 
   // Post-audit Fix C enforcement: audit may revert add_to_stan→stan_quoted correction.
@@ -1624,6 +1627,15 @@ async function handleDeleteStockPrice(url, env) {
   if (!mpn) return json({ error: 'mpn required' }, 400);
   await env.DB.prepare('DELETE FROM stock_prices WHERE mpn = ?').bind(mpn).run();
   return json({ ok: true });
+}
+
+async function handleGetInstockRow(url, env) {
+  const row = parseInt(url.searchParams.get('row') || '0', 10);
+  if (!row) return json({ error: 'row required' }, 400);
+  const tok = await getGmailToken(env);
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${IN_STOCK_ID}/values/A${row}:K${row}`, { headers: { Authorization: 'Bearer ' + tok } }).then(r => r.json());
+  const vals = (res.values || [[]])[0] || [];
+  return json({ row, mpn: vals[1]||'', man: vals[2]||'', dc: vals[3]||'', qty: vals[4]||'', price_to_quote: vals[5]||'', notes: vals[9]||'' });
 }
 
 async function handleGetCommandQueue(url, env) {
