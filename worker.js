@@ -1653,8 +1653,11 @@ async function handleGetCommandById(env, id) {
 }
 
 async function handlePostCommandQueue(request, env) {
-  const { type, data } = await request.json();
+  const body = await request.json();
+  const type = body.type;
   if (!type) return json({ error: 'type is required' }, 400);
+  // Accept both { type, data: {...} } and flat { type, mpn, qty, ... }
+  const data = body.data || (Object.keys(body).length > 1 ? (({ type: _t, ...rest }) => rest)(body) : null);
   const { meta } = await env.DB.prepare(
     `INSERT INTO command_queue (type, data) VALUES (?, ?)`
   ).bind(type, data ? JSON.stringify(data) : null).run();
@@ -3413,7 +3416,7 @@ async function cronProcessCommandQueue(env) {
         if (hasRecent) {
           await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: add_forte_entry 60-day skip ${mpn}`);
         } else {
-          await workerAddToForteSheet(env, mpn, qty, data.tp || '', data.country || '');
+          await workerAddToForteSheet(env, mpn, qty, data.tp || data.buyer_tp || '', data.country || '');
           await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: add_forte_entry ${mpn} qty=${qty}`);
         }
 
