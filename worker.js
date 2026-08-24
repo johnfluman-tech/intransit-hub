@@ -2839,6 +2839,11 @@ async function buildScanPayload(threadId, token, env) {
   // Inject [PARSED_RFQ] for netCOMPONENTS emails — gives agent authoritative QtyReq/TgtPrice
   const isNetComp = msgs[0] && getHdr(msgs[0], 'From').toLowerCase().includes('messagesend@netcomponents.com');
   if (isNetComp) {
+    // Extract real buyer email from From header: "Name [buyer@domain.com]" <relay>
+    const ncFromHdr = getHdr(msgs[0], 'From');
+    const ncEmailMatch = ncFromHdr.match(/\[([^\]@\s]+@[^\]\s]+)\]/);
+    if (ncEmailMatch) payload.nc_buyer_email = ncEmailMatch[1];
+
     const ncHtml = extractMimeText(msgs[0].payload, true);
     if (ncHtml) {
       const nc = parseNetCompHTML(ncHtml);
@@ -2868,7 +2873,7 @@ async function executeDecisionCron(decision, payload, token, env) {
   const threadId = payload.thread_id;
 
   if (decision.draft_body) {
-    const replyTo = payload.ics_buyer_email || decision.buyer_email || payload.sender || '';
+    const replyTo = payload.ics_buyer_email || payload.nc_buyer_email || decision.buyer_email || payload.sender || '';
     const isRelay = a => !a || a.toLowerCase().includes('intransittech.com') ||
       a.includes('messagesend@netcomponents') || a.includes('autosend@icsource');
     if (isRelay(replyTo)) {
