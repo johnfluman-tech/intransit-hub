@@ -2809,7 +2809,7 @@ async function buildScanPayload(threadId, token, env) {
   const firstBuyer = msgs.find(m => {
     const f = getHdr(m, 'From').toLowerCase();
     return !f.includes('intransittech.com') && !f.includes('fortetechno.com') && !f.includes('fortecomp.com')
-      && !f.includes('autosend@icsource') && !f.includes('messagesend@netcomponents');
+      && !f.includes('autosend@icsource') && !f.includes('messagesend@netcomponents') && !f.includes('partalert@netcomponents');
   });
   const sender = firstBuyer ? extractEmailAddr(getHdr(firstBuyer, 'From')) : '';
   const mpnHint = extractMpnHint(subject);
@@ -2875,7 +2875,7 @@ async function executeDecisionCron(decision, payload, token, env) {
   if (decision.draft_body) {
     const replyTo = payload.ics_buyer_email || payload.nc_buyer_email || decision.buyer_email || payload.sender || '';
     const isRelay = a => !a || a.toLowerCase().includes('intransittech.com') ||
-      a.includes('messagesend@netcomponents') || a.includes('autosend@icsource');
+      a.includes('messagesend@netcomponents') || a.includes('autosend@icsource') || a.includes('partalert@netcomponents');
     if (isRelay(replyTo)) {
       await hubLog(env, 'email_automation', 'error', 'cronScanInbox: SAFETY ABORT no external replyTo for ' + threadId);
       return;
@@ -2980,13 +2980,13 @@ async function cronScanInbox(env) {
 
   // Gmail search queries (keep short to stay under URL limits)
   const rfqQ = encodeURIComponent(
-    'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -label:oem-rfq-incoming-processed newer_than:3d ' + blockFilter
+    'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed newer_than:3d ' + blockFilter
   );
   const tpQ = encodeURIComponent(
-    'in:inbox (label:oem-rfq-incoming-processed OR from:messagesend@netcomponents.com) -label:oem-tp-processed newer_than:60d ' + blockFilter
+    'in:inbox (label:oem-rfq-incoming-processed OR from:messagesend@netcomponents.com) -label:oem-tp-processed -from:partalert@netcomponents.com newer_than:60d ' + blockFilter
   );
   const agentQ = encodeURIComponent(
-    'in:inbox -label:oem-agent-processed -label:oem-rfq-incoming-processed newer_than:3d -from:fortetechno.com -from:fortecomp.com ' + blockFilter + ' (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for" OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend OR subject:pcs OR subject:units OR quotation OR "please quote" OR "please check" OR "can you quote" OR "provide the price")'
+    'in:inbox -label:oem-agent-processed -label:oem-rfq-incoming-processed newer_than:3d -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com ' + blockFilter + ' (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for" OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend OR subject:pcs OR subject:units OR quotation OR "please quote" OR "please check" OR "can you quote" OR "provide the price")'
   );
 
   const [rfqRes, tpRes, agentRes] = await Promise.all([
