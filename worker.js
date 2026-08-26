@@ -3276,7 +3276,14 @@ async function cronCheckDavidNoStock(env) {
   const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
   const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
 
-  const NO_STK = ['no stk','no stock','stk sold','stock sold','cant find','cant share','cannot find','removed','no inventory','sold lying commie','soly lying commie','lying commie','sold out','all sold','no longer have','sold'];
+  const NO_STK = ['no stk','no stock','stk sold','stock sold','cant find','cant share','cannot find','removed','no inventory','sold lying commie','soly lying commie','lying commie','sold out','all sold','no longer have'];
+  // Market-pricing emails list competitor distributors + prices — never treat as no-stock
+  const MARKET_DISTRIBUTORS = ['newark','mouser','avnet','digikey','arrow','future','turandot','winsun','vrg','bettering','element14','rs components','farnell'];
+  function isMarketPricingEmail(text) {
+    const distMatches = MARKET_DISTRIBUTORS.filter(d => text.includes(d)).length;
+    const priceMatches = (text.match(/\$\d+(\.\d+)?/g) || []).length;
+    return distMatches >= 2 && priceMatches >= 3;
+  }
   const searches = await Promise.all([
     'from:david@fortetechno.com -label:oem-rfq-incoming-processed newer_than:14d',
     'from:david@fortecomp.com -label:oem-rfq-incoming-processed newer_than:14d',
@@ -3303,9 +3310,16 @@ async function cronCheckDavidNoStock(env) {
       const subject = getHdr(msgs[0], 'Subject');
       const bodyAll = msgs.map(m => extractMimeText(m.payload)).join('\n').toLowerCase();
       const checkText = subject.toLowerCase() + '\n' + bodyAll;
-      const isNoStk = NO_STK.some(kw => checkText.includes(kw));
       const addLabels = processedLabelId ? [processedLabelId] : [];
 
+      // If email looks like a competitor price list, it's market pricing — not a no-stock signal
+      if (isMarketPricingEmail(bodyAll)) {
+        await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
+        await hubLog(env, 'email_automation', 'run', 'cronCheckDavidNoStock: skipped market-pricing thread tid=' + tid);
+        continue;
+      }
+
+      const isNoStk = NO_STK.some(kw => checkText.includes(kw));
       if (!isNoStk) {
         await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
         continue;
