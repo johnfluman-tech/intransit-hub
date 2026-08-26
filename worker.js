@@ -145,6 +145,8 @@ export default {
       const agentId = p.match(/^\/api\/agent-decisions\/(\d+)$/);
       if (agentId && m === 'PATCH') return handlePatchAgentDecision(request, env, parseInt(agentId[1]));
 
+
+
       if (p === '/api/netcomp-check' && m === 'GET') {
         const mpn = url.searchParams.get('mpn');
         if (!mpn) return json({ error: 'mpn required' }, 400);
@@ -1672,6 +1674,86 @@ async function handlePatchCommandQueue(request, env, id) {
   ).bind(status, error || null, id).run();
   return json({ ok: true });
 }
+
+function noStkColKRequest(sheetId, rowIndex) {
+  // backgroundColor:{} = black (API omits zero values; explicit {r:0,g:0,b:0} is treated as "no color")
+  return { repeatCell: {
+    range: { sheetId, startRowIndex: rowIndex, endRowIndex: rowIndex + 1, startColumnIndex: 10, endColumnIndex: 11 },
+    cell: { userEnteredFormat: {
+      backgroundColor: {},
+      backgroundColorStyle: { rgbColor: {} },
+      textFormat: {
+        foregroundColor: { red: 1, green: 1, blue: 1 },
+        foregroundColorStyle: { rgbColor: { red: 1, green: 1, blue: 1 } }
+      }
+    }},
+    fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.backgroundColorStyle,userEnteredFormat.textFormat.foregroundColor,userEnteredFormat.textFormat.foregroundColorStyle'
+  }};
+}
+
+async function handleProcessNoStkColL(env) {
+  const rows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+  const meta = await sheetsGetMeta(env, FORTE_SHEET_ID);
+  const sheetId = meta.sheets[0].properties.sheetId;
+  const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles' });
+  const noStkPhrases = ['no stock', 'no stk', 'cant share', 'cant find', 'can\'t share', 'can\'t find'];
+  const valUpdates = [], fmtRequests = [], queued = [];
+  // Skip rows where status is already NO STK, CLOSED, or QUOTED
+  const skipStatus = ['no stk', 'closed', 'quoted'];
+  for (let i = 1; i < rows.length; i++) {
+    const status = ((rows[i] && rows[i][10]) || '').toString().toLowerCase();
+    if (skipStatus.some(s => status.includes(s))) continue;
+    // Check col L (index 11) and beyond for no-stk phrases
+    const extra = [rows[i][11], rows[i][12], rows[i][13]].map(v => (v||'').toLowerCase()).join(' ');
+    if (!noStkPhrases.some(p => extra.includes(p))) continue;
+    const mpn = (rows[i][1] || '').trim();
+    if (!mpn) continue;
+    valUpdates.push({ range: `K${i+1}`, values: [['NO STK - ' + today]] });
+    fmtRequests.push(noStkColKRequest(sheetId, i));
+    queued.push(mpn);
+  }
+  if (valUpdates.length) {
+    const ft = await getGmailToken(env);
+    const vr = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values:batchUpdate`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + ft, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ valueInputOption: 'RAW', data: valUpdates }),
+    });
+    const vj = await vr.json();
+    if (vj.error) await hubLog(env, 'email_automation', 'error', 'process-nostk-colL values: ' + JSON.stringify(vj.error));
+    const fr = await sheetsBatchUpdate(env, FORTE_SHEET_ID, fmtRequests);
+    if (fr.error) await hubLog(env, 'email_automation', 'error', 'process-nostk-colL format: ' + JSON.stringify(fr.error));
+    // Queue OEM removals
+    for (const mpn of queued) {
+      await env.DB.prepare(`INSERT INTO command_queue (type, data) VALUES (?, ?)`).bind('remove_oem_mpn', JSON.stringify({ mpn })).run();
+    }
+  }
+  return json({ ok: true, processed: queued.length, mpns: queued });
+}
+
+async function handleFixNoStkFormat(env) {
+  const meta = await sheetsGetMeta(env, FORTE_SHEET_ID);
+  const sheetId = meta.sheets[0].properties.sheetId;
+  const rows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+  const requests = [];
+  for (let i = 1; i < rows.length; i++) {
+    const status = ((rows[i] && rows[i][10]) || '').toString().toUpperCase();
+    if (status.indexOf('NO STK') !== -1) {
+      // Clear ALL formatting on the entire row first (restores default colors — avoids black-on-black)
+      requests.push({ repeatCell: {
+        range: { sheetId, startRowIndex: i, endRowIndex: i + 1, startColumnIndex: 0, endColumnIndex: 26 },
+        cell: {},
+        fields: 'userEnteredFormat'
+      }});
+      // Apply black bg + white text to col K only using both color + colorStyle
+      requests.push(noStkColKRequest(sheetId, i));
+    }
+  }
+  if (!requests.length) return json({ ok: true, formatted: 0 });
+  const result = await sheetsBatchUpdate(env, FORTE_SHEET_ID, requests);
+  return json({ ok: true, nostk_rows: requests.length / 2, api: result.replies ? 'ok' : result });
+}
+
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -3387,22 +3469,30 @@ async function cronProcessCommandQueue(env) {
             await sheetsBatchUpdate(env, OEM_SHEET_ID, [{ deleteDimension: { range: { sheetId: oemSheetId, dimension: 'ROWS', startIndex: rn-1, endIndex: rn } } }]);
           }
         }
-        // Update Forte: set col K to "NO STK - today" for non-closed rows matching MPN
+        // Update Forte: set col K to "NO STK - today" + apply black/white col K formatting
         const forteRows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+        const forteMeta = await sheetsGetMeta(env, FORTE_SHEET_ID);
+        const forteSheetId = forteMeta.sheets[0].properties.sheetId;
         const forteUpdates = [];
+        const forteRowNums = [];
         for (let i = 1; i < forteRows.length; i++) {
           if (normalizeMPN(forteRows[i][1]) === normalizeMPN(mpn)) {
             const status = (forteRows[i][10] || '').trim().toUpperCase();
-            if (status !== 'CLOSED') forteUpdates.push({ range: `K${i+1}`, values: [['NO STK - ' + today]] });
+            if (status !== 'CLOSED') { forteUpdates.push({ range: `K${i+1}`, values: [['NO STK - ' + today]] }); forteRowNums.push(i); }
           }
         }
         if (forteUpdates.length) {
           const ft = await getGmailToken(env);
-          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values:batchUpdate`, {
+          const valRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values:batchUpdate`, {
             method: 'POST',
             headers: { Authorization: 'Bearer ' + ft, 'Content-Type': 'application/json' },
             body: JSON.stringify({ valueInputOption: 'RAW', data: forteUpdates }),
           });
+          const valJson = await valRes.json();
+          if (valJson.error) await hubLog(env, 'email_automation', 'error', `remove_oem_mpn forte values error ${mpn}: ${JSON.stringify(valJson.error)}`);
+          // Apply black bg + white text to col K for each updated row
+          const fmtRes = await sheetsBatchUpdate(env, FORTE_SHEET_ID, forteRowNums.map(i => noStkColKRequest(forteSheetId, i)));
+          if (fmtRes.error) await hubLog(env, 'email_automation', 'error', `remove_oem_mpn forte format error ${mpn}: ${JSON.stringify(fmtRes.error)}`);
         }
         await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: remove_oem_mpn ${mpn} (${toDelete.length} oem rows, ${forteUpdates.length} forte updates)`);
 
@@ -3588,6 +3678,32 @@ async function cronProcessFixQueue(env) {
         const data = JSON.parse(fix.draft_body || '{}');
         if (!data.mpn && !data.row) throw new Error('oem_remove: missing mpn and row');
         await workerDeleteOemRow(env, data.mpn || '', data.row || 0);
+        // Stamp Forte col K "NO STK - today" + black/white formatting for every matching open row
+        if (data.mpn) {
+          const oemToday = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles' });
+          const forteRows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+          const forteMeta = await sheetsGetMeta(env, FORTE_SHEET_ID);
+          const forteSheetId = forteMeta.sheets[0].properties.sheetId;
+          const forteUpdates = [], forteRowNums = [];
+          for (let i = 1; i < forteRows.length; i++) {
+            if (normalizeMPN(forteRows[i][1]) === normalizeMPN(data.mpn)) {
+              const status = (forteRows[i][10] || '').trim().toUpperCase();
+              if (status !== 'CLOSED') {
+                forteUpdates.push({ range: `K${i+1}`, values: [['NO STK - ' + oemToday]] });
+                forteRowNums.push(i);
+              }
+            }
+          }
+          if (forteUpdates.length) {
+            const fToken = await getGmailToken(env);
+            await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values:batchUpdate`, {
+              method: 'POST',
+              headers: { Authorization: 'Bearer ' + fToken, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ valueInputOption: 'RAW', data: forteUpdates })
+            });
+            await sheetsBatchUpdate(env, FORTE_SHEET_ID, forteRowNums.map(i => noStkColKRequest(forteSheetId, i)));
+          }
+        }
         await hubLog(env, 'email_automation', 'run', `processFixQueue: oem_remove mpn=${data.mpn} row=${data.row}`);
 
       } else if (fix.type === 'replace_draft') {
