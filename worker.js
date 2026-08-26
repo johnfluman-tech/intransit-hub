@@ -3096,27 +3096,25 @@ async function cronScanInbox(env) {
 
   await hubLog(env, 'email_automation', 'run', `cronScanInbox: rfq=${rfqThreads.length} tp=${tpThreads.length} agent=${agentThreads.length}`);
 
-  // Mark threads as scanned immediately — prevents re-queuing on next cron run
-  const labelOps = [];
-  for (const tid of rfqThreads) {
-    const ids = [rfqLabelId].filter(Boolean);
-    if (ids.length) labelOps.push(gPost('/threads/' + tid + '/modify', { addLabelIds: ids }));
-  }
-  // tpThreads: do NOT pre-label with oem-tp-processed here.
-  // executeDecisionCron applies Label_166 only after a final action (msg_checking etc.).
-  // Pre-labeling here permanently blocks buyer TP replies from being re-caught.
-  for (const tid of agentThreads.filter(t => !rfqThreads.includes(t) && !tpThreads.includes(t))) {
-    const ids = [agentLabelId, rfqLabelId].filter(Boolean);
-    if (ids.length) labelOps.push(gPost('/threads/' + tid + '/modify', { addLabelIds: ids }));
-  }
-  await Promise.all(labelOps);
-
-  // Process up to 3 threads through the email agent (cap for subrequest budget)
+  // Build toProcess FIRST — only label threads we're actually going to process.
+  // Pre-labeling ALL threads caused permanent skips when the cap was hit (labeled but never processed).
   const toProcess = [
     ...rfqThreads.map(t => ({ tid: t, source: 'rfq' })),
     ...tpThreads.map(t => ({ tid: t, source: 'tp' })),
     ...agentThreads.filter(t => !rfqThreads.includes(t) && !tpThreads.includes(t)).map(t => ({ tid: t, source: 'agent' })),
-  ].slice(0, 3);
+  ].slice(0, 5);
+
+  // Label only the threads we're about to process — unprocessed threads stay unlabeled and get caught next cron run
+  const labelOps = [];
+  for (const { tid, source } of toProcess) {
+    const ids = [];
+    if (rfqLabelId)   ids.push(rfqLabelId);
+    if (source === 'agent' && agentLabelId) ids.push(agentLabelId);
+    if (ids.length) labelOps.push(gPost('/threads/' + tid + '/modify', { addLabelIds: ids }));
+  }
+  // tpThreads: do NOT pre-label with oem-tp-processed here.
+  // executeDecisionCron applies Label_166 only after a final action (msg_checking etc.).
+  await Promise.all(labelOps);
 
   for (const { tid, source } of toProcess) {
     try {
