@@ -2911,6 +2911,16 @@ async function buildScanPayload(threadId, token, env) {
     prior_quotes:    'None found',
   };
   if (mpnHint && /[A-Za-z]/.test(mpnHint) && /[0-9]/.test(mpnHint) && mpnHint.length >= 5) payload.mpn = mpnHint;
+
+  // Subject-only emails: subject has MPN+qty but body is empty — inject [PARSED_RFQ] so agent can act
+  const bodyText = parts.slice(2).join('\n').replace(/--- Msg \d+ \| From:[^\n]*---/g, '').trim();
+  if (bodyText.length < 30 && payload.mpn) {
+    const qtyM = subject.match(/\b(\d{1,7})\s*(?:pcs?|units?|pieces?|ea)\b/i);
+    if (qtyM) {
+      payload.thread_content = `[PARSED_RFQ: MPN=${payload.mpn}, QtyReq=${qtyM[1]}]\n` + payload.thread_content;
+    }
+  }
+
   if (isICS) {
     const icsHtml = extractMimeText(lastMsg.payload, true) || extractMimeText(lastMsg.payload);
     payload.icsource_html = icsHtml;
