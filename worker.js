@@ -746,6 +746,7 @@ const AGENT_SYSTEM_PROMPT = `You are the AI brain for Intransit Technologies' em
 ## STEP 1 — SENDER OVERRIDES (evaluate before inventory)
 
 David/Steve no-stk: sender is david@fortetechno.com, david@fortecomp.com, or steve@fortetechno.com AND body/subject contains any of: "no stk", "no stock", "cant share", "cant find", "sold out", "no longer have", "stk sold", "all sold" → remove_oem, draft: "Ok, removed from listing." (fires even when oem_results has rows — David is confirming removal)
+CRITICAL EXCEPTION: If "no stk" / "no stock" appears ONLY on lines that start with a supplier name followed by a colon (e.g. "Masters: No stk 1.4120 LT: 28wks" or "Quest: No stk"), David is sharing a multi-source pricing rundown — he is NOT saying he has no stock. In this case do NOT fire remove_oem. Look for a line where David himself says no stock (standalone line, not prefixed by "SupplierName:"). If no such standalone line exists, treat as a normal RFQ and route by inventory rules.
 
 Bill @John: sender is bill.pratt@intransittech.com AND body contains "@John" + MPN → remove_oem, buyer_email = "bill.pratt@intransittech.com"
 
@@ -756,6 +757,9 @@ Payment advice / remittance → forward_deb
 ## STEP 2 — SIMILAR MPN ([SIMILAR_MPN: ...] prefix present)
 Ask buyer before quoting: "We have [INVENTORY_MPN] available — would you be able to use this part number? Please let us know and we will get back to you right away." → ask_similar_mpn, forte_entry: null
 CRITICAL: [INVENTORY_MPN] in the draft MUST be our inventory part number (from the [SIMILAR_MPN: ...] tag), NOT the buyer's requested MPN. If they are the same part number, ask_similar_mpn is WRONG — skip to STEP 3 and apply OEM/stock rules normally.
+
+## MULTI-MPN RFQs
+When [EXTRA_MPN_INVENTORY: MPN=X, rows=N] tags appear in the thread, the buyer requested multiple parts. You MUST quote EVERY part that has inventory — one block per MPN in the draft body. Apply the same routing rules (stan_quoted, own_stock, request_tp, etc.) per part. Use action=stan_quoted if ANY part has a stan_sheet row. Never quote only the first MPN and ignore the rest.
 
 ## STEP 3 — NO INVENTORY
 oem_results, in_stock_results, and stan_results all empty → no_bid
@@ -868,31 +872,65 @@ function isMpnMatch(requestMpn, resultMpn) {
   if (a === b) return true;
   const shorter = a.length <= b.length ? a : b;
   const longer  = a.length <= b.length ? b : a;
-  // One must start with the other and the trailing suffix ≤ 3 chars
-  return longer.startsWith(shorter) && (longer.length - shorter.length) <= 3;
+  // One must start with the other and the trailing suffix ≤ 6 chars
+  // 6 handles packaging suffixes like TRPBF (5), NOPB (4), TR (2) while still
+  // rejecting significant variants like LP2951ACMX-3.3/NOPB (diff=7).
+  return longer.startsWith(shorter) && (longer.length - shorter.length) <= 6;
 }
 
-// Parses an IC Source HTML RFQ table.
-// Columns: Quantity | Part Number | Mfg | Date Code | List Price | Req Unit Price | Total Price
-// Returns { qtyReq, mpn, tgtPrice } or null.
+// Parses an IC Source HTML RFQ email. Handles two formats:
+//   NEW (2026+): "They Need / You Show" styled table — no <th> headers
+//   OLD: plain <th> column-header table (Quantity | Part Number | ...)
+// Returns { qtyReq, mpn, tgtPrice, buyerEmail } or null.
 function parseICSourceHTML(html) {
+  // Shared buyer-email extractor — pick first mailto that isn't intransittech or icsource
+  function extractBuyerEmailFromHtml(h) {
+    const re = /href="mailto:([^"@\s]+@[^"@\s]+)"/gi;
+    let em;
+    while ((em = re.exec(h)) !== null) {
+      const addr = em[1].toLowerCase();
+      if (!addr.includes('intransittech.com') && !addr.includes('icsource.com')) return em[1];
+    }
+    return null;
+  }
+
+  // ── NEW FORMAT: "They Need / You Show" table ──────────────────────────────
+  // Find the <tr> whose first <td> contains "They Need" — that row holds buyer's request.
+  // Column order (after label cell): Part | Qty | Mfg | Date Code | Price | Terms
+  const rowRe2 = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rm;
+  while ((rm = rowRe2.exec(html)) !== null) {
+    const rowHtml = rm[1];
+    if (!/They\s+Need/i.test(rowHtml)) continue;
+    const tdRe2 = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    const cells = [];
+    let td2;
+    while ((td2 = tdRe2.exec(rowHtml)) !== null) {
+      cells.push(td2[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim());
+    }
+    // cells[0]="They Need" label, [1]=Part, [2]=Qty, [3]=Mfg, [4]=DateCode, [5]=Price, [6]=Terms
+    if (cells.length >= 3) {
+      const mpn   = cells[1] || null;
+      const qty   = cells[2] ? parseInt(cells[2].replace(/,/g, ''), 10) : NaN;
+      const price = cells[5] ? parseFloat(cells[5].replace(/[$,\s]/g, '')) : NaN;
+      return {
+        qtyReq:    isNaN(qty) ? null : qty,
+        mpn:       mpn || null,
+        tgtPrice:  isNaN(price) || price <= 0 ? null : price,
+        buyerEmail: extractBuyerEmailFromHtml(html),
+      };
+    }
+    break;
+  }
+
+  // ── OLD FORMAT: <th> column-header table ──────────────────────────────────
   const thRe = /<th[^>]*>([\s\S]*?)<\/th>/gi;
   const headers = [];
   let m;
   while ((m = thRe.exec(html)) !== null) {
     headers.push(m[1].replace(/<[^>]+>/g, '').trim().toLowerCase());
   }
-  // Extract buyer email from mailto links — pick first that isn't intransittech.com or icsource
-  let buyerEmail = null;
-  const mailtoRe = /href="mailto:([^"@\s]+@[^"@\s]+)"/gi;
-  let em;
-  while ((em = mailtoRe.exec(html)) !== null) {
-    const addr = em[1].toLowerCase();
-    if (!addr.includes('intransittech.com') && !addr.includes('icsource.com')) {
-      buyerEmail = em[1];
-      break;
-    }
-  }
+  const buyerEmail = extractBuyerEmailFromHtml(html);
   if (!headers.length) return buyerEmail ? { qtyReq: null, mpn: null, tgtPrice: null, buyerEmail } : null;
   const qtyIdx = headers.findIndex(h => h === 'quantity' || h === 'qty');
   const mpnIdx = headers.findIndex(h => h === 'part number' || h === 'part no.' || (h.includes('part') && !h.includes('price')));
@@ -963,15 +1001,19 @@ async function handleEmailAgent(request, env) {
   const { thread_id, last_message_id, subject, sender, current_labels, prior_quotes } = body;
   // IC Source: Apps Script sends raw HTML body — parse the RFQ table here in the worker
   let thread_content = body.thread_content || '';
+  let icBuyerEmail = null;
   if (body.icsource_html) {
     const ic = parseICSourceHTML(body.icsource_html);
-    if (ic && ic.qtyReq) {
-      let rLine = '[PARSED_RFQ: QtyReq=' + ic.qtyReq;
+    if (ic) {
+      // Always capture buyer email even when qty/mpn parsing fails
+      if (ic.buyerEmail) icBuyerEmail = ic.buyerEmail;
+      let rLine = '[PARSED_RFQ: QtyReq=' + (ic.qtyReq ?? 'null');
       if (ic.tgtPrice !== null) rLine += ', TgtPrice=' + ic.tgtPrice;
       if (ic.mpn)               rLine += ', MPN=' + ic.mpn;
+      if (ic.buyerEmail)        rLine += ', BuyerEmail=' + ic.buyerEmail;
       rLine += ']';
       thread_content = rLine + '\n' + thread_content;
-      if (!body.mpn && ic.mpn) body.mpn = ic.mpn;
+      if (!body.mpn && ic.mpn)           body.mpn = ic.mpn;
     }
   }
   // Use let so we can override if Apps Script sends empty/no inventory (new slim mode)
@@ -988,7 +1030,10 @@ async function handleEmailAgent(request, env) {
       const mpn0 = body.mpn || await extractMpnFromThread(subject, thread_content, env);
       if (mpn0) {
         const inv = await lookupInventory(mpn0);
-        if (inv) {
+        // Require valid array fields — a truthy error payload like {"error":"..."} must not
+        // set inventoryLookupSucceeded=true with empty arrays, which would wrongly trigger
+        // the listing_removed early exit for parts that ARE in stock.
+        if (inv && (Array.isArray(inv.oem_excess) || Array.isArray(inv.in_stock) || Array.isArray(inv.stan_sheet))) {
           oem_results      = inv.oem_excess  || [];
           in_stock_results = inv.in_stock    || [];
           stan_results     = inv.stan_sheet  || [];
@@ -1006,6 +1051,28 @@ async function handleEmailAgent(request, env) {
   } else {
     // Apps Script pre-fetched inventory — treat as confirmed lookup
     inventoryLookupSucceeded = true;
+  }
+
+  // Multi-MPN: if the netCOMPONENTS subject had additional MPNs beyond the first,
+  // look them all up and merge into the combined results so the agent quotes every part.
+  if (Array.isArray(body.extra_mpns) && body.extra_mpns.length > 0) {
+    for (const extraMpn of body.extra_mpns) {
+      try {
+        const inv2 = await lookupInventory(extraMpn);
+        if (inv2 && (Array.isArray(inv2.oem_excess) || Array.isArray(inv2.in_stock) || Array.isArray(inv2.stan_sheet))) {
+          oem_results      = oem_results.concat(inv2.oem_excess  || []);
+          in_stock_results = in_stock_results.concat(inv2.in_stock    || []);
+          stan_results     = stan_results.concat(inv2.stan_sheet  || []);
+          forte_results    = forte_results.concat(inv2.forte_sheet || []);
+          inventoryLookupSucceeded = true;
+          // Annotate thread_content so agent knows this MPN's inventory was found
+          const extraHits = (inv2.oem_excess || []).length + (inv2.in_stock || []).length + (inv2.stan_sheet || []).length;
+          if (extraHits > 0) {
+            thread_content = `[EXTRA_MPN_INVENTORY: MPN=${extraMpn}, rows=${extraHits}]\n` + thread_content;
+          }
+        }
+      } catch(e) { /* silently skip failed extra-MPN lookups */ }
+    }
   }
 
   // Augment in_stock_results with price_to_quote (col F) — the OEM web app omits this column.
@@ -1060,6 +1127,33 @@ async function handleEmailAgent(request, env) {
                           subjectLC.includes('netcomponents') || subjectLC.includes('icsource') ||
                           contentLC.includes('messagesend@netcomponents') || contentLC.includes('autosend@icsource');
     if (isListingSite) {
+      // Safety re-check: if we have a requestMpn, do one more lookup before sending
+      // listing_removed — a failed/malformed first lookup could have caused false empty results.
+      if (requestMpn) {
+        try {
+          const inv2 = await lookupInventory(requestMpn);
+          if (inv2 && (Array.isArray(inv2.oem_excess) || Array.isArray(inv2.in_stock))) {
+            const oemHit = (inv2.oem_excess || []).filter(r => isMpnMatch(requestMpn, r.mpn));
+            const inHit  = (inv2.in_stock   || []).filter(r => isMpnMatch(requestMpn, r.mpn));
+            if (oemHit.length > 0 || inHit.length > 0) {
+              // Inventory confirmed on retry — abort listing_removed, reassign and fall through
+              oem_results      = oemHit;
+              in_stock_results = inHit;
+              stan_results     = inv2.stan_sheet  || [];
+              forte_results    = inv2.forte_sheet || [];
+              // Jump past the early-exit block by setting a flag and breaking out
+              inventoryLookupSucceeded = true; // already true, but make intent clear
+              // Re-run post-lookup guards inline before falling through
+              const ownStockRows2 = in_stock_results.filter(r => !/Warehouse#/i.test(r.notes || ''));
+              if (ownStockRows2.length > 0) {
+                return json({ action: 'own_stock', reasoning: 'Inventory found on retry — own IN STOCK rows exist', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+              }
+              const has2k2 = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+              return json({ action: has2k2 ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Inventory found on retry — OEM EXCESS exists, no TP given', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+            }
+          }
+        } catch(e2) { /* ignore retry errors — proceed with listing_removed */ }
+      }
       return json({ action: 'listing_removed', reasoning: 'No inventory — RFQ from listing site, send polite removal notice', mpn: requestMpn || null, buyer_email: null, draft_body: 'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.', forte_entry: null, oem_delete_row: null });
     }
     return json({ action: 'no_bid', reasoning: 'No inventory found for this MPN', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
@@ -1219,6 +1313,11 @@ async function handleEmailAgent(request, env) {
     'own_stock','stan_quoted','add_to_stan','no_bid','no_action','remove_oem',
     'david_nostock','forward_deb','listing_removed','ask_similar_mpn','below_min_line','still_checking','decline'
   ]);
+  // IC Source buyer email override — never let Claude's guess beat the parsed mailto address
+  if (icBuyerEmail && (!decision.buyer_email || decision.buyer_email.includes('icsource') || decision.buyer_email.includes('autosend'))) {
+    decision.buyer_email = icBuyerEmail;
+  }
+
   if (!KNOWN_ACTIONS.has(decision.action)) {
     const hasOwnStock   = (in_stock_results || []).some(r => !/Warehouse#/i.test(r.notes || ''));
     const hasWarehouse  = (in_stock_results || []).some(r => /Warehouse#\d/i.test(r.notes || ''));
@@ -1407,14 +1506,16 @@ async function handleEmailAgent(request, env) {
     if (mpnKey) {
       // Check sheet price_to_quote first (col F added by John)
       const ownRows = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
-      const sheetPrice = ownRows.length > 0 && ownRows[0].price_to_quote ? Number(ownRows[0].price_to_quote) : null;
+      const _rawP = ownRows.length > 0 ? ownRows[0].price_to_quote : null;
+      const _parsedP = _rawP ? parseFloat(String(_rawP).replace(/[$,\s]/g, '')) : NaN;
+      const sheetPrice = (!isNaN(_parsedP) && _parsedP > 0) ? _parsedP : null;
       const priceRow = sheetPrice == null ? await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(mpnKey).first() : null;
       const storedPrice = sheetPrice != null ? sheetPrice : (priceRow != null ? priceRow.price : null);
       if (!decision.draft_body) {
         const dc  = (ownRows[0] && ownRows[0].dc)  ? ownRows[0].dc  : '';
         const man = (ownRows[0] && ownRows[0].man) ? ownRows[0].man : '';
         const totalQty = ownRows.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
-        const priceStr = storedPrice != null ? `$${Number(storedPrice).toFixed(2)} each` : '$[FILL IN]';
+        const priceStr = (storedPrice != null && !isNaN(Number(storedPrice))) ? `$${Number(storedPrice).toFixed(2)} each` : '$[FILL IN]';
         decision.draft_body = `We have the following available:\n\nMPN: ${mpnKey}${man ? '\nManufacturer: ' + man : ''}${dc ? '\nDC: ' + dc : ''}\nQTY: ${totalQty || '?'}\nPrice: ${priceStr}\n\nPlease let us know if you would like to proceed.`;
       } else if (storedPrice != null && decision.draft_body.includes('[FILL IN]')) {
         decision.draft_body = decision.draft_body.replace(/\$\[FILL IN\]/g, `$${Number(storedPrice).toFixed(2)} each`);
@@ -1479,13 +1580,15 @@ async function handleEmailAgent(request, env) {
   if (decision.action === 'own_stock') {
     const mpnKey2 = (decision.mpn || requestMpn || '').replace(/\s+/g, '').toUpperCase();
     const ownRows2 = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
-    const sheetPrice2 = ownRows2.length > 0 && ownRows2[0].price_to_quote ? Number(ownRows2[0].price_to_quote) : null;
+    const _rawP2 = ownRows2.length > 0 ? ownRows2[0].price_to_quote : null;
+    const _parsedP2 = _rawP2 ? parseFloat(String(_rawP2).replace(/[$,\s]/g, '')) : NaN;
+    const sheetPrice2 = (!isNaN(_parsedP2) && _parsedP2 > 0) ? _parsedP2 : null;
     const priceRow2 = sheetPrice2 == null ? await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(mpnKey2).first() : null;
     const storedPrice2 = sheetPrice2 != null ? sheetPrice2 : (priceRow2 != null ? priceRow2.price : null);
     const dc2  = (ownRows2[0] && ownRows2[0].dc)  ? ownRows2[0].dc  : '';
     const man2 = (ownRows2[0] && ownRows2[0].man) ? ownRows2[0].man : '';
     const totalQty2 = ownRows2.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
-    const priceStr2 = storedPrice2 != null ? `$${Number(storedPrice2).toFixed(2)} each` : '$[FILL IN]';
+    const priceStr2 = (storedPrice2 != null && !isNaN(Number(storedPrice2))) ? `$${Number(storedPrice2).toFixed(2)} each` : '$[FILL IN]';
     decision.draft_body = `We have the following available:\n\nMPN: ${mpnKey2}${man2 ? '\nManufacturer: ' + man2 : ''}\nDC: ${dc2 || '?'}\nQTY: ${totalQty2 || '?'}\nPrice: ${priceStr2}\n\nPlease let us know if you would like to proceed.`;
   }
 
@@ -2951,6 +3054,16 @@ async function buildScanPayload(threadId, token, env) {
         if (!payload.mpn && nc.mpn && /[A-Za-z]/.test(nc.mpn) && /[0-9]/.test(nc.mpn) && nc.mpn.length >= 5) payload.mpn = nc.mpn;
       }
     }
+
+    // Multi-MPN: netCOMPONENTS subjects sometimes list several MPNs after the "|":
+    // "RFQ from netCOMPONENTS Member (Company | MPN1,MPN2,MPN3)"
+    // extractMpnHint only returns the first — collect the rest for batch lookup in handleEmailAgent.
+    const pipeMatch = subject.match(/\|\s*([^)]+)\)/);
+    if (pipeMatch) {
+      const allMpns = pipeMatch[1].split(',').map(s => s.trim()).filter(s => /[A-Za-z]/.test(s) && /[0-9]/.test(s) && s.length >= 4);
+      if (allMpns.length > 0 && !payload.mpn) payload.mpn = allMpns[0];
+      if (allMpns.length > 1) payload.extra_mpns = allMpns.slice(1);
+    }
   }
 
   return payload;
@@ -3075,7 +3188,7 @@ async function cronScanInbox(env) {
 
   // Gmail search queries (keep short to stay under URL limits)
   const rfqQ = encodeURIComponent(
-    'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed newer_than:3d ' + blockFilter
+    'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR to:icsource.quotes@intransittech.com OR deliveredto:icsource.quotes@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability" OR "your price" OR "price and quantity"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed newer_than:3d ' + blockFilter
   );
   const tpQ = encodeURIComponent(
     'in:inbox (label:oem-rfq-incoming-processed OR from:messagesend@netcomponents.com) -label:oem-tp-processed -from:partalert@netcomponents.com newer_than:60d ' + blockFilter
@@ -3118,6 +3231,29 @@ async function cronScanInbox(env) {
 
   for (const { tid, source } of toProcess) {
     try {
+      // tpQ guard: only process a thread as a TP reply if John has already sent
+      // a reply in the thread. Without this, brand-new RFQs that got a TP request
+      // drafted (but not yet sent) keep getting re-processed every cron cycle.
+      if (source === 'tp') {
+        const tCheck = await gGet('/threads/' + tid + '?format=metadata&metadataHeaders=From');
+        const tMsgs  = (tCheck.messages || []);
+        const johnReplied = tMsgs.some(m => {
+          const from = ((m.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
+          return /john\.fluman@intransittech\.com|rfq@intransittech\.com/i.test(from);
+        });
+        if (!johnReplied) {
+          await hubLog(env, 'email_automation', 'run', `cronScanInbox: tp skip — no John reply yet tid=${tid}`);
+          continue;
+        }
+        // Also require the LAST message to be from the buyer (not John)
+        const lastMsg = tMsgs[tMsgs.length - 1];
+        const lastFrom = ((lastMsg?.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
+        if (/john\.fluman@intransittech\.com|rfq@intransittech\.com/i.test(lastFrom)) {
+          await hubLog(env, 'email_automation', 'run', `cronScanInbox: tp skip — last message is from John tid=${tid}`);
+          continue;
+        }
+      }
+
       const payload = await buildScanPayload(tid, token, env);
       if (!payload) continue;
 
@@ -3284,7 +3420,8 @@ async function cronCheckDavidNoStock(env) {
   const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
   const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
 
-  const NO_STK = ['no stk','no stock','stk sold','stock sold','cant find','cant share','cannot find','removed','no inventory','sold lying commie','soly lying commie','lying commie','sold out','all sold','no longer have'];
+  // Only explicit phrases David uses to mean he has no stock — NOT market commentary
+  const NO_STK = ['no stk','no stock','cant share'];
   // Market-pricing emails list competitor distributors + prices — never treat as no-stock
   const MARKET_DISTRIBUTORS = ['newark','mouser','avnet','digikey','arrow','future','turandot','winsun','vrg','bettering','element14','rs components','farnell'];
   function isMarketPricingEmail(text) {
@@ -3330,6 +3467,17 @@ async function cronCheckDavidNoStock(env) {
       const isNoStk = NO_STK.some(kw => checkText.includes(kw));
       if (!isNoStk) {
         await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
+        continue;
+      }
+
+      // Guard: if EVERY "no stk/stock" line is prefixed by a supplier name + colon
+      // (e.g. "Masters: No stk 1.4120 LT: 28wks"), David is sharing a pricing rundown —
+      // not saying he himself has no stock. Skip to avoid false-positive removal.
+      const noStkLines = bodyAll.split(/\r?\n/).filter(l => /no\s*stk|no\s*stock|cant\s*share/.test(l));
+      const allInRundown = noStkLines.length > 0 && noStkLines.every(l => /^\s*[\w][\w\s\-\.]*:\s/.test(l.trim()));
+      if (allInRundown) {
+        await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
+        await hubLog(env, 'email_automation', 'run', 'cronCheckDavidNoStock: skipped — no-stk only in pricing rundown lines tid=' + tid);
         continue;
       }
 
