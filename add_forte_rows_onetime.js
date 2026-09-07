@@ -660,3 +660,35 @@ function addForteAug11() {
   ]);
   Logger.log('Added L6384ED013TR — 132800 qty, $0.15 TP, HK buyer (HK Waykey Technology)');
 }
+
+// ─────────────────────────────────────────────────────────────────
+// fixFalseNoStkStamps_Sep2()
+// Clears wrongly applied NO STK stamps from Forte col K.
+// Caused by cronCheckDavidNoStock firing on competitor "no stk" language
+// in David's market-research emails, not his own stock.
+// Affected rows:
+//   59Z163-003-Z  rows 1433 + 4194 (today 9/2/2026, competitor "no stk" in body)
+//   STM32F407VGT6 row 4188         (OEM EXCESS already re-listed by David)
+//   BAT74215      row 3588         (OEM EXCESS already re-listed by David)
+// Run ONCE.
+// ─────────────────────────────────────────────────────────────────
+function fixFalseNoStkStamps_Sep2() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+
+  // [rowNumber, restoredStatus]
+  var fixes = [
+    [1433, 'Open'],    // 59Z163-003-Z (Jul 2024 entry)
+    [4194, 'Open'],    // 59Z163-003-Z (Jul 2026 entry)
+    [4188, 'Open'],    // STM32F407VGT6 (Jul 2026 India buyer)
+    [3588, 'QUOTED'],  // BAT74215 (Apr 2026, was quoted $0.45)
+  ];
+
+  fixes.forEach(function(f) {
+    var row = f[0], status = f[1];
+    sheet.getRange(row, 11).setValue(status); // col K = index 11 (1-based)
+    // Clear the black-background formatting that remove_oem_mpn applied
+    sheet.getRange(row, 11).setBackground(null).setFontColor(null);
+    Logger.log('Fixed row ' + row + ' col K → ' + status);
+  });
+}
