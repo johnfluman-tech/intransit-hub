@@ -4066,6 +4066,16 @@ select{background:#0f1923;border:1px solid #2a3f55;border-radius:6px;color:#e0e6
   <div class="result" id="actions-result"></div>
 </div>
 
+<!-- Forte Quotes -->
+<div class="card">
+  <h2>Forte Quotes</h2>
+  <div class="note" style="margin-bottom:8px">Fill in col H (your price) and col I (notes: DC, COO, etc.) in the Forte sheet first — then click below to draft quote replies to David for all Open rows with col H filled.</div>
+  <div class="btn-row">
+    <button class="btn btn-primary" onclick="draftForteQuotes()">Draft Forte Quotes</button>
+  </div>
+  <div class="result" id="forte-quotes-result"></div>
+</div>
+
 <!-- Stock Price -->
 <div class="card" id="stock-card">
   <h2>Stock Price <span class="tag" id="mpn-tag"></span></h2>
@@ -4243,6 +4253,15 @@ async function blockDomain() {
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
 
+async function draftForteQuotes() {
+  const el = document.getElementById('forte-quotes-result');
+  showResult(el, '⏳ Checking Forte for quoted rows…');
+  try {
+    const r = await sapi('draft-forte-quotes', {});
+    showResult(el, r.message || JSON.stringify(r, null, 2), !r.ok);
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
 init();
 </script>
 </body>
@@ -4313,6 +4332,82 @@ async function handleSidebarApi(request, url, env, action, ctx) {
     if (tid) fakeUrl.searchParams.set('thread_id', tid);
     return handleGetAgentDecisions(fakeUrl, env);
   }
+  if (action === 'draft-forte-quotes') {
+    return handleDraftForteQuotes(env);
+  }
 
   return json({ error: 'Unknown sidebar action: ' + action }, 400);
+}
+
+async function handleDraftForteQuotes(env) {
+  const rows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+  const drafted = [];
+  const skipped = [];
+  const errors = [];
+
+  // Fetch all drafts once to avoid re-creating existing ones
+  const allDraftsData = await gmailGet(env, '/drafts?maxResults=500');
+  const allDraftThreadIds = new Set((allDraftsData.drafts || []).map(d => d.message?.threadId).filter(Boolean));
+
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const rowNum = i + 1; // 1-indexed sheet row number
+    const mpn          = (r[1]  || '').trim();
+    const qty          = (r[2]  || '').trim();
+    const quotedPrice  = (r[7]  || '').trim(); // col H — John Quoted
+    const notes        = (r[8]  || '').trim(); // col I — Notes
+    const status       = (r[10] || '').trim(); // col K
+
+    if (!mpn || !quotedPrice) continue;
+    if (status.toLowerCase() !== 'open') continue;
+
+    // Find David's thread referencing this Forte row
+    const searchQ = `from:david@fortetechno.com subject:"#${rowNum}"`;
+    let threadId = null;
+    try {
+      const sr = await gmailGet(env, '/threads?q=' + encodeURIComponent(searchQ) + '&maxResults=3');
+      const threads = sr.threads || [];
+      if (!threads.length) { skipped.push(`#${rowNum} ${mpn} — no David thread found`); continue; }
+      threadId = threads[0].id;
+    } catch(e) { errors.push(`#${rowNum} ${mpn} — search error`); continue; }
+
+    // Skip if a draft already exists for this thread
+    if (allDraftThreadIds.has(threadId)) {
+      skipped.push(`#${rowNum} ${mpn} — draft already exists`);
+      continue;
+    }
+
+    // Get last message for proper Gmail threading
+    try {
+      const thread = await gmailGet(env, '/threads/' + threadId + '?format=METADATA&metadataHeaders=Message-ID&metadataHeaders=Subject');
+      const msgs = thread.messages || [];
+      if (!msgs.length) { skipped.push(`#${rowNum} ${mpn} — empty thread`); continue; }
+      const last = msgs[msgs.length - 1];
+      const gmailMsgId = ((last.payload?.headers || []).find(h => h.name === 'Message-ID') || {}).value || null;
+      const origSubject = ((msgs[0].payload?.headers || []).find(h => h.name === 'Subject') || {}).value || `check #${rowNum}`;
+      const replySubject = origSubject.startsWith('Re:') ? origSubject : 'Re: ' + origSubject;
+
+      let body = `Hi David,\n\nQuoted out #${rowNum} ${mpn}:\n\nPrice: ${quotedPrice}`;
+      if (qty)   body += `\nQty requested: ${qty}`;
+      if (notes) body += `\n${notes}`;
+      body += `\n\nPlease let me know if you need anything else.`;
+
+      const html = '<div>' + body.replace(/\n/g, '<br>') + '</div>' + SIG_HTML;
+      const raw = base64url(buildMime('david@fortetechno.com', replySubject, html, gmailMsgId));
+      const created = await gmailPost(env, '/drafts', { message: { raw, threadId } });
+      if (created.error) {
+        errors.push(`#${rowNum} ${mpn} — create error: ${JSON.stringify(created.error)}`);
+      } else {
+        drafted.push(`#${rowNum} ${mpn} — draft created`);
+      }
+    } catch(e) { errors.push(`#${rowNum} ${mpn} — error: ${String(e)}`); }
+  }
+
+  const parts = [];
+  if (drafted.length) parts.push(`✓ Drafted ${drafted.length}:\n${drafted.join('\n')}`);
+  if (skipped.length) parts.push(`⚠ Skipped ${skipped.length}:\n${skipped.join('\n')}`);
+  if (errors.length)  parts.push(`✗ Errors ${errors.length}:\n${errors.join('\n')}`);
+  if (!parts.length)  parts.push('No Open Forte rows with col H filled found.');
+
+  return json({ ok: true, message: parts.join('\n\n') });
 }
