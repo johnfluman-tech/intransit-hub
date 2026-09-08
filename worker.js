@@ -2969,7 +2969,9 @@ function extractEmailAddr(raw) {
 
 function extractMpnHint(subject) {
   if (!subject) return null;
-  const tokens = subject.split(/[\s,;|\/\[\]()]+/);
+  // Strip "--" and everything after so "MPN--need your stock list..." → "MPN"
+  const cleaned = subject.replace(/--.*$/, '').trim();
+  const tokens = cleaned.split(/[\s,;|\/\[\]()]+/);
   const cands = tokens.filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 5 && !/^\d+(pcs?|k|m|units?)?$/i.test(t));
   return cands[0] || null;
 }
