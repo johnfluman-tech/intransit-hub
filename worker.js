@@ -1740,7 +1740,7 @@ async function handleGetInstockRow(url, env) {
   const tok = await getGmailToken(env);
   const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${IN_STOCK_ID}/values/A${row}:K${row}`, { headers: { Authorization: 'Bearer ' + tok } }).then(r => r.json());
   const vals = (res.values || [[]])[0] || [];
-  return json({ row, mpn: vals[1]||'', man: vals[2]||'', dc: vals[3]||'', qty: vals[4]||'', price_to_quote: vals[5]||'', notes: vals[9]||'' });
+  return json({ row, mpn: vals[0]||'', man: vals[1]||'', dc: vals[2]||'', qty: vals[3]||'', notes: vals[4]||'', price_to_quote: vals[5]||'' });
 }
 
 async function handleGetCommandQueue(url, env) {
