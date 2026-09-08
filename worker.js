@@ -1159,6 +1159,18 @@ async function handleEmailAgent(request, env) {
     return json({ action: 'no_bid', reasoning: 'No inventory found for this MPN', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
   }
 
+  // Deterministic own_stock pre-check: if exact-match non-warehouse IN STOCK rows exist,
+  // skip Claude entirely — own inventory never needs a TP request.
+  if (requestMpn) {
+    const _normQ = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const _exactOwn = (in_stock_results || []).filter(
+      r => !/Warehouse#/i.test(r.notes || '') && _normQ(r.mpn || '') === _normQ(requestMpn)
+    );
+    if (_exactOwn.length > 0) {
+      return json({ action: 'own_stock', reasoning: 'Deterministic: exact own IN STOCK match — bypassing AI', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+    }
+  }
+
   // Detect similar-but-not-exact MPN: e.g. buyer wants PMEG3020EJ, we have PMEG3020EJ115.
   // Inject [SIMILAR_MPN] note so Haiku knows to ask the buyer before quoting.
   let similarMpnNote = '';
@@ -1364,6 +1376,16 @@ async function handleEmailAgent(request, env) {
       decision.action     = has2kMin2 ? 'request_tp_2000' : 'request_tp_500';
       decision.draft_body = DRAFT_TEMPLATES[decision.action];
     }
+  }
+
+  // Code-level own_stock override: if AI asked for TP but own-stock IN STOCK rows exist,
+  // force own_stock — our own inventory never needs a buyer TP.
+  if ((decision.action === 'request_tp_500' || decision.action === 'request_tp_2000') &&
+      (in_stock_results || []).some(r => !/Warehouse#/i.test(r.notes || ''))) {
+    decision._corrected_from    = decision._corrected_from || decision.action;
+    decision._correction_reason = 'Own IN STOCK rows found — cannot ask for TP on own-stock parts';
+    decision.action     = 'own_stock';
+    decision.draft_body = null;
   }
 
   // Code-level Warehouse# guard: if Haiku said own_stock but every in_stock row has
