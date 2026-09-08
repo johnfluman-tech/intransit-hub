@@ -724,3 +724,54 @@ function davidNoStk_Sep7() {
   cell.setFontWeight('bold');
   Logger.log('Stamped Forte row ' + rowNum + ' (AD620ARZ) col K → ' + stamp);
 }
+
+// ─────────────────────────────────────────────────────────────────
+// davidNoStk_Sep8()
+// David no-stk / cant-share emails received 9/8/2026.
+// Stamps col K then deletes rows — highest row first to avoid shift.
+// Run ONCE after sending the reply drafts.
+// ─────────────────────────────────────────────────────────────────
+function davidNoStk_Sep8() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var stamp = 'NO STK - 9/8/2026';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+
+  // [rowNum, expectedMPN] — descending order so row shifts don't affect earlier entries
+  var items = [
+    [4461, 'BD82QM67SLJ4M'],
+    [4460, 'MAX233AEWP'],
+    [4356, 'AD620BRZ-RL'],
+    [4350, 'MT40A2G8SA-062EIT:FTR'],
+    [4323, 'THAS322M050AD0C'],
+  ];
+
+  items.forEach(function(item) {
+    var rowNum = item[0];
+    var expectedMpn = item[1];
+    var actualMpn = String(sheet.getRange(rowNum, 2).getValue()).trim();
+    if (actualMpn !== expectedMpn) {
+      Logger.log('SKIP row ' + rowNum + ': expected ' + expectedMpn + ' but found ' + actualMpn);
+      return;
+    }
+    var cell = sheet.getRange(rowNum, 11);
+    cell.clearDataValidations();
+    cell.setValue(stamp);
+    cell.setBackground('#000000');
+    cell.setFontColor('#FFFFFF');
+    cell.setFontWeight('bold');
+    Logger.log('Stamped row ' + rowNum + ' (' + expectedMpn + ') col K → ' + stamp);
+  });
+
+  // Delete rows in descending order (already sorted above)
+  items.forEach(function(item) {
+    var rowNum = item[0];
+    var expectedMpn = item[1];
+    var actualMpn = String(sheet.getRange(rowNum, 2).getValue()).trim();
+    if (actualMpn !== expectedMpn) {
+      Logger.log('SKIP delete row ' + rowNum + ': MPN mismatch');
+      return;
+    }
+    sheet.deleteRow(rowNum);
+    Logger.log('Deleted row ' + rowNum + ' (' + expectedMpn + ')');
+  });
+}
