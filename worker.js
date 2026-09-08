@@ -3158,6 +3158,8 @@ async function cronScanInbox(env) {
   const { results: blockRows } = await env.DB.prepare("SELECT key FROM rules WHERE type='blocked_domain'").all();
   const blockFilter = (blockRows || []).map(r => '-from:' + r.key).join(' ');
 
+  const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+
   // Auto-archive blocked domain emails from inbox + create "blocked sender" draft
   if (blockRows?.length) {
     const blockedQ = encodeURIComponent('in:inbox (' + blockRows.map(r => 'from:' + r.key).join(' OR ') + ')');
@@ -3711,6 +3713,35 @@ async function cronProcessCommandQueue(env) {
         }
         await sheetsBatchUpdate(env, FORTE_SHEET_ID, [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rowNum-1, endIndex: rowNum } } }]);
         await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: delete_forte_row ${rowNum} (${expectedMpn})`);
+
+      } else if (cmd.type === 'forte_nostk_batch') {
+        // items: [{row, mpn}] sorted descending — stamp col K then delete each row
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (!items.length) throw new Error('forte_nostk_batch: items array required');
+        const meta = await sheetsGetMeta(env, FORTE_SHEET_ID);
+        const sheetId = meta.sheets?.[0]?.properties?.sheetId ?? 0;
+        let done = 0;
+        for (const item of items) {
+          const rowNum = parseInt(item.row, 10);
+          const expectedMpn = (item.mpn || '').trim();
+          if (!rowNum || !expectedMpn) { await hubLog(env, 'email_automation', 'error', 'forte_nostk_batch: missing row/mpn'); continue; }
+          const cell = await sheetsGet(env, FORTE_SHEET_ID, `B${rowNum}`);
+          const actual = ((cell.values || [[]])[0] || [])[0] || '';
+          if (actual.trim().toUpperCase() !== expectedMpn.toUpperCase()) {
+            await hubLog(env, 'email_automation', 'error', `forte_nostk_batch: row ${rowNum} has "${actual}" not "${expectedMpn}" — skip`);
+            continue;
+          }
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values:batchUpdate`, {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ valueInputOption: 'RAW', data: [{ range: `K${rowNum}`, values: [['NO STK - ' + today]] }] }),
+          });
+          await sheetsBatchUpdate(env, FORTE_SHEET_ID, [noStkColKRequest(sheetId, rowNum - 1)]);
+          await sheetsBatchUpdate(env, FORTE_SHEET_ID, [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rowNum-1, endIndex: rowNum } } }]);
+          done++;
+          await hubLog(env, 'email_automation', 'run', `forte_nostk_batch: stamped+deleted row ${rowNum} (${expectedMpn})`);
+        }
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: forte_nostk_batch done ${done}/${items.length}`);
 
       } else if (cmd.type === 'send_datamaster_email') {
         const BCC = '5BDFA5@stkdst.com,datamaster@netcomponents.com,post@icsource.com,bill@intransittech.com,david@fortetechno.com,Stan@amorelectronics.com';
