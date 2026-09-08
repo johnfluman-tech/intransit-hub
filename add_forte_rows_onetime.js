@@ -692,3 +692,35 @@ function fixFalseNoStkStamps_Sep2() {
     Logger.log('Fixed row ' + row + ' col K → ' + status);
   });
 }
+
+
+// ─────────────────────────────────────────────────────────────────
+// Run davidNoStk_Sep7() to stamp Forte row 4492 col K for AD620ARZ.
+// David confirmed removal 9/4/2026 ("Sure, I will remove too").
+// OEM EXCESS deletion already queued via command-queue #459 (9/7/2026).
+// Run ONCE.
+// ─────────────────────────────────────────────────────────────────
+function davidNoStk_Sep7() {
+  var FORTE_SHEET_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var stamp = 'NO STK - 9/7/2026';
+  var sheet = SpreadsheetApp.openById(FORTE_SHEET_ID).getSheets()[0];
+  var rowNum = 4492;
+  var mpn = String(sheet.getRange(rowNum, 2).getValue()).trim();
+  Logger.log('Row ' + rowNum + ' MPN: ' + mpn);
+  if (mpn.toUpperCase() !== 'AD620ARZ') {
+    Logger.log('ERROR: Row 4492 MPN is "' + mpn + '" — expected AD620ARZ. Check row before running.');
+    return;
+  }
+  var cell = sheet.getRange(rowNum, 11);
+  var cur = String(cell.getValue()).trim().toUpperCase();
+  if (cur.indexOf('NO STK') !== -1 || cur === 'CLOSED') {
+    Logger.log('Row ' + rowNum + ' already stamped: ' + cur);
+    return;
+  }
+  cell.clearDataValidations();
+  cell.setValue(stamp);
+  cell.setBackground('#000000');
+  cell.setFontColor('#FFFFFF');
+  cell.setFontWeight('bold');
+  Logger.log('Stamped Forte row ' + rowNum + ' (AD620ARZ) col K → ' + stamp);
+}
