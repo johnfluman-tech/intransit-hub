@@ -850,7 +850,7 @@ async function extractMpnFromThread(subject, content, env) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 40,
-        system: 'Extract the electronic component part number (MPN) from this email thread. IMPORTANT: RFQ numbers, PO numbers, and order reference numbers in the subject line (e.g. "RFQ B26000486264", "PO #12345", "Order 987654") are NOT part numbers — ignore them. Look instead for explicit "PN:", "Part Number:", "MPN:", or "part number" labels in the body. Return ONLY valid JSON: {"mpn":"PART-NUMBER"} or {"mpn":null}. No markdown, no explanation.',
+        system: 'Extract the electronic component part number (MPN) from this email thread. Return ONLY valid JSON: {"mpn":"PART-NUMBER"} or {"mpn":null}. No markdown, no explanation.\n\nRules:\n- RFQ numbers, PO numbers, order reference numbers in the SUBJECT (e.g. "RFQ B26000486264", "PO #12345", "Order 987654") are NOT part numbers — ignore them.\n- Look for explicit labels in the body: "PN:", "Part Number:", "MPN:", "Part:", "Item:".\n- Also look for a standalone alphanumeric token (letters+numbers, or all digits 4+ chars) that appears alone on its own line in the body after purchasing language like "quote", "need", "request", "pcs", "pieces" — that standalone value is likely the MPN.\n- If the body has a pattern like "quote Npcs\\nXXXXX" or "quote XXXXX", XXXXX is the MPN.\n- Prefer body MPNs over subject MPNs.',
         messages: [{ role: 'user', content: `Subject: ${subject || ''}\n\n${(content || '').substring(0, 3000)}` }],
       })
     });
@@ -3212,21 +3212,23 @@ async function cronScanInbox(env) {
     }
   }
 
-  // Gmail search queries (keep short to stay under URL limits)
+  // Gmail search queries — blockFilter intentionally excluded: 65+ blocked domains made the
+  // URL-encoded query exceed Gmail API limits, causing silent empty results. Blocked domains
+  // are caught by the code-level pre-flight check in handleEmailAgent instead.
   const rfqQ = encodeURIComponent(
-    'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR to:icsource.quotes@intransittech.com OR deliveredto:icsource.quotes@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability" OR "your price" OR "price and quantity"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed newer_than:3d ' + blockFilter
+    'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR to:icsource.quotes@intransittech.com OR deliveredto:icsource.quotes@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability" OR "your price" OR "price and quantity"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed newer_than:3d'
   );
   const tpQ = encodeURIComponent(
-    'in:inbox (label:oem-rfq-incoming-processed OR from:messagesend@netcomponents.com) -label:oem-tp-processed -from:partalert@netcomponents.com newer_than:60d ' + blockFilter
+    'in:inbox (label:oem-rfq-incoming-processed OR from:messagesend@netcomponents.com) -label:oem-tp-processed -from:partalert@netcomponents.com newer_than:60d'
   );
   const agentQ = encodeURIComponent(
-    'in:inbox -label:oem-agent-processed -label:oem-rfq-incoming-processed newer_than:3d -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com ' + blockFilter + ' (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for" OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend OR subject:pcs OR subject:units OR quotation OR "please quote" OR "please check" OR "can you quote" OR "provide the price")'
+    'in:inbox -label:oem-agent-processed -label:oem-rfq-incoming-processed newer_than:3d -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com (subject:rfq OR subject:quot OR subject:offer OR subject:"best price" OR subject:"looking for" OR subject:availability OR subject:qty OR subject:inquiry OR subject:sourcing OR subject:parts OR subject:"request for" OR from:netcomponents.com OR from:icsource.com OR from:messagesend OR subject:pcs OR subject:units OR quotation OR "please quote" OR "please check" OR "can you quote" OR "provide the price")'
   );
 
   const [rfqRes, tpRes, agentRes] = await Promise.all([
-    gGet('/messages?q=' + rfqQ   + '&maxResults=5'),
-    gGet('/messages?q=' + tpQ    + '&maxResults=5'),
-    gGet('/messages?q=' + agentQ + '&maxResults=5'),
+    gGet('/messages?q=' + rfqQ   + '&maxResults=10'),
+    gGet('/messages?q=' + tpQ    + '&maxResults=10'),
+    gGet('/messages?q=' + agentQ + '&maxResults=10'),
   ]);
 
   const rfqThreads   = [...new Set((rfqRes.messages   || []).map(m => m.threadId))];
@@ -3241,7 +3243,7 @@ async function cronScanInbox(env) {
     ...rfqThreads.map(t => ({ tid: t, source: 'rfq' })),
     ...tpThreads.map(t => ({ tid: t, source: 'tp' })),
     ...agentThreads.filter(t => !rfqThreads.includes(t) && !tpThreads.includes(t)).map(t => ({ tid: t, source: 'agent' })),
-  ].slice(0, 5);
+  ].slice(0, 10);
 
   // Label only the threads we're about to process — unprocessed threads stay unlabeled and get caught next cron run
   const labelOps = [];
