@@ -780,7 +780,7 @@ Price: $[FILL IN]
 There is a $100 minimum on stock items"
 
 ## STEP 5 — WAREHOUSE STOCK (all in_stock rows have "Warehouse#" in notes AND oem_results has no non-BILL-EXT rows)
-- stan_results has a QUOTED entry → stan_quoted (use Stan's colB + colC text VERBATIM — no headers, no reformatting)
+- stan_results has a QUOTED entry → stan_quoted (worker builds structured template: "This is our stock / MPN / DC / QTY in stock / Price extracted from colB / colB notes / $100 min" — do NOT write draft_body yourself)
 - Otherwise → add_to_stan, draft: "Warehouse is checking details and I will update ASAP"
 
 ## STEP 6 — OEM EXCESS
@@ -1295,11 +1295,22 @@ async function handleEmailAgent(request, env) {
 
   // Enforce exact template wording — override whatever Claude wrote for standard reply types.
   // Claude picks the action; the worker locks the text. No improvisation possible.
-  // Build draft body for stan_quoted from Stan sheet colB + colC (verbatim per John's rule)
-  function buildStanQuotedBody(stanRow) {
+  // Build structured stan_quoted draft: extract price from colB, pull DC/QTY from in_stock_results
+  function buildStanQuotedBody(stanRow, inStockRows) {
+    const mpn  = (stanRow.mpn  || '').trim();
     const colB = (stanRow.colB || '').trim();
     const colC = (stanRow.colC || '').trim();
-    return colC ? colB + '\n\n' + colC : colB;
+    const priceMatch = colB.match(/\$(\d+(?:\.\d+)?)/);
+    const priceStr   = priceMatch ? `$${parseFloat(priceMatch[1]).toFixed(2)}` : '$[FILL IN]';
+    const notes      = colB.replace(/\$\d+(?:\.\d+)?/, '').replace(/\s{2,}/g, ' ').trim();
+    const rows       = Array.isArray(inStockRows) ? inStockRows : [];
+    const dc         = (rows[0] && rows[0].dc) ? rows[0].dc.trim() : '';
+    const qty        = rows.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
+    let body = `This is our stock\n\nMPN: ${mpn}${dc ? '\nDC: ' + dc : ''}\nQTY in stock: ${qty || '?'}\nPrice: ${priceStr}`;
+    if (notes) body += `\n\n${notes}`;
+    if (colC)  body += `\n\n${colC}`;
+    body += '\n\nThere is a $100 min on stock items.';
+    return body;
   }
 
   const DRAFT_TEMPLATES = {
@@ -1346,7 +1357,7 @@ async function handleEmailAgent(request, env) {
       const stanQuotedRow = (stan_results || []).find(r => r.status === 'QUOTED' && r.colB);
       if (stanQuotedRow) {
         decision.action = 'stan_quoted';
-        decision.draft_body = buildStanQuotedBody(stanQuotedRow);
+        decision.draft_body = buildStanQuotedBody(stanQuotedRow, in_stock_results);
       } else {
         decision.action = 'add_to_stan';
         decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
@@ -1398,7 +1409,7 @@ async function handleEmailAgent(request, env) {
         decision._corrected_from    = 'own_stock';
         decision._correction_reason = 'All in_stock rows are Warehouse#N but Stan already has QUOTED — using stan_quoted';
         decision.action    = 'stan_quoted';
-        decision.draft_body = buildStanQuotedBody(stanQuotedRow2);
+        decision.draft_body = buildStanQuotedBody(stanQuotedRow2, in_stock_results);
       } else {
         decision._corrected_from    = 'own_stock';
         decision._correction_reason = 'All in_stock rows have Warehouse#N in notes — must be add_to_stan not own_stock';
@@ -1416,7 +1427,7 @@ async function handleEmailAgent(request, env) {
       decision._corrected_from    = 'add_to_stan';
       decision._correction_reason = 'Stan already has QUOTED entry — corrected to stan_quoted';
       decision.action     = 'stan_quoted';
-      decision.draft_body = buildStanQuotedBody(stanQuotedRow);
+      decision.draft_body = buildStanQuotedBody(stanQuotedRow, in_stock_results);
     }
   }
 
@@ -1622,7 +1633,7 @@ async function handleEmailAgent(request, env) {
       decision._corrected_from    = decision._corrected_from || decision.action;
       decision._correction_reason = 'Post-audit: Stan has QUOTED entry — enforcing stan_quoted';
       decision.action     = 'stan_quoted';
-      decision.draft_body = buildStanQuotedBody(stanQuotedRowPost);
+      decision.draft_body = buildStanQuotedBody(stanQuotedRowPost, in_stock_results);
     }
   }
 
