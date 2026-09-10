@@ -3273,22 +3273,33 @@ async function cronScanInbox(env) {
       // tpQ guard: only process a thread as a TP reply if John has already sent
       // a reply in the thread. Without this, brand-new RFQs that got a TP request
       // drafted (but not yet sent) keep getting re-processed every cron cycle.
-      if (source === 'tp') {
-        const tCheck = await gGet('/threads/' + tid + '?format=metadata&metadataHeaders=From');
-        const tMsgs  = (tCheck.messages || []);
-        const johnReplied = tMsgs.some(m => {
-          const from = ((m.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
-          return /john\.fluman@intransittech\.com|rfq@intransittech\.com/i.test(from);
-        });
-        if (!johnReplied) {
-          await hubLog(env, 'email_automation', 'run', `cronScanInbox: tp skip — no John reply yet tid=${tid}`);
+      // Fetch thread messages for all sources — needed for staff-reply guard
+      const tCheck = await gGet('/threads/' + tid + '?format=metadata&metadataHeaders=From');
+      const tMsgs  = (tCheck.messages || []);
+      const lastMsg0 = tMsgs[tMsgs.length - 1];
+      const lastFrom0 = ((lastMsg0?.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
+      const lastIsStaff = /@intransittech\.com/i.test(lastFrom0);
+
+      if (source === 'rfq' || source === 'agent') {
+        // Skip threads where staff already replied last — they're handled
+        if (lastIsStaff) {
+          await hubLog(env, 'email_automation', 'run', `cronScanInbox: ${source} skip — staff already replied last tid=${tid}`);
           continue;
         }
-        // Also require the LAST message to be from the buyer (not John)
-        const lastMsg = tMsgs[tMsgs.length - 1];
-        const lastFrom = ((lastMsg?.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
-        if (/john\.fluman@intransittech\.com|rfq@intransittech\.com/i.test(lastFrom)) {
-          await hubLog(env, 'email_automation', 'run', `cronScanInbox: tp skip — last message is from John tid=${tid}`);
+      }
+
+      if (source === 'tp') {
+        const johnReplied = tMsgs.some(m => {
+          const from = ((m.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
+          return /@intransittech\.com/i.test(from);
+        });
+        if (!johnReplied) {
+          await hubLog(env, 'email_automation', 'run', `cronScanInbox: tp skip — no staff reply yet tid=${tid}`);
+          continue;
+        }
+        // Also require the LAST message to be from the buyer (not staff)
+        if (lastIsStaff) {
+          await hubLog(env, 'email_automation', 'run', `cronScanInbox: tp skip — last message is from staff tid=${tid}`);
           continue;
         }
       }
