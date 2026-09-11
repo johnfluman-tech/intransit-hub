@@ -806,7 +806,7 @@ TP given:
 
 No TP: any non-BILL-EXT row has "$2,000 MIN" in notes → request_tp_2000; otherwise → request_tp_500
 Buyers often say "no target" on first email — always ask anyway. When uncertain, default to request_tp_500.
-EXCEPTION — buyer explicitly refuses TP after we already asked: if thread_content shows John already sent a TP request ("We need a target price to proceed") AND buyer's latest reply explicitly declines to give a TP (says things like "give me your best price", "provide your lowest price", "I can't share a target", "no target available", "end customer's budget is limited, just quote me", "please quote your best price") → action=decline, draft: "Unfortunately, without a target price we are unable to assist with this request. Thank you for the opportunity." (do NOT send another TP request)
+EXCEPTION — buyer explicitly refuses TP after we already asked: ONLY applies when (1) thread_content shows John already sent a TP request ("We need a target price to proceed") in a prior message AND (2) buyer's latest reply explicitly declines to give a TP (says things like "give me your best price", "provide your lowest price", "I can't share a target", "no target available", "end customer's budget is limited, just quote me", "please quote your best price") → action=decline, draft: "Unfortunately, without a target price we are unable to assist with this request. Thank you for the opportunity." (do NOT send another TP request). CRITICAL: This exception NEVER fires on first-contact emails where no prior TP request from John exists in the thread. A buyer saying "please quote me" or "can you quote" on a fresh inquiry is NOT refusing TP — use request_tp_500.
 
 Buyer follow-up with no new TP (e.g. "any update?", "please quote", "how much?"): if thread shows MSG_CHECKING was sent and forte_results has an Open entry → still_checking. If no prior MSG_CHECKING → request_tp_500.
 
@@ -3114,6 +3114,9 @@ async function executeDecisionCron(decision, payload, token, env) {
   }).then(r => r.json());
 
   const threadId = payload.thread_id;
+
+  // Debug log: capture action + draft_body state before draft creation
+  await hubLog(env, 'email_automation', 'debug', `executeDecision: action=${action} draft_body=${decision.draft_body ? 'SET('+String(decision.draft_body).slice(0,60)+')' : 'FALSY'} replyTo_candidates=${JSON.stringify({ics:payload.ics_buyer_email||null,nc:payload.nc_buyer_email||null,dec:decision.buyer_email||null,sender:payload.sender||null})}`, { threadId });
 
   if (decision.draft_body) {
     const replyTo = payload.ics_buyer_email || payload.nc_buyer_email || decision.buyer_email || payload.sender || '';
