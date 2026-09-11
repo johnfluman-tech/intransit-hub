@@ -775,3 +775,25 @@ function davidNoStk_Sep8() {
     Logger.log('Deleted row ' + rowNum + ' (' + expectedMpn + ')');
   });
 }
+
+// ─────────────────────────────────────────────────────────────────
+// addForteRows_Sep10_2026()
+// Adds Forte entries for two threads processed on 2026-09-10:
+//   1. PS2701-1-F3-A  — Hanmo/ALLCHIPS HK, 140k pcs, TP $0.07
+//   2. GG8067402612700SR2GF — Standard International HK, 93 pcs, TP $400
+// Run ONCE. Calls addToForteSheet() so col J history is auto-populated.
+// ─────────────────────────────────────────────────────────────────
+function addForteRows_Sep10_2026() {
+  addToForteSheet('PS2701-1-F3-A', 140000, 0.07, 'HK', '');
+  addToForteSheet('GG8067402612700SR2GF', 93, 400, 'CN', '');
+  Logger.log('Done: 2 rows added.');
+}
+
+// addForteRows_Sep11_2026()
+// Adds Forte entry for MPQ4228GRE-Q-AEC1-Z — Kisa Xue / Mostech, 10K pcs, TP $1.05, CN
+// MSG_CHECKING draft created manually 2026-09-11. Run ONCE.
+// ─────────────────────────────────────────────────────────────────
+function addForteRows_Sep11_2026() {
+  addToForteSheet('MPQ4228GRE-Q-AEC1-Z', 10000, 1.05, 'CN', '');
+  Logger.log('Done: 1 row added.');
+}
