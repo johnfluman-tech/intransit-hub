@@ -795,5 +795,8 @@ function addForteRows_Sep10_2026() {
 // ─────────────────────────────────────────────────────────────────
 function addForteRows_Sep11_2026() {
   addToForteSheet('MPQ4228GRE-Q-AEC1-Z', 10000, 1.05, 'CN', '');
-  Logger.log('Done: 1 row added.');
+  addToForteSheet('2302785-2', 50, 153, 'US', '');
+  addToForteSheet('88E1111-B2-BAB2I000', 360, 6, 'CN', '');
+  addToForteSheet('TPS54618CQRTERQ1', 4150, 1.50, 'HK', '');
+  Logger.log('Done: 4 rows added.');
 }
