@@ -1147,7 +1147,13 @@ async function handleEmailAgent(request, env) {
               // Re-run post-lookup guards inline before falling through
               const ownStockRows2 = in_stock_results.filter(r => !/Warehouse#/i.test(r.notes || ''));
               if (ownStockRows2.length > 0) {
-                return json({ action: 'own_stock', reasoning: 'Inventory found on retry — own IN STOCK rows exist', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+                const _r2 = ownStockRows2[0];
+                const _p2 = _r2.price_to_quote ? parseFloat(String(_r2.price_to_quote).replace(/[$,\s]/g,'')) : NaN;
+                const _sp2 = (!isNaN(_p2) && _p2 > 0) ? _p2 : null;
+                const _pStr2 = _sp2 != null ? `$${Number(_sp2).toFixed(2)} each` : '$[FILL IN]';
+                const _qty2 = ownStockRows2.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
+                const _db2 = `We have the following available:\n\nMPN: ${requestMpn}${_r2.man?'\nManufacturer: '+_r2.man:''}${_r2.dc?'\nDC: '+_r2.dc:''}\nQTY: ${_qty2||'?'}\nPrice: ${_pStr2}\n\nPlease let us know if you would like to proceed.`;
+                return json({ action: 'own_stock', reasoning: 'Inventory found on retry — own IN STOCK rows exist', mpn: requestMpn, buyer_email: null, draft_body: _db2, forte_entry: null, oem_delete_row: null });
               }
               const has2k2 = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
               return json({ action: has2k2 ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Inventory found on retry — OEM EXCESS exists, no TP given', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
@@ -1168,7 +1174,18 @@ async function handleEmailAgent(request, env) {
       r => !/Warehouse#/i.test(r.notes || '') && _normQ(r.mpn || '') === _normQ(requestMpn)
     );
     if (_exactOwn.length > 0) {
-      return json({ action: 'own_stock', reasoning: 'Deterministic: exact own IN STOCK match — bypassing AI', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+      const _mpnKey = requestMpn.replace(/\s+/g,'').toUpperCase();
+      const _r = _exactOwn[0];
+      const _rawP = _r.price_to_quote;
+      const _parsedP = _rawP ? parseFloat(String(_rawP).replace(/[$,\s]/g,'')) : NaN;
+      let _sheetPrice = (!isNaN(_parsedP) && _parsedP > 0) ? _parsedP : null;
+      if (_sheetPrice == null) {
+        try { const _pr = await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(_mpnKey).first(); if (_pr) _sheetPrice = _pr.price; } catch(e) {}
+      }
+      const _priceStr = _sheetPrice != null ? `$${Number(_sheetPrice).toFixed(2)} each` : '$[FILL IN]';
+      const _totalQty = _exactOwn.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
+      const _draftBody = `We have the following available:\n\nMPN: ${_mpnKey}${_r.man?'\nManufacturer: '+_r.man:''}${_r.dc?'\nDC: '+_r.dc:''}\nQTY: ${_totalQty||'?'}\nPrice: ${_priceStr}\n\nPlease let us know if you would like to proceed.`;
+      return json({ action: 'own_stock', reasoning: 'Deterministic: exact own IN STOCK match — bypassing AI', mpn: requestMpn, buyer_email: null, draft_body: _draftBody, forte_entry: null, oem_delete_row: null });
     }
   }
 
