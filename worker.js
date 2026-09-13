@@ -1168,10 +1168,13 @@ async function handleEmailAgent(request, env) {
 
   // Deterministic own_stock pre-check: if exact-match non-warehouse IN STOCK rows exist,
   // skip Claude entirely — own inventory never needs a TP request.
+  // NOPB/TR suffix variants (RoHS / tape-and-reel) count as exact matches — same part.
   if (requestMpn) {
     const _normQ = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const _stripStd = s => _normQ(s).replace(/(NOPB|T&R|TR)$/, '');
+    const _normReqBase = _stripStd(requestMpn);
     const _exactOwn = (in_stock_results || []).filter(
-      r => !/Warehouse#/i.test(r.notes || '') && _normQ(r.mpn || '') === _normQ(requestMpn)
+      r => !/Warehouse#/i.test(r.notes || '') && (_normQ(r.mpn || '') === _normQ(requestMpn) || _stripStd(r.mpn || '') === _normReqBase)
     );
     if (_exactOwn.length > 0) {
       const _mpnKey = requestMpn.replace(/\s+/g,'').toUpperCase();
@@ -1191,17 +1194,21 @@ async function handleEmailAgent(request, env) {
 
   // Detect similar-but-not-exact MPN: e.g. buyer wants PMEG3020EJ, we have PMEG3020EJ115.
   // Inject [SIMILAR_MPN] note so Haiku knows to ask the buyer before quoting.
+  // EXCEPTION: standard packaging/compliance suffixes (NOPB=RoHS, TR=tape&reel) are the same part — never ask.
   let similarMpnNote = '';
   if (requestMpn) {
     const normFn = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    // Strip standard suffixes that don't change the part: NOPB (RoHS lead-free), TR/T (tape&reel)
+    const stripStd = s => normFn(s).replace(/(NOPB|T&R|TR)$/, '');
     const normReq = normFn(requestMpn);
+    const normReqBase = stripStd(requestMpn);
     const allInvMpns = [
       ...(oem_results || []).map(r => r.mpn),
       ...(in_stock_results || []).map(r => r.mpn),
     ].filter(Boolean);
-    const hasExact = allInvMpns.some(m => normFn(m) === normReq);
+    const hasExact = allInvMpns.some(m => normFn(m) === normReq || stripStd(m) === normReqBase);
     if (!hasExact) {
-      const similar = [...new Set(allInvMpns.filter(m => isMpnMatch(requestMpn, m) && normFn(m) !== normReq))];
+      const similar = [...new Set(allInvMpns.filter(m => isMpnMatch(requestMpn, m) && normFn(m) !== normReq && stripStd(m) !== normReqBase))];
       if (similar.length > 0) {
         similarMpnNote = `[SIMILAR_MPN: buyer requested "${requestMpn}" but inventory has "${similar.join('", "')}" — ask buyer if they can use our available MPN]\n\n`;
       }
