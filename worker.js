@@ -150,6 +150,9 @@ export default {
       if (p === '/api/netcomp-check' && m === 'GET') {
         const mpn = url.searchParams.get('mpn');
         if (!mpn) return json({ error: 'mpn required' }, 400);
+        if (url.searchParams.get('debug') === '1') {
+          return json(await checkNetcomponentsListingDebug(mpn, env));
+        }
         const result = await checkNetcomponentsListing(mpn, env);
         return json({ mpn, result });
       }
@@ -2469,6 +2472,61 @@ async function handleSessionLog(env) {
 
   lines.push('\n=== END OF LOG ===');
   return new Response(lines.join('\n'), { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
+}
+
+// Debug version — returns intermediate step results to diagnose login failures.
+async function checkNetcomponentsListingDebug(mpn, env) {
+  const NC = 'https://www.netcomponents.com';
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+  const jar = {};
+  const log = [];
+
+  function cookieStr() { return Object.entries(jar).map(([k,v]) => `${k}=${v}`).join('; '); }
+  function updateJar(resp) {
+    try {
+      const all = resp.headers.getAll ? resp.headers.getAll('set-cookie') : [resp.headers.get('set-cookie') || ''];
+      for (const h of all) {
+        if (!h) continue;
+        const pair = h.split(';')[0]; const eq = pair.indexOf('=');
+        if (eq > 0) jar[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+      }
+    } catch(e) { log.push('jar error: ' + e.message); }
+  }
+  async function nc(url, opts = {}) {
+    const hdrs = { 'User-Agent': UA, ...(opts.headers || {}) };
+    if (cookieStr()) hdrs['Cookie'] = cookieStr();
+    const r = await fetch(url, { ...opts, headers: hdrs, redirect: 'manual' });
+    updateJar(r);
+    return r;
+  }
+
+  try {
+    const r1 = await nc(`${NC}/account/login`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    const html1 = await r1.text();
+    log.push(`step1: status=${r1.status} len=${html1.length} cookies=${JSON.stringify(jar)}`);
+    const csrfM = html1.match(/name=["']?__RequestVerificationToken["']?[^>]*value=["']?([^"'\s>]+)/i)
+               || html1.match(/value=["']?([^"'\s>]{20,})["']?[^>]*name=["']?__RequestVerificationToken/i);
+    if (!csrfM) return { error: 'no csrf', log };
+    const csrf = csrfM[1];
+    log.push(`csrf: ${csrf.slice(0,20)}...`);
+
+    const loginBody = new URLSearchParams({ __RequestVerificationToken: csrf, AccountNumber: env.NC_ACCOUNT||'229644', UserName: env.NC_USERNAME||'Intransit', Password: env.NC_PASSWORD||'', RememberMe: 'false' });
+    const r2 = await nc(`${NC}/account/login`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': `${NC}/account/login` }, body: loginBody.toString() });
+    log.push(`step2: status=${r2.status} location=${r2.headers.get('location')} cookies=${JSON.stringify(jar)}`);
+    if (r2.status !== 302) return { error: 'login no redirect', status: r2.status, log };
+
+    await nc(`${NC}/search`, { headers: { 'Referer': `${NC}/account/login` } });
+    log.push(`step3: done cookies=${JSON.stringify(jar)}`);
+
+    const r4 = await nc(`${NC}/search/startsearchapi?parts=${encodeURIComponent(mpn)}&searchlogic=Begins`, { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Referer': `${NC}/search` } });
+    const apiId = (await r4.text()).trim();
+    log.push(`step4: apiId=${apiId}`);
+    if (!apiId || isNaN(apiId)) return { error: 'no apiId', apiId, log };
+
+    return { ok: true, apiId, log };
+  } catch(e) {
+    return { error: e.message, log };
+  }
 }
 
 // Best-effort netCOMPONENTS listing check; returns { found, qty, partNumber } or null.
