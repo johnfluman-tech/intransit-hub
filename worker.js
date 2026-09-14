@@ -3278,11 +3278,14 @@ async function cronScanInbox(env) {
 
   // Build toProcess FIRST â€” only label threads we're actually going to process.
   // Pre-labeling ALL threads caused permanent skips when the cap was hit (labeled but never processed).
+  // Deduplicate: netCOMPONENTS threads appear in both rfqQ and tpQ; only process as rfq on first encounter.
+  const rfqSet = new Set(rfqThreads);
+  const tpDedupe = tpThreads.filter(t => !rfqSet.has(t));
   const toProcess = [
     ...rfqThreads.map(t => ({ tid: t, source: 'rfq' })),
-    ...tpThreads.map(t => ({ tid: t, source: 'tp' })),
-    ...agentThreads.filter(t => !rfqThreads.includes(t) && !tpThreads.includes(t)).map(t => ({ tid: t, source: 'agent' })),
-  ].slice(0, 10);
+    ...tpDedupe.map(t => ({ tid: t, source: 'tp' })),
+    ...agentThreads.filter(t => !rfqSet.has(t) && !tpDedupe.includes(t)).map(t => ({ tid: t, source: 'agent' })),
+  ].slice(0, 3); // Keep at 3 — each thread uses ~10-15 subrequests; Cloudflare free limit is 50/invocation
 
   // Label only the threads we're about to process â€” unprocessed threads stay unlabeled and get caught next cron run
   const labelOps = [];
