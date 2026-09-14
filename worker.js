@@ -2474,7 +2474,7 @@ async function handleSessionLog(env) {
 // Best-effort netCOMPONENTS listing check; returns { found, qty, partNumber } or null.
 async function checkNetcomponentsListing(mpn, env) {
   const NC  = 'https://www.netcomponents.com';
-  const UA  = 'curl/8.11.0';
+  const UA  = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
   const jar = {};
 
   function cookieStr() {
@@ -2501,8 +2501,8 @@ async function checkNetcomponentsListing(mpn, env) {
   }
 
   try {
-    // 1. Get login page for CSRF token
-    const r1 = await nc(`${NC}/account/login`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    // 1. Get login page for CSRF token (no XHR header — this is a regular HTML page)
+    const r1 = await nc(`${NC}/account/login`);
     const html1 = await r1.text();
     // Try name-first then value-first ordering, both quoted and unquoted
     const csrfM = html1.match(/name=["']?__RequestVerificationToken["']?[^>]*value=["']?([^"'\s>]+)/i)
