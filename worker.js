@@ -3344,7 +3344,11 @@ async function cronScanInbox(env) {
       const agentResp = await handleEmailAgent(fakeReq, env);
       const decision = await agentResp.json();
 
-      if (!decision || decision.error || decision.action === 'no_action') continue;
+      if (!decision || decision.error || decision.action === 'no_action') {
+        const why = !decision ? 'null_decision' : decision.error ? 'error:'+decision.error : 'no_action';
+        await hubLog(env, 'email_automation', 'debug', `cronScanInbox: ${source} skip action=${why} tid=${tid} mpn=${payload.mpn||'?'}`, { reasoning: decision?.reasoning });
+        continue;
+      }
       await executeDecisionCron(decision, payload, token, env);
     } catch(e) {
       await hubLog(env, 'email_automation', 'error', `cronScanInbox: error tid=${tid}: ${e.message}`);
