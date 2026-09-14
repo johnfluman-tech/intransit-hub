@@ -2504,7 +2504,9 @@ async function checkNetcomponentsListing(mpn, env) {
     // 1. Get login page for CSRF token
     const r1 = await nc(`${NC}/account/login`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
     const html1 = await r1.text();
-    const csrfM = html1.match(/name=__RequestVerificationToken[^>]*value=([^\s>]+)/);
+    // Try name-first then value-first ordering, both quoted and unquoted
+    const csrfM = html1.match(/name=["']?__RequestVerificationToken["']?[^>]*value=["']?([^"'\s>]+)/i)
+               || html1.match(/value=["']?([^"'\s>]{20,})["']?[^>]*name=["']?__RequestVerificationToken/i);
     if (!csrfM) return null;
     const csrf = csrfM[1];
 
