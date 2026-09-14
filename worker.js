@@ -876,6 +876,8 @@ function isMpnMatch(requestMpn, resultMpn) {
   // One must start with the other and the trailing suffix â‰¤ 6 chars
   // 6 handles packaging suffixes like TRPBF (5), NOPB (4), TR (2) while still
   // rejecting significant variants like LP2951ACMX-3.3/NOPB (diff=7).
+  // Require shorter â‰¥5 chars: prevents 'LM3' (from OEM row 'LM-3') matching 'LM3914V'.
+  if (shorter.length < 5) return false;
   return longer.startsWith(shorter) && (longer.length - shorter.length) <= 6;
 }
 
@@ -1035,7 +1037,7 @@ async function handleEmailAgent(request, env) {
         // set inventoryLookupSucceeded=true with empty arrays, which would wrongly trigger
         // the listing_removed early exit for parts that ARE in stock.
         if (inv && (Array.isArray(inv.oem_excess) || Array.isArray(inv.in_stock) || Array.isArray(inv.stan_sheet))) {
-          oem_results      = inv.oem_excess  || [];
+          oem_results      = (inv.oem_excess || []).filter(r => isMpnMatch(mpn0, r.mpn));
           in_stock_results = inv.in_stock    || [];
           stan_results     = inv.stan_sheet  || [];
           forte_results    = inv.forte_sheet || [];
@@ -3142,6 +3144,11 @@ async function executeDecisionCron(decision, payload, token, env) {
 
   // Debug log: capture action + draft_body state before draft creation
   await hubLog(env, 'email_automation', 'debug', `executeDecision: action=${action} draft_body=${decision.draft_body ? 'SET('+String(decision.draft_body).slice(0,60)+')' : 'FALSY'} replyTo_candidates=${JSON.stringify({ics:payload.ics_buyer_email||null,nc:payload.nc_buyer_email||null,dec:decision.buyer_email||null,sender:payload.sender||null})}`, { threadId });
+
+  // W3/add_to_stan: Claude returns the action but often omits draft_body — fill from template.
+  if (!decision.draft_body && action === 'add_to_stan') {
+    decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+  }
 
   if (decision.draft_body) {
     const replyTo = payload.ics_buyer_email || payload.nc_buyer_email || decision.buyer_email || payload.sender || '';
