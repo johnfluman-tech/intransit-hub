@@ -2501,8 +2501,8 @@ async function checkNetcomponentsListing(mpn, env) {
   }
 
   try {
-    // 1. Get login page for CSRF token (no XHR header — this is a regular HTML page)
-    const r1 = await nc(`${NC}/account/login`);
+    // 1. Get login form partial — XHR header required; without it server redirects to /#/account/login
+    const r1 = await nc(`${NC}/account/login`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
     const html1 = await r1.text();
     // Try name-first then value-first ordering, both quoted and unquoted
     const csrfM = html1.match(/name=["']?__RequestVerificationToken["']?[^>]*value=["']?([^"'\s>]+)/i)
