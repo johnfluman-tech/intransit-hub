@@ -1387,6 +1387,7 @@ async function handleEmailAgent(request, env) {
     bill_handle:      'Bill will help with this request',
     add_to_stan:      'Our warehouse is checking on the details and I will update you as soon as possible. Thank you for your patience.',
     listing_removed:  'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.',
+    ask_similar_mpn:  'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
   };
   // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic â€” leave as-is
   if (DRAFT_TEMPLATES[decision.action]) {
@@ -1406,6 +1407,9 @@ async function handleEmailAgent(request, env) {
       decision.action = hasTp2 ? 'bill_handle' : 'request_tp_500';
     } else if ((oem_results || []).length > 0) {
       decision.action = hasTp2 ? 'msg_checking' : (has2kMin2 ? 'request_tp_2000' : 'request_tp_500');
+    } else {
+      // oem_results empty but guard fired — AI saw OEM context that worker can't see; safe default
+      decision.action = hasTp2 ? 'msg_checking' : 'request_tp_500';
     }
     if (DRAFT_TEMPLATES[decision.action]) decision.draft_body = DRAFT_TEMPLATES[decision.action];
   }
@@ -1495,6 +1499,27 @@ async function handleEmailAgent(request, env) {
       } else {
         decision._corrected_from    = 'own_stock';
         decision._correction_reason = 'All in_stock rows have Warehouse#N in notes â€” must be add_to_stan not own_stock';
+        decision.action    = 'add_to_stan';
+        decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+      }
+    }
+  }
+
+  // Bug 1 fix: if AI returned request_tp_* but every in_stock row is Warehouse#N,
+  // the part isn't own-stock — route to WH3 checking reply (stan_quoted or add_to_stan).
+  if ((decision.action === 'request_tp_500' || decision.action === 'request_tp_2000') &&
+      Array.isArray(in_stock_results) && in_stock_results.length > 0) {
+    const allWarehouseTP = in_stock_results.every(r => /Warehouse#\d/i.test(r.notes || ''));
+    if (allWarehouseTP) {
+      const stanQuotedRowTP = (stan_results || []).find(r => r.status === 'QUOTED' && r.colB);
+      if (stanQuotedRowTP) {
+        decision._corrected_from    = decision.action;
+        decision._correction_reason = 'request_tp chosen but all in_stock rows are WH3 and Stan has QUOTED — corrected to stan_quoted';
+        decision.action    = 'stan_quoted';
+        decision.draft_body = buildStanQuotedBody(stanQuotedRowTP, in_stock_results);
+      } else {
+        decision._corrected_from    = decision.action;
+        decision._correction_reason = 'request_tp chosen but all in_stock rows are WH3 — corrected to add_to_stan';
         decision.action    = 'add_to_stan';
         decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
       }
@@ -3409,14 +3434,16 @@ async function cronScanInbox(env) {
           const from = ((m.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
           return /@intransittech\.com/i.test(from);
         });
-        if (!johnReplied) {
-          await hubLog(env, 'email_automation', 'run', `cronScanInbox: tp skip â€” no staff reply yet tid=${tid}`);
-          continue;
-        }
-        // Also require the LAST message to be from the buyer (not staff)
         if (lastIsStaff) {
           await hubLog(env, 'email_automation', 'run', `cronScanInbox: tp skip â€” last message is from staff tid=${tid}`);
           continue;
+        }
+        if (!johnReplied) {
+          // Bug 2 fix: standalone TP reply arrived as its own thread (rfq label stuck from crashed run).
+          // No John message in this thread, but buyer is last sender — process it like an rfq thread
+          // so the AI sees the buyer's TP and can issue msg_checking.
+          await hubLog(env, 'email_automation', 'run', `cronScanInbox: tp→rfq reclassify (no staff reply in thread) tid=${tid}`);
+          // Fall through to processing (no continue)
         }
       }
 
@@ -3435,11 +3462,15 @@ async function cronScanInbox(env) {
       if (!decision || decision.error || decision.action === 'no_action') {
         const why = !decision ? 'null_decision' : decision.error ? 'error:'+decision.error : 'no_action';
         await hubLog(env, 'email_automation', 'debug', `cronScanInbox: ${source} skip action=${why} tid=${tid} mpn=${payload.mpn||'?'}`, { reasoning: decision?.reasoning });
+        // Remove the rfq label so the cron retries this thread next run instead of permanently skipping it
+        if (rfqLabelId) await gPost('/threads/' + tid + '/modify', { removeLabelIds: [rfqLabelId] }).catch(() => {});
         continue;
       }
       await executeDecisionCron(decision, payload, token, env);
     } catch(e) {
       await hubLog(env, 'email_automation', 'error', `cronScanInbox: error tid=${tid}: ${e.message}`);
+      // Remove the rfq label on exception too — let the next cron retry rather than permanently skipping
+      if (rfqLabelId) await gPost('/threads/' + tid + '/modify', { removeLabelIds: [rfqLabelId] }).catch(() => {});
     }
   }
 }
