@@ -1247,6 +1247,26 @@ async function handleEmailAgent(request, env) {
     }
   }
 
+  // Deterministic OEM EXCESS + no buyer TP pre-check: if OEM EXCESS exists and buyer gave no TP,
+  // always request TP before doing anything else. Prevents Claude from returning msg_checking
+  // (or any other action) when the correct response is always request_tp_500/request_tp_2000.
+  // Only fires when there are no own IN STOCK rows (WH3/Warehouse rows don't count as own stock).
+  // Checks thread_content for buyer TP in multiple forms before skipping â€" ensures tpQ reply emails
+  // (where buyer already gave TP in plain text) are not caught by this guard.
+  if (oem_results.length > 0 && (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
+    const tcLC = (thread_content || '').toLowerCase();
+    const hasBuyerTp =
+      /tgtprice=\d/i.test(thread_content) ||
+      /(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*[\d.]/i.test(tcLC) ||
+      /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|usd|per\s*pc)/i.test(tcLC) ||
+      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(tcLC);
+    if (!hasBuyerTp) {
+      const has2k = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+      await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: OEM pre-check â€" no buyer TP, returning ${has2k ? 'request_tp_2000' : 'request_tp_500'}`, { subject, mpn: requestMpn });
+      return json({ action: has2k ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Deterministic: OEM EXCESS exists, buyer gave no TP', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+    }
+  }
+
   // Detect similar-but-not-exact MPN: e.g. buyer wants PMEG3020EJ, we have PMEG3020EJ115.
   // Inject [SIMILAR_MPN] note so Haiku knows to ask the buyer before quoting.
   // EXCEPTION: standard packaging/compliance suffixes (NOPB=RoHS, TR=tape&reel) are the same part â€" never ask.
