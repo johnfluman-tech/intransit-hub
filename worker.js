@@ -1262,8 +1262,11 @@ async function handleEmailAgent(request, env) {
       /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(tcLC);
     if (!hasBuyerTp) {
       const has2k = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+      const _tpTpl = has2k
+        ? 'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.'
+        : 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.';
       await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: OEM pre-check â€" no buyer TP, returning ${has2k ? 'request_tp_2000' : 'request_tp_500'}`, { subject, mpn: requestMpn });
-      return json({ action: has2k ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Deterministic: OEM EXCESS exists, buyer gave no TP', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+      return json({ action: has2k ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Deterministic: OEM EXCESS exists, buyer gave no TP', mpn: requestMpn, buyer_email: null, draft_body: _tpTpl, forte_entry: null, oem_delete_row: null });
     }
   }
 
@@ -1318,19 +1321,6 @@ async function handleEmailAgent(request, env) {
     }
   }
 
-  // Fetch lessons learned from John's past corrections â€" inject into every decision
-  let lessonsBlock = '';
-  try {
-    const senderDomain = sender ? sender.replace(/.*@/, '') : '';
-    const { results: allLessons } = await env.DB.prepare(
-      `SELECT description, body FROM ai_memory WHERE type = 'lesson' ORDER BY updated_at DESC LIMIT 25`
-    ).all();
-    if (allLessons && allLessons.length > 0) {
-      lessonsBlock = '\n\n## LESSONS LEARNED FROM JOHN\'S CORRECTIONS â€" these OVERRIDE defaults, follow exactly:\n' +
-        allLessons.map((l, i) => `${i+1}. ${l.description}`).join('\n');
-    }
-  } catch(e) {}
-
   // Pre-flight blocked-domain check â€" catches buyer domains buried in messagesend@/autosend@ bodies
   // (the AI prompt lists blocked domains but can't reliably match them when the buyer email is inside body text)
   try {
@@ -1358,68 +1348,7 @@ async function handleEmailAgent(request, env) {
     }
   } catch(e) {}
 
-  // Best-effort netCOMPONENTS listing check â€" extract MPN from oem_results if present
-  let ncResult = null;
-  const ncMpn = body.mpn || (Array.isArray(oem_results) && oem_results[0] && oem_results[0].mpn) || null;
-  if (ncMpn) {
-    try { ncResult = await checkNetcomponentsListing(ncMpn, env); } catch(e) {}
-  }
-  const ncSection = ncResult === null
-    ? 'NETCOMPONENTS CHECK: unavailable (auth/network issue)\n\n'
-    : ncResult.found
-      ? `NETCOMPONENTS CHECK: Listed â€" Part# ${ncResult.partNumber}, Qty ${ncResult.qty ?? 'unknown'} (searchApiId: ${ncResult.apiId})\n\n`
-      : `NETCOMPONENTS CHECK: Part searchable (apiId: ${ncResult.apiId}) but our listing row not found in result page\n\n`;
-
-  const inventoryWarning = inventoryLookupSucceeded
-    ? ''
-    : 'CRITICAL WARNING: INVENTORY LOOKUP FAILED (network/timeout error). Results below may be empty due to failure, NOT because the part is unavailable. DO NOT issue no_bid or listing_removed based on empty inventory results â€" default to request_tp_500 instead.\n\n';
-
-  const userMessage =
-    inventoryWarning +
-    similarMpnNote +
-    `EMAIL THREAD\nSubject: ${subject || '(none)'}\nSender: ${sender || '(unknown)'}\nCurrent labels: ${(current_labels || []).join(', ') || 'none'}\n\n` +
-    `THREAD CONTENT:\n${thread_content || '(empty)'}\n\n` +
-    `IN STOCK RESULTS:\n${JSON.stringify(in_stock_results || [], null, 2)}\n\n` +
-    `STAN SHEET RESULTS:\n${JSON.stringify(stan_results || [], null, 2)}\n\n` +
-    `OEM EXCESS RESULTS:\n${JSON.stringify(oem_results || [], null, 2)}\n\n` +
-    `FORTE 60-DAY DUPLICATE CHECK:\n${JSON.stringify(forte_results || [], null, 2)}\n\n` +
-    `PRIOR SENT QUOTES:\n${prior_quotes || 'None found'}\n\n` +
-    ncSection +
-    `Analyze this thread and return your JSON decision.`;
-
-  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': env.CLAUDE_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'prompt-caching-2024-07-31',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1000,
-      system: [
-        { type: 'text', text: AGENT_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-        ...(lessonsBlock ? [{ type: 'text', text: lessonsBlock }] : []),
-      ],
-      messages: [{ role: 'user', content: userMessage }],
-    }),
-  });
-
-  const claudeData = await claudeRes.json();
-  if (!claudeData.content || !claudeData.content[0]) {
-    return json({ error: 'Claude API error', raw: claudeData }, 500);
-  }
-
   let decision;
-  try {
-    const raw = claudeData.content[0].text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
-    decision = JSON.parse(raw);
-  } catch (e) {
-    return json({ error: 'Claude returned non-JSON', raw: claudeData.content[0].text }, 500);
-  }
-
-  await logApiCost(env, 'claude-haiku-4-5-20251001', 'email-agent', claudeData.usage, decision.mpn || null, decision.action || null);
 
   // Enforce exact template wording â€" override whatever Claude wrote for standard reply types.
   // Claude picks the action; the worker locks the text. No improvisation possible.
@@ -1452,7 +1381,65 @@ async function handleEmailAgent(request, env) {
     listing_removed:  'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.',
     ask_similar_mpn:  'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
   };
-  // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic â€" leave as-is
+
+  // --- Deterministic decision engine (replaces Claude AI call) ---
+  {
+    const _own  = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
+    const _wh3  = (in_stock_results || []).filter(r => /Warehouse#\d/i.test(r.notes || ''));
+    const _stanQ = (stan_results || []).find(r => r.status === 'QUOTED' && r.colB);
+    const _billOnly = (oem_results || []).length > 0 && (oem_results || []).every(r => /BILL EXT/i.test(r.notes || ''));
+    const _hasOem   = (oem_results || []).some(r => !/BILL EXT/i.test(r.notes || ''));
+    const _has2k    = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+    const _tcLC2    = (thread_content || '').toLowerCase();
+    const _hasTp    =
+      /tgtprice=\d/i.test(thread_content) ||
+      /(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*[\d.]/i.test(_tcLC2) ||
+      /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|usd|per\s*pc)/i.test(_tcLC2) ||
+      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(_tcLC2);
+    const _tpMatch = (thread_content || '').match(/tgtprice=([\d.]+)/i) ||
+      (thread_content || '').match(/(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*([\d.]+)/i) ||
+      (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|usd|per\s*pc)/i);
+    const _tpVal = _tpMatch ? parseFloat(_tpMatch[1]) : null;
+
+    // Extract buyer qty from thread content
+    const _qtyM = (thread_content || '').match(/QtyReq=(\d+)/i) ||
+      (thread_content || '').match(/NQTY=(\d+)/i) ||
+      (thread_content || '').match(/qty\s*req\w*\s*[:=]?\s*(\d{1,7})/i) ||
+      (thread_content || '').match(/\b(\d{1,7})\s*pcs?\b/i) ||
+      (thread_content || '').match(/qty\s*[:=]\s*(\d{1,7})/i);
+    const _buyerQty = _qtyM ? parseInt(_qtyM[1]) : null;
+    // Extract country from sender domain
+    const _sdrDomain = (sender || '').replace(/.*@/, '').toLowerCase();
+    const _domCtry = { cn: 'CN', hk: 'HK', nl: 'NL', de: 'DE', jp: 'JP', tw: 'TW', ca: 'CA', uk: 'GB', au: 'AU', kr: 'KR', sg: 'SG', in: 'IN', fr: 'FR' };
+    const _tld = _sdrDomain.split('.').pop();
+    const _senderCtry = _domCtry[_tld] || 'CN';
+
+    let _act, _body = null, _rsn, _forteEntry = null;
+    if (_own.length > 0) {
+      _act = 'own_stock'; _rsn = 'Own IN STOCK';
+    } else if (_wh3.length > 0 && !_hasOem) {
+      if (_stanQ) { _act = 'stan_quoted'; _body = buildStanQuotedBody(_stanQ, in_stock_results); _rsn = 'WH3+Stan QUOTED'; }
+      else        { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3 only'; }
+    } else if (_billOnly) {
+      if (_hasTp) { _act = 'bill_handle'; _body = DRAFT_TEMPLATES.bill_handle; _rsn = 'BILL EXT+TP'; }
+      else        { _act = _has2k ? 'request_tp_2000' : 'request_tp_500'; _rsn = 'BILL EXT no TP'; }
+    } else if (_hasOem) {
+      _act = 'msg_checking'; _body = DRAFT_TEMPLATES.msg_checking; _rsn = 'OEM EXCESS+TP';
+      // Build forte_entry if no 60-day duplicate and we have qty + TP
+      if ((forte_results || []).length === 0 && _tpVal && _buyerQty && requestMpn) {
+        _forteEntry = { mpn: requestMpn, qty: _buyerQty, target_price: _tpVal, country: _senderCtry };
+      }
+    } else if (_stanQ) {
+      _act = 'stan_quoted'; _body = buildStanQuotedBody(_stanQ, in_stock_results); _rsn = 'Stan QUOTED only';
+    } else {
+      _act = 'no_bid'; _rsn = 'No inventory';
+    }
+    // msg_checking/bill_handle guards check target_price > 0; use 0.01 sentinel when TP text found but no parseable number
+    const _finalTp = (_act === 'msg_checking' || _act === 'bill_handle') ? (_tpVal || 0.01) : _tpVal;
+    decision = { action: _act, reasoning: _rsn, mpn: requestMpn || null, buyer_email: null, forte_entry: _forteEntry, target_price: _finalTp, draft_body: _body };
+  }
+
+  // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic — leave as-is
   if (DRAFT_TEMPLATES[decision.action]) {
     decision.draft_body = DRAFT_TEMPLATES[decision.action];
   }
@@ -1746,75 +1733,6 @@ async function handleEmailAgent(request, env) {
         decision.draft_body = decision.draft_body.replace(/\$\[FILL IN\]/g, `$${Number(storedPrice).toFixed(2)} each`);
       }
     }
-  }
-
-  // â"€â"€ Inline Sonnet audit (moved from Apps Script auditAndCorrect) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-  const AUDITABLE_ACTIONS = ['msg_checking','request_tp_500','request_tp_2000','request_qty','bill_handle','own_stock','stan_quoted','add_to_stan'];
-  const hasInv = (oem_results && oem_results.length > 0) || (in_stock_results && in_stock_results.length > 0);
-  if (AUDITABLE_ACTIONS.includes(decision.action) || (decision.action === 'no_bid' && hasInv)) {
-    try {
-      const auditMsg =
-        `DECISION TO AUDIT:\n${JSON.stringify(decision, null, 2)}\n\n` +
-        `EMAIL: Subject="${subject || ''}" | Sender="${sender || ''}"\n\n` +
-        `THREAD CONTENT:\n${(thread_content || '').slice(0, 3000)}\n\n` +
-        `IN STOCK RESULTS:\n${JSON.stringify(in_stock_results || [], null, 2)}\n\n` +
-        `STAN SHEET:\n${JSON.stringify(stan_results || [], null, 2)}\n\n` +
-        `OEM EXCESS RESULTS:\n${JSON.stringify(oem_results || [], null, 2)}\n\n` +
-        `FORTE 60-DAY CHECK:\n${JSON.stringify(forte_results || [], null, 2)}\n\n` +
-        `Is this decision correct? Find any mistakes.`;
-      const auditRes = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'x-api-key': env.CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'prompt-caching-2024-07-31', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 800,
-          system: [{ type: 'text', text: AUDIT_PROMPT, cache_control: { type: 'ephemeral' } }],
-          messages: [{ role: 'user', content: auditMsg }] }),
-      });
-      const auditData = await auditRes.json();
-      await logApiCost(env, 'claude-sonnet-4-6', 'audit-inline', auditData.usage, decision.mpn || null, decision.action || null);
-      const audit = JSON.parse(auditData.content[0].text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim());
-
-      if (audit.verdict === 'wrong') {
-        const origAction = decision.action;
-        if (audit.corrected_action)      decision.action      = audit.corrected_action;
-        if (audit.corrected_buyer_email) decision.buyer_email = audit.corrected_buyer_email;
-        if (audit.corrected_draft_body)  decision.draft_body  = audit.corrected_draft_body;
-        if (audit.corrected_forte_entry === false) decision.forte_entry = null;
-        else if (audit.corrected_forte_entry)      decision.forte_entry = audit.corrected_forte_entry;
-        if (DRAFT_TEMPLATES[decision.action]) decision.draft_body = DRAFT_TEMPLATES[decision.action];
-        decision.reasoning          = `[CORRECTED: ${audit.reason}]`;
-        decision._corrected_from    = origAction; // signals Apps Script to send bug-report email
-        decision._correction_reason = audit.reason || null;
-
-        if (audit.lesson && audit.is_systematic_bug) {
-          try {
-            const slug = 'lesson_' + Date.now().toString(36) + '_' + (decision.mpn||'x').replace(/[^a-zA-Z0-9]/g,'').slice(0,8);
-            await env.DB.prepare(
-              `INSERT OR IGNORE INTO ai_memory (slug, description, type, body, updated_at) VALUES (?, ?, 'lesson', ?, datetime('now'))`
-            ).bind(slug, audit.lesson.slice(0,200),
-              `RULE: ${audit.lesson}\nTRIGGER: Haiku said ${origAction}, Sonnet corrected to ${decision.action}\nMPN: ${decision.mpn||'n/a'}`
-            ).run();
-          } catch(e) {}
-        }
-      }
-    } catch(auditErr) {}
-  }
-
-  // Post-audit own_stock price enforcement: audit may override draft_body with a hallucinated
-  // price. Re-build the draft from trusted sources (sheet col F â†' D1 â†' $[FILL IN]) to ensure
-  // no AI-invented dollar amount survives.
-  if (decision.action === 'own_stock') {
-    const mpnKey2 = (decision.mpn || requestMpn || '').replace(/\s+/g, '').toUpperCase();
-    const ownRows2 = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
-    const _rawP2 = ownRows2.length > 0 ? ownRows2[0].price_to_quote : null;
-    const _parsedP2 = _rawP2 ? parseFloat(String(_rawP2).replace(/[$,\s]/g, '')) : NaN;
-    const sheetPrice2 = (!isNaN(_parsedP2) && _parsedP2 > 0) ? _parsedP2 : null;
-    const priceRow2 = sheetPrice2 == null ? await env.DB.prepare('SELECT price FROM stock_prices WHERE mpn = ?').bind(mpnKey2).first() : null;
-    const storedPrice2 = sheetPrice2 != null ? sheetPrice2 : (priceRow2 != null ? priceRow2.price : null);
-    const dc2  = (ownRows2[0] && ownRows2[0].dc)  ? ownRows2[0].dc  : '';
-    const man2 = (ownRows2[0] && ownRows2[0].man) ? ownRows2[0].man : '';
-    const totalQty2 = ownRows2.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
-    const priceStr2 = (storedPrice2 != null && !isNaN(Number(storedPrice2))) ? `$${Number(storedPrice2).toFixed(2)} each` : '$[FILL IN]';
-    decision.draft_body = `We have the following available:\n\nMPN: ${mpnKey2}${man2 ? '\nManufacturer: ' + man2 : ''}\nDC: ${dc2 || '?'}\nQTY: ${totalQty2 || '?'}\nPrice: ${priceStr2}\n\nPlease let us know if you would like to proceed.`;
   }
 
   // Post-audit Fix C enforcement: audit may revert add_to_stanâ†'stan_quoted correction.
@@ -3333,9 +3251,18 @@ async function executeDecisionCron(decision, payload, token, env) {
   // Debug log: capture action + draft_body state before draft creation
   await hubLog(env, 'email_automation', 'debug', `executeDecision: action=${action} draft_body=${decision.draft_body ? 'SET('+String(decision.draft_body).slice(0,60)+')' : 'FALSY'} replyTo_candidates=${JSON.stringify({ics:payload.ics_buyer_email||null,nc:payload.nc_buyer_email||null,dec:decision.buyer_email||null,sender:payload.sender||null})}`, { threadId });
 
-  // W3/add_to_stan: Claude returns the action but often omits draft_body — fill from template.
-  if (!decision.draft_body && action === 'add_to_stan') {
-    decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+  // Fill draft_body from inline templates if missing (safety net for early-return paths)
+  const _EXEC_TEMPLATES = {
+    request_tp_500:  'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
+    request_tp_2000: 'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.',
+    msg_checking:    'We are checking on it now. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.',
+    bill_handle:     'Bill will help with this request',
+    add_to_stan:     'Our warehouse is checking on the details and I will update you as soon as possible. Thank you for your patience.',
+    listing_removed: 'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.',
+    remove_oem:      'Ok, removed from listing.',
+  };
+  if (!decision.draft_body && _EXEC_TEMPLATES[action]) {
+    decision.draft_body = _EXEC_TEMPLATES[action];
   }
 
   if (decision.draft_body) {
