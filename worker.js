@@ -1206,6 +1206,14 @@ async function handleEmailAgent(request, env) {
     return json({ action: 'no_bid', reasoning: 'No inventory found for this MPN', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
   }
 
+  // Improvement #1/#3: if the web app lookup failed (timeout/error), do NOT call Claude —
+  // Claude would default to request_tp_500 with no inventory context, creating wrong drafts.
+  // Return no_action so the cron removes the rfq label and retries next cycle.
+  if (!inventoryLookupSucceeded) {
+    await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: inventory_lookup_failed — returning no_action for retry`, { subject });
+    return json({ action: 'no_action', reasoning: 'inventory_lookup_failed — will retry next cron run', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+  }
+
   // Deterministic own_stock pre-check: if exact-match non-warehouse IN STOCK rows exist,
   // skip Claude entirely â€” own inventory never needs a TP request.
   // NOPB/TR suffix variants (RoHS / tape-and-reel) count as exact matches â€” same part.
