@@ -1267,6 +1267,34 @@ async function handleEmailAgent(request, env) {
     }
   }
 
+  // Fetch Forte col H (John Quoted price) for this MPN.
+  // If John has previously quoted a sell price for this part, inject it so Claude can quote directly
+  // when the buyer's TP covers that price â€" instead of always sending MSG_CHECKING.
+  // Only fetches when forte_results has a matching entry (avoids unnecessary subrequests).
+  let forteQuotedPrice = null;
+  if (requestMpn && Array.isArray(forte_results) && forte_results.length > 0) {
+    try {
+      const _fTok = await getGmailToken(env);
+      const _fSheet = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values/B1:H700?majorDimension=ROWS`,
+        { headers: { Authorization: 'Bearer ' + _fTok } }
+      ).then(r => r.json());
+      const _normF = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const _reqNormF = _normF(requestMpn);
+      for (const _fRow of (_fSheet.values || [])) {
+        // col B = index 0 (MPN), col H = index 6 (John Quoted)
+        if (_normF(_fRow[0] || '') === _reqNormF && _fRow[6]) {
+          const _fp = parseFloat(String(_fRow[6]).replace(/[$,\s]/g, ''));
+          if (!isNaN(_fp) && _fp > 0) forteQuotedPrice = _fp; // no break â€" take last/most-recent match
+        }
+      }
+      if (forteQuotedPrice != null) {
+        await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: Forte col H found $${forteQuotedPrice} for ${requestMpn}`, { subject });
+        thread_content = `[FORTE_QUOTED_PRICE: John previously quoted $${forteQuotedPrice.toFixed(2)}/each for ${requestMpn}. If buyer TP >= $${forteQuotedPrice.toFixed(2)}, quote directly at that price. If buyer TP < $${forteQuotedPrice.toFixed(2)}, send MSG_CHECKING.]\n\n` + thread_content;
+      }
+    } catch(e) { /* ignore â€" proceed without */ }
+  }
+
   // Detect similar-but-not-exact MPN: e.g. buyer wants PMEG3020EJ, we have PMEG3020EJ115.
   // Inject [SIMILAR_MPN] note so Haiku knows to ask the buyer before quoting.
   // EXCEPTION: standard packaging/compliance suffixes (NOPB=RoHS, TR=tape&reel) are the same part â€" never ask.
