@@ -1157,10 +1157,40 @@ async function handleEmailAgent(request, env) {
   // ONLY fire if inventoryLookupSucceeded â€" if the lookup itself failed, fall through to Claude
   // so a silent network error doesn't wrongly send a "no longer available" reply.
   if (inventoryLookupSucceeded && oem_results.length === 0 && in_stock_results.length === 0 && stan_results.length === 0) {
+    // Safety retry for ALL email types before giving up â€" web app can return empty on transient
+    // errors even when inventory exists (e.g. ST3232BD query returning empty when ST3232BDR is in OEM).
+    // Previously this retry only ran for listing-site emails, causing false no_bid for direct buyers.
+    if (requestMpn) {
+      try {
+        const inv2 = await lookupInventory(requestMpn);
+        if (inv2 && (Array.isArray(inv2.oem_excess) || Array.isArray(inv2.in_stock))) {
+          const oemHit = (inv2.oem_excess || []).filter(r => isMpnMatch(requestMpn, r.mpn));
+          const inHit  = (inv2.in_stock   || []).filter(r => isMpnMatch(requestMpn, r.mpn));
+          if (oemHit.length > 0 || inHit.length > 0) {
+            // Inventory confirmed on retry â€" reassign and fall through to full agent processing
+            oem_results      = oemHit;
+            in_stock_results = inHit;
+            stan_results     = inv2.stan_sheet  || [];
+            forte_results    = inv2.forte_sheet || [];
+            const ownStockRows2 = in_stock_results.filter(r => !/Warehouse#/i.test(r.notes || ''));
+            if (ownStockRows2.length > 0) {
+              const _r2 = ownStockRows2[0];
+              const _p2 = _r2.price_to_quote ? parseFloat(String(_r2.price_to_quote).replace(/[$,\s]/g,'')) : NaN;
+              const _sp2 = (!isNaN(_p2) && _p2 > 0) ? _p2 : null;
+              const _pStr2 = _sp2 != null ? `$${Number(_sp2).toFixed(2)} each` : '$[FILL IN]';
+              const _qty2 = ownStockRows2.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
+              const _db2 = `We have the following available:\n\nMPN: ${requestMpn}${_r2.man?'\nManufacturer: '+_r2.man:''}${_r2.dc?'\nDC: '+_r2.dc:''}\nQTY: ${_qty2||'?'}\nPrice: ${_pStr2}\n\nPlease let us know if you would like to proceed.`;
+              return json({ action: 'own_stock', reasoning: 'Inventory found on retry â€" own IN STOCK rows exist', mpn: requestMpn, buyer_email: null, draft_body: _db2, forte_entry: null, oem_delete_row: null });
+            }
+            const has2k2 = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+            return json({ action: has2k2 ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Inventory found on retry â€" OEM EXCESS exists, no TP given', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+          }
+        }
+      } catch(e2) { /* ignore retry errors â€" proceed to no_bid/listing_removed */ }
+    }
+    // Retry found nothing â€" determine response based on email source.
     // If the RFQ came through a listing site (netCOMPONENTS, IC Source), the buyer found our
-    // listing and deserves a polite apology â€" not silence. Part was removed from OEM EXCESS
-    // (David no-stk or similar) but the listing hasn't dropped off the site yet.
-    // Check sender AND subject â€" the last message may be from John (reply), not the relay address.
+    // listing and deserves a polite apology â€" not silence.
     const senderLC = (sender || '').toLowerCase();
     const subjectLC = (subject || '').toLowerCase();
     const contentLC = (thread_content || '').toLowerCase();
@@ -1168,39 +1198,6 @@ async function handleEmailAgent(request, env) {
                           subjectLC.includes('netcomponents') || subjectLC.includes('icsource') ||
                           contentLC.includes('messagesend@netcomponents') || contentLC.includes('autosend@icsource');
     if (isListingSite) {
-      // Safety re-check: if we have a requestMpn, do one more lookup before sending
-      // listing_removed â€" a failed/malformed first lookup could have caused false empty results.
-      if (requestMpn) {
-        try {
-          const inv2 = await lookupInventory(requestMpn);
-          if (inv2 && (Array.isArray(inv2.oem_excess) || Array.isArray(inv2.in_stock))) {
-            const oemHit = (inv2.oem_excess || []).filter(r => isMpnMatch(requestMpn, r.mpn));
-            const inHit  = (inv2.in_stock   || []).filter(r => isMpnMatch(requestMpn, r.mpn));
-            if (oemHit.length > 0 || inHit.length > 0) {
-              // Inventory confirmed on retry â€" abort listing_removed, reassign and fall through
-              oem_results      = oemHit;
-              in_stock_results = inHit;
-              stan_results     = inv2.stan_sheet  || [];
-              forte_results    = inv2.forte_sheet || [];
-              // Jump past the early-exit block by setting a flag and breaking out
-              inventoryLookupSucceeded = true; // already true, but make intent clear
-              // Re-run post-lookup guards inline before falling through
-              const ownStockRows2 = in_stock_results.filter(r => !/Warehouse#/i.test(r.notes || ''));
-              if (ownStockRows2.length > 0) {
-                const _r2 = ownStockRows2[0];
-                const _p2 = _r2.price_to_quote ? parseFloat(String(_r2.price_to_quote).replace(/[$,\s]/g,'')) : NaN;
-                const _sp2 = (!isNaN(_p2) && _p2 > 0) ? _p2 : null;
-                const _pStr2 = _sp2 != null ? `$${Number(_sp2).toFixed(2)} each` : '$[FILL IN]';
-                const _qty2 = ownStockRows2.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
-                const _db2 = `We have the following available:\n\nMPN: ${requestMpn}${_r2.man?'\nManufacturer: '+_r2.man:''}${_r2.dc?'\nDC: '+_r2.dc:''}\nQTY: ${_qty2||'?'}\nPrice: ${_pStr2}\n\nPlease let us know if you would like to proceed.`;
-                return json({ action: 'own_stock', reasoning: 'Inventory found on retry â€" own IN STOCK rows exist', mpn: requestMpn, buyer_email: null, draft_body: _db2, forte_entry: null, oem_delete_row: null });
-              }
-              const has2k2 = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
-              return json({ action: has2k2 ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Inventory found on retry â€" OEM EXCESS exists, no TP given', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
-            }
-          }
-        } catch(e2) { /* ignore retry errors â€" proceed with listing_removed */ }
-      }
       return json({ action: 'listing_removed', reasoning: 'No inventory â€" RFQ from listing site, send polite removal notice', mpn: requestMpn || null, buyer_email: null, draft_body: 'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.', forte_entry: null, oem_delete_row: null });
     }
     return json({ action: 'no_bid', reasoning: 'No inventory found for this MPN', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
