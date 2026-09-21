@@ -4685,32 +4685,41 @@ async function processNext() {
 }
 
 async function reverseOemRemoval() {
-  if (!currentMPN) { alert('No MPN detected — open a David/Forte thread first.'); return; }
-  // Prompt for OEM row details — allows restoring even when no D1 backup exists
+  let mpn = currentMPN;
+  if (!mpn) {
+    mpn = window.prompt('MPN not auto-detected. Enter MPN to reverse OEM removal:');
+    if (!mpn || !mpn.trim()) return;
+    mpn = mpn.trim().toUpperCase();
+  }
   const qty = window.prompt('QTY for OEM EXCESS row?\n(Leave blank to use saved backup)', '');
-  if (qty === null) return; // cancelled
+  if (qty === null) return;
   const notes = window.prompt('OEM EXCESS listing notes?', 'OEM EXCESS! $500 MIN TP REQUIRED');
-  if (notes === null) return; // cancelled
-  if (!confirm('Reverse OEM removal for ' + currentMPN + '?\n\nThis will:\n1. Re-add the row to OEM EXCESS\n2. Reset Forte status back to Open')) return;
+  if (notes === null) return;
+  if (!confirm('Reverse OEM removal for ' + mpn + '?\n\nThis will:\n1. Re-add the row to OEM EXCESS\n2. Reset Forte status back to Open')) return;
   const el = document.getElementById('actions-result');
-  showResult(el, '⏳ Reversing removal for ' + currentMPN + '…');
-  const cmdData = { mpn: currentMPN };
-  if (qty.trim()) cmdData.row_data = [currentMPN, '', '', qty.trim(), notes.trim() || 'OEM EXCESS! $500 MIN TP REQUIRED'];
+  showResult(el, '&#x23F3; Reversing removal for ' + mpn + '...');
+  const cmdData = { mpn };
+  if (qty.trim()) cmdData.row_data = [mpn, '', '', qty.trim(), notes.trim() || 'OEM EXCESS! $500 MIN TP REQUIRED'];
   try {
     const r = await sapi('command-queue', { type: 'reverse_oem_removal', data: cmdData });
-    showResult(el, r.ok ? '✔ OEM EXCESS row restored and Forte status reset for ' + currentMPN : JSON.stringify(r), !r.ok);
+    showResult(el, r.ok ? '&#x2714; OEM EXCESS row restored and Forte status reset for ' + mpn : JSON.stringify(r), !r.ok);
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
 
 async function requoteFromStan() {
-  if (!currentMPN) { alert('No MPN detected — open a thread first.'); return; }
-  if (!TID) { alert('No thread ID — open a thread first.'); return; }
-  if (!confirm('Delete current draft and create a new Stan-quoted draft for ' + currentMPN + '?\n\nThis will:\n1. Delete the existing draft in this thread\n2. Create a new draft with Stan sheet pricing')) return;
+  let mpn = currentMPN;
+  if (!mpn) {
+    mpn = window.prompt('MPN not auto-detected. Enter MPN to requote from Stan:');
+    if (!mpn || !mpn.trim()) return;
+    mpn = mpn.trim().toUpperCase();
+  }
+  if (!TID) { alert('No thread ID — reopen the sidebar from a Gmail thread.'); return; }
+  if (!confirm('Delete current draft and create a new Stan-quoted draft for ' + mpn + '?\n\nThis will:\n1. Delete the existing draft in this thread\n2. Create a new draft with Stan sheet pricing')) return;
   const el = document.getElementById('actions-result');
-  showResult(el, '⏳ Requoting from Stan for ' + currentMPN + '…');
+  showResult(el, '&#x23F3; Requoting from Stan for ' + mpn + '...');
   try {
-    const r = await sapi('command-queue', { type: 'requote_stan', data: { mpn: currentMPN, thread_id: TID } });
-    showResult(el, r.ok ? '✔ Stan-quoted draft created for ' + currentMPN + ' — check your drafts in Gmail.' : JSON.stringify(r), !r.ok);
+    const r = await sapi('command-queue', { type: 'requote_stan', data: { mpn, thread_id: TID } });
+    showResult(el, r.ok ? '&#x2714; Stan-quoted draft created for ' + mpn + ' — check your drafts in Gmail.' : JSON.stringify(r), !r.ok);
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
 
