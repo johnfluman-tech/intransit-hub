@@ -4048,7 +4048,19 @@ async function cronProcessCommandQueue(env) {
             body: JSON.stringify({ valueInputOption: 'RAW', data: revForteUpdates }),
           });
         }
-        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: reverse_oem_removal ${mpn} — restored row + ${revForteUpdates.length} forte resets`);
+        // Delete any "Ok, removed from listing." draft in the thread (if thread_id provided)
+        const revThreadId = (data.thread_id || '').trim();
+        let deletedDrafts = 0;
+        if (revThreadId) {
+          const revDraftList = await gGet('/drafts?maxResults=200');
+          const revThreadMin = await gGet(`/threads/${revThreadId}?format=minimal`);
+          const revMsgIds = new Set((revThreadMin.messages || []).map(m => m.id));
+          for (const d of (revDraftList.drafts || []).filter(d => d.message?.id && revMsgIds.has(d.message.id))) {
+            await gDel('/drafts/' + d.id);
+            deletedDrafts++;
+          }
+        }
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: reverse_oem_removal ${mpn} — restored row + ${revForteUpdates.length} forte resets + ${deletedDrafts} drafts deleted`);
 
       } else if (cmd.type === 'delete_draft') {
         const draftId = (data.draft_id || '').trim();
@@ -4712,7 +4724,7 @@ async function reverseOemRemoval() {
   const qty = (document.getElementById('action-qty').value || '').trim();
   const notes = (document.getElementById('action-notes').value || '').trim() || 'OEM EXCESS! $500 MIN TP REQUIRED';
   showResult(el, 'Reversing OEM removal for ' + mpn + '...');
-  const cmdData = { mpn };
+  const cmdData = { mpn, thread_id: TID || '' };
   if (qty) cmdData.row_data = [mpn, '', '', qty, notes];
   try {
     const r = await sapi('command-queue', { type: 'reverse_oem_removal', data: cmdData });
