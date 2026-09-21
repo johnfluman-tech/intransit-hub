@@ -4048,7 +4048,7 @@ async function cronProcessCommandQueue(env) {
             body: JSON.stringify({ valueInputOption: 'RAW', data: revForteUpdates }),
           });
         }
-        // Delete any "Ok, removed from listing." draft in the thread (if thread_id provided)
+        // Delete any draft in the thread + restore thread to inbox (if thread_id provided)
         const revThreadId = (data.thread_id || '').trim();
         let deletedDrafts = 0;
         if (revThreadId) {
@@ -4059,8 +4059,18 @@ async function cronProcessCommandQueue(env) {
             await gDel('/drafts/' + d.id);
             deletedDrafts++;
           }
+          // Move thread back to INBOX and remove automation labels
+          const revAllLabels = await gGet('/labels');
+          const revLabelMap = {};
+          (revAllLabels.labels || []).forEach(l => { revLabelMap[l.name] = l.id; });
+          const revRemoveIds = ['oem-rfq-incoming-processed','oem-tp-processed','oem-nostock-seen','oem-agent-processed']
+            .map(n => revLabelMap[n]).filter(Boolean);
+          await gPost(`/threads/${revThreadId}/modify`, {
+            addLabelIds: ['INBOX'],
+            removeLabelIds: revRemoveIds
+          }).catch(() => {});
         }
-        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: reverse_oem_removal ${mpn} — restored row + ${revForteUpdates.length} forte resets + ${deletedDrafts} drafts deleted`);
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: reverse_oem_removal ${mpn} — restored row + ${revForteUpdates.length} forte resets + ${deletedDrafts} drafts deleted + inbox restored`);
 
       } else if (cmd.type === 'delete_draft') {
         const draftId = (data.draft_id || '').trim();
