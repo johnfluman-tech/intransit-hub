@@ -1259,7 +1259,9 @@ async function handleEmailAgent(request, env) {
       /tgtprice=\d/i.test(thread_content) ||
       /(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*[\d.]/i.test(tcLC) ||
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|usd|per\s*pc)/i.test(tcLC) ||
-      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(tcLC);
+      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(tcLC) ||
+      /usd\s*[\d]+(?:\.\d+)?/i.test(tcLC) ||
+      /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(thread_content);
     if (!hasBuyerTp) {
       const has2k = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
       const _tpTpl = has2k
@@ -1384,6 +1386,21 @@ async function handleEmailAgent(request, env) {
 
   // --- Deterministic decision engine (replaces Claude AI call) ---
   {
+    // David/Forte pre-check: scope no-stk detection to LATEST message body only.
+    // Historical David messages (e.g. pricing rundowns) often contain "No stk" for other
+    // suppliers — scanning full thread_content causes false remove_oem on follow-up messages.
+    const _lastFromLC2 = (body.last_from || '').toLowerCase();
+    const _isDavidThread = _lastFromLC2.includes('fortetechno.com') || _lastFromLC2.includes('fortecomp.com');
+    if (_isDavidThread) {
+      const _lastBodyLC = (body.last_msg_body || '').toLowerCase();
+      const _davidNoStkKw = ['no stk', 'no stock', 'cant share', "can't share", 'cant find', "can't find", 'sold out', 'no longer have', 'stk sold', 'all sold'];
+      if (_davidNoStkKw.some(k => _lastBodyLC.includes(k))) {
+        const _oemDelRow2 = (oem_results && oem_results.length > 0) ? (oem_results[0].row || null) : null;
+        decision = { action: 'remove_oem', reasoning: 'Deterministic: David no-stk in latest message only', mpn: requestMpn || null, buyer_email: null, draft_body: DRAFT_TEMPLATES.remove_oem, forte_entry: null, oem_delete_row: _oemDelRow2 };
+      } else {
+        decision = { action: 'no_action', reasoning: 'Deterministic: David thread — latest message has no no-stk signal (historical content ignored)', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null };
+      }
+    } else {
     const _own  = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
     const _wh3  = (in_stock_results || []).filter(r => /Warehouse#\d/i.test(r.notes || ''));
     const _stanQ = (stan_results || []).find(r => r.status === 'QUOTED' && r.colB);
@@ -1395,10 +1412,14 @@ async function handleEmailAgent(request, env) {
       /tgtprice=\d/i.test(thread_content) ||
       /(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*[\d.]/i.test(_tcLC2) ||
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|usd|per\s*pc)/i.test(_tcLC2) ||
-      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(_tcLC2);
+      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(_tcLC2) ||
+      /usd\s*[\d]+(?:\.\d+)?/i.test(_tcLC2) ||
+      /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(thread_content);
     const _tpMatch = (thread_content || '').match(/tgtprice=([\d.]+)/i) ||
       (thread_content || '').match(/(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*([\d.]+)/i) ||
-      (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|usd|per\s*pc)/i);
+      (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|usd|per\s*pc)/i) ||
+      (thread_content || '').match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
+      (thread_content || '').match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m);
     const _tpVal = _tpMatch ? parseFloat(_tpMatch[1]) : null;
 
     // Extract buyer qty from thread content
@@ -1437,6 +1458,7 @@ async function handleEmailAgent(request, env) {
     // msg_checking/bill_handle guards check target_price > 0; use 0.01 sentinel when TP text found but no parseable number
     const _finalTp = (_act === 'msg_checking' || _act === 'bill_handle') ? (_tpVal || 0.01) : _tpVal;
     decision = { action: _act, reasoning: _rsn, mpn: requestMpn || null, buyer_email: null, forte_entry: _forteEntry, target_price: _finalTp, draft_body: _body };
+    } // end else (_isDavidThread)
   }
 
   // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic — leave as-is
@@ -3123,15 +3145,17 @@ function stripQuoted(text) {
 function extractEmailAddr(raw) {
   if (!raw) return '';
   const m = raw.match(/<([^>]+)>/);
-  return m ? m[1] : raw.trim();
+  if (m) return m[1];
+  const emailMatch = raw.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  return emailMatch ? emailMatch[0] : raw.trim();
 }
 
+const _MPN_GENERIC_WORDS = new Set(['QUOTE','QUOTES','RFQ','RFQS','REQUEST','REQUESTS','INQUIRY','INQUIRE','ORDER','ORDERS','OFFER','OFFERS','INFO','PRICE','PRICING','STOCK','PURCHASE','BUY','NEED','SALE','SALES']);
 function extractMpnHint(subject) {
   if (!subject) return null;
-  // Strip "--" and everything after so "MPN--need your stock list..." â†' "MPN"
   const cleaned = subject.replace(/--.*$/, '').trim();
   const tokens = cleaned.split(/[\s,;|\/\[\]()]+/);
-  const cands = tokens.filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 5 && !/^\d+(pcs?|k|m|units?)?$/i.test(t));
+  const cands = tokens.filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 4 && !/^\d+(pcs?|k|m|units?)?$/i.test(t) && !_MPN_GENERIC_WORDS.has(t.toUpperCase()));
   return cands[0] || null;
 }
 
@@ -3170,6 +3194,8 @@ async function buildScanPayload(threadId, token, env) {
     _last_refs:       getHdr(lastMsg, 'References'),
     subject,
     sender,
+    last_from:       lastFrom,
+    last_msg_body:   stripQuoted(extractMimeText(lastMsg.payload) || '').substring(0, 1000),
     thread_content:  content,
     current_labels:  thread.labelIds || [],
     prior_quotes:    'None found',
@@ -3389,7 +3415,7 @@ async function cronScanInbox(env) {
           const msgId   = getHdr(lastMsg, 'Message-ID') || '';
           const refs    = getHdr(lastMsg, 'References') || '';
           const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
-          const toAddr = fromHdr.match(/<([^>]+)>/) ? fromHdr.match(/<([^>]+)>/)[1] : fromHdr;
+          const toAddr = extractEmailAddr(fromHdr);
           const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + toAddr, 'Subject: ' + replySubj, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8'];
           if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
           mimeLines.push('', 'This is a blocked sender');
@@ -3860,6 +3886,7 @@ async function cronProcessCommandQueue(env) {
 
   const token = await getGmailToken(env);
   const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
   const gDel  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
 
   for (const cmd of commands) {
@@ -3953,6 +3980,75 @@ async function cronProcessCommandQueue(env) {
           await workerAddToForteSheet(env, mpn, qty, data.tp || data.buyer_tp || '', data.country || '');
           await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: add_forte_entry ${mpn} qty=${qty}`);
         }
+
+      } else if (cmd.type === 'replace_oem_row') {
+        // Correct a wrongly-restored OEM EXCESS row: delete existing row by MPN, append correct row_data
+        // Does NOT touch Forte — use this only when Forte is already correct
+        const mpn = (data.mpn || '').trim();
+        const newRow = data.row_data; // [MPN, Man, DC, QTY, Notes, ...]
+        if (!mpn || !newRow) throw new Error('replace_oem_row: mpn and row_data required');
+        const _oemMeta2 = await sheetsGetMeta(env, OEM_SHEET_ID);
+        const _oemSheets2 = _oemMeta2.sheets || [];
+        const _oemSM2 = _oemSheets2.find(s => (s.properties?.title||'').toLowerCase() === OEM_SHEET_NAME.toLowerCase()) || _oemSheets2[0];
+        const _oemSId2 = _oemSM2?.properties?.sheetId ?? 0;
+        const _oemAll2 = await sheetsGetAllValues(env, OEM_SHEET_ID, OEM_SHEET_NAME);
+        const _toDelete2 = [];
+        for (let i = 1; i < _oemAll2.length; i++) {
+          if (normalizeMPN(_oemAll2[i][0] || '') === normalizeMPN(mpn)) _toDelete2.push(i + 1);
+        }
+        _toDelete2.sort((a, b) => b - a);
+        for (const rn of _toDelete2) {
+          await sheetsBatchUpdate(env, OEM_SHEET_ID, [{ deleteDimension: { range: { sheetId: _oemSId2, dimension: 'ROWS', startIndex: rn - 1, endIndex: rn } } }]);
+        }
+        const _appendTok2 = await getGmailToken(env);
+        const _appendRes2 = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${OEM_SHEET_ID}/values/${encodeURIComponent(OEM_SHEET_NAME + '!A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + _appendTok2, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [newRow] }),
+        });
+        const _ar2 = await _appendRes2.json();
+        if (_ar2.error) throw new Error('replace_oem_row append: ' + JSON.stringify(_ar2.error));
+        // Update D1 backup with correct row data
+        await env.DB.prepare("INSERT OR REPLACE INTO rules (type, key, value) VALUES ('oem_deleted_backup', ?, ?)").bind(normalizeMPN(mpn), JSON.stringify(newRow)).run().catch(() => {});
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: replace_oem_row ${mpn} — deleted ${_toDelete2.length} wrong rows, appended corrected row`);
+
+      } else if (cmd.type === 'reverse_oem_removal') {
+        // Restore a falsely-removed OEM EXCESS row from D1 backup + reset Forte status
+        const mpn = (data.mpn || '').trim();
+        if (!mpn) throw new Error('reverse_oem_removal: mpn required');
+        // 1. Try D1 backup (saved by oem_remove handler before deletion)
+        let restoredRow = data.row_data || null; // allow caller to provide explicit row_data fallback
+        if (!restoredRow) {
+          const bkup = await env.DB.prepare("SELECT value FROM rules WHERE type='oem_deleted_backup' AND key=?").bind(normalizeMPN(mpn)).first().catch(() => null);
+          if (bkup?.value) restoredRow = JSON.parse(bkup.value);
+        }
+        if (!restoredRow) throw new Error(`reverse_oem_removal: no backup found for ${mpn} — provide row_data in command data`);
+        const appendTok = await getGmailToken(env);
+        const appendRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${OEM_SHEET_ID}/values/${encodeURIComponent(OEM_SHEET_NAME)}!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + appendTok, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: [restoredRow] }),
+        });
+        const appendJson = await appendRes.json();
+        if (appendJson.error) throw new Error(`reverse_oem_removal: append failed: ${JSON.stringify(appendJson.error)}`);
+        // Reset Forte col K from "NO STK" back to "Open"
+        const forteRowsRev = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
+        const revForteTok = await getGmailToken(env);
+        const revForteUpdates = [];
+        for (let i = 1; i < forteRowsRev.length; i++) {
+          if (normalizeMPN(String(forteRowsRev[i][1] || '')) === normalizeMPN(mpn)) {
+            const st = String(forteRowsRev[i][10] || '').trim().toLowerCase();
+            if (st.startsWith('no stk')) revForteUpdates.push({ range: `K${i+1}`, values: [['Open']] });
+          }
+        }
+        if (revForteUpdates.length) {
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values:batchUpdate`, {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + revForteTok, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ valueInputOption: 'RAW', data: revForteUpdates }),
+          });
+        }
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: reverse_oem_removal ${mpn} — restored row + ${revForteUpdates.length} forte resets`);
 
       } else if (cmd.type === 'delete_draft') {
         const draftId = (data.draft_id || '').trim();
@@ -4080,6 +4176,55 @@ async function cronProcessCommandQueue(env) {
         const result = await sheetsGet(env, sheetId, (sheetName ? sheetName + '!' : '') + rangeName);
         await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: read_sheet_rows ${rangeName} (${(result.values||[]).length} rows)`);
 
+      } else if (cmd.type === 'requote_stan') {
+        const mpn = (data.mpn || '').trim();
+        const threadId = (data.thread_id || '').trim();
+        if (!mpn) throw new Error('requote_stan: mpn required');
+        if (!threadId) throw new Error('requote_stan: thread_id required');
+        // Fetch Stan data from web app
+        const _waRes = await fetch(`https://script.google.com/macros/s/AKfycbyuuBmiYVW5mKI82D5YQGPh1nNGLJZzlLKoxuOdtmOUwUe75VlhhakqgwKooZu5LHFK/exec?key=baSDJ%23444FE%268&mpn=${encodeURIComponent(mpn)}`, { redirect: 'follow' });
+        const _waData = await _waRes.json();
+        const _stanRow = (_waData.stan_sheet || []).find(r => r.status === 'QUOTED' && r.colB);
+        if (!_stanRow) throw new Error(`requote_stan: no QUOTED Stan entry found for ${mpn}`);
+        const _inStock = _waData.in_stock || [];
+        // Build stan_quoted body (same logic as buildStanQuotedBody)
+        const _rsColB = (_stanRow.colB || '').trim();
+        const _rsColC = (_stanRow.colC || '').trim();
+        const _rsPriceM = _rsColB.match(/\$(\d+(?:\.\d+)?)/);
+        const _rsPriceStr = _rsPriceM ? `$${parseFloat(_rsPriceM[1]).toFixed(2)}` : '$[FILL IN]';
+        const _rsNotes = _rsColB.replace(/\$\d+(?:\.\d+)?/, '').replace(/\s{2,}/g, ' ').trim();
+        const _rsDc = (_inStock[0] && _inStock[0].dc) ? String(_inStock[0].dc).trim() : '';
+        const _rsQty = _inStock.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
+        let _rsDraftBody = `This is our stock\n\nMPN: ${mpn}${_rsDc ? '\nDC: ' + _rsDc : ''}\nQTY in stock: ${_rsQty || '?'}\nPrice: ${_rsPriceStr}`;
+        if (_rsNotes) _rsDraftBody += `\n\n${_rsNotes}`;
+        if (_rsColC) _rsDraftBody += `\n\n${_rsColC}`;
+        _rsDraftBody += '\n\nThere is a $100 min on stock items.';
+        // Delete existing drafts in this thread
+        const _rsDraftList = await gGet('/drafts?maxResults=200');
+        const _rsThreadMin = await gGet(`/threads/${threadId}?format=minimal`);
+        const _rsMsgIds = new Set((_rsThreadMin.messages || []).map(m => m.id));
+        for (const d of (_rsDraftList.drafts || []).filter(d => d.message?.id && _rsMsgIds.has(d.message.id))) {
+          await gDel('/drafts/' + d.id);
+        }
+        // Fetch thread metadata for reply headers
+        const _rsThr = await gGet(`/threads/${threadId}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Reply-To&metadataHeaders=References`);
+        const _rsMsgs = _rsThr.messages || [];
+        if (!_rsMsgs.length) throw new Error('requote_stan: thread has no messages');
+        const _rsLast = _rsMsgs[_rsMsgs.length - 1];
+        const _rsHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+        const _rsSubjRaw = _rsHdr(_rsLast, 'Subject') || '';
+        const _rsSubj = _rsSubjRaw.match(/^re:/i) ? _rsSubjRaw : 'Re: ' + _rsSubjRaw;
+        const _rsMsgId = _rsHdr(_rsLast, 'Message-ID');
+        const _rsRefs = _rsHdr(_rsLast, 'References');
+        const _rsTo = data.to_email || _rsHdr(_rsMsgs[0], 'Reply-To') || _rsHdr(_rsMsgs[0], 'From');
+        const _rsHtml = '<div dir="ltr">' + _rsDraftBody.replace(/\n/g, '<br>') + SIG_HTML + '</div>';
+        const _rsMime = ['From: ' + JOHN_FROM, 'To: ' + _rsTo, 'Subject: ' + _rsSubj, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+        if (_rsMsgId) { _rsMime.push('In-Reply-To: ' + _rsMsgId); _rsMime.push('References: ' + (((_rsRefs ? _rsRefs + ' ' : '') + _rsMsgId).trim())); }
+        _rsMime.push('', _rsHtml);
+        const _rsDraft = await gPost('/drafts', { message: { threadId, raw: base64url(_rsMime.join('\r\n')) } });
+        if (_rsDraft.error) throw new Error('requote_stan draft create: ' + JSON.stringify(_rsDraft.error));
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: requote_stan ${mpn} thread=${threadId} draft=${_rsDraft.id}`);
+
       } else {
         throw new Error('Unknown command type: ' + cmd.type);
       }
@@ -4150,6 +4295,16 @@ async function cronProcessFixQueue(env) {
       } else if (fix.type === 'oem_remove') {
         const data = JSON.parse(fix.draft_body || '{}');
         if (!data.mpn && !data.row) throw new Error('oem_remove: missing mpn and row');
+        // Save full row data to D1 BEFORE deleting — needed for reverse_oem_removal
+        if (data.mpn) {
+          try {
+            const _oemAllRows = await sheetsGetAllValues(env, OEM_SHEET_ID, OEM_SHEET_NAME);
+            const _oemMatchRow = _oemAllRows.find((r, i) => i > 0 && normalizeMPN(r[0] || '') === normalizeMPN(data.mpn));
+            if (_oemMatchRow) {
+              await env.DB.prepare("INSERT OR REPLACE INTO rules (type, key, value) VALUES ('oem_deleted_backup', ?, ?)").bind(normalizeMPN(data.mpn), JSON.stringify(_oemMatchRow)).run().catch(() => {});
+            }
+          } catch(e) { /* non-fatal */ }
+        }
         await workerDeleteOemRow(env, data.mpn || '', data.row || 0);
         // Stamp Forte col K "NO STK - today" + black/white formatting for every matching open row
         if (data.mpn) {
@@ -4366,6 +4521,12 @@ select{background:#0f1923;border:1px solid #2a3f55;border-radius:6px;color:#e0e6
     <button class="btn btn-ghost" onclick="processNext()">Process Next Email</button>
     <button class="btn btn-ghost" onclick="sendNetComp()">Send to NetCOMPONENTS</button>
   </div>
+  <div class="btn-row" id="reverse-row" style="display:none;margin-top:8px">
+    <button class="btn" style="background:#c0392b;color:#fff" onclick="reverseOemRemoval()">↩ Reverse OEM Removal</button>
+  </div>
+  <div class="btn-row" id="requote-stan-row" style="display:none;margin-top:8px">
+    <button class="btn" style="background:#1a6b3c;color:#fff" onclick="requoteFromStan()">↩ Requote from Stan</button>
+  </div>
   <div class="result" id="actions-result"></div>
 </div>
 
@@ -4408,6 +4569,7 @@ const SQS   = ${JSON.stringify(sqs)};
 
 let currentDraftId = null;
 let currentMPN = null;
+let currentFromH = '';
 
 async function sapi(action, body) {
   const r = await fetch('/sidebar/api/' + action + '?' + SQS, {
@@ -4423,10 +4585,12 @@ function showResult(el, msg, isErr) {
   el.className = 'result show ' + (isErr ? 'status-err' : '');
 }
 
+const _MPN_GENERIC = new Set(['QUOTE','QUOTES','RFQ','RFQS','REQUEST','REQUESTS','INQUIRY','INQUIRE','ORDER','ORDERS','OFFER','OFFERS','INFO','PRICE','PRICING','STOCK','PURCHASE','BUY','NEED','SALE','SALES']);
 function extractMPN(s) {
   if (!s) return null;
-  const m = s.match(/\\b([A-Z0-9]{4,}(?:[-][A-Z0-9]+)*)\\b/i);
-  return m ? m[1].toUpperCase() : null;
+  const tokens = s.toUpperCase().split(/[\s,;|\/\[\]()\-]+/);
+  const cand = tokens.find(t => t.length >= 4 && /[A-Z]/.test(t) && /[0-9]/.test(t) && !_MPN_GENERIC.has(t));
+  return cand || null;
 }
 
 async function init() {
@@ -4438,7 +4602,13 @@ async function init() {
       document.getElementById('thread-card').style.display = '';
       document.getElementById('thread-subject').innerHTML = '<span>Subject:</span> ' + escHtml(ctx.subject);
       document.getElementById('thread-from').innerHTML = '<span>From:</span> ' + escHtml(ctx.fromH || '');
+      currentFromH = ctx.fromH || '';
       currentMPN = extractMPN(ctx.subject);
+      // Show Reverse OEM Removal button only on David/Forte threads
+      const _isDavid = (currentFromH || '').toLowerCase().includes('fortetechno.com') || (currentFromH || '').toLowerCase().includes('fortecomp.com');
+      document.getElementById('reverse-row').style.display = _isDavid ? '' : 'none';
+      // Requote from Stan button — shown whenever an MPN is detected (server checks Stan data)
+      document.getElementById('requote-stan-row').style.display = currentMPN ? '' : 'none';
       if (currentMPN) {
         document.getElementById('mpn-tag').textContent = currentMPN;
         document.getElementById('chat-input').value = 'What should I do with this RFQ for ' + currentMPN + '?';
@@ -4461,7 +4631,7 @@ async function askClaude() {
   const el = document.getElementById('chat-result');
   showResult(el, 'â³ Asking Claudeâ€¦');
   try {
-    const r = await sapi('chat', { message: msg, thread_id: TID, mpn: currentMPN });
+    const r = await sapi('chat', { message: msg, thread_id: TID, mpn: currentMPN, from_email: currentFromH });
     showResult(el, r.reply || r.response || r.answer || JSON.stringify(r));
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
@@ -4507,6 +4677,29 @@ async function processNext() {
   try {
     const r = await sapi('process-next', { thread_id: TID });
     showResult(el, r.message || JSON.stringify(r));
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+async function reverseOemRemoval() {
+  if (!currentMPN) { alert('No MPN detected — open a David/Forte thread first.'); return; }
+  if (!confirm('Reverse OEM removal for ' + currentMPN + '?\n\nThis will:\n1. Re-add the row to OEM EXCESS from Deleted Rows\n2. Reset Forte status back to Open')) return;
+  const el = document.getElementById('actions-result');
+  showResult(el, '⏳ Reversing removal for ' + currentMPN + '…');
+  try {
+    const r = await sapi('command-queue', { type: 'reverse_oem_removal', data: { mpn: currentMPN } });
+    showResult(el, r.ok ? '✔ OEM EXCESS row restored and Forte status reset for ' + currentMPN : JSON.stringify(r), !r.ok);
+  } catch(e) { showResult(el, 'Error: ' + e, true); }
+}
+
+async function requoteFromStan() {
+  if (!currentMPN) { alert('No MPN detected — open a thread first.'); return; }
+  if (!TID) { alert('No thread ID — open a thread first.'); return; }
+  if (!confirm('Delete current draft and create a new Stan-quoted draft for ' + currentMPN + '?\n\nThis will:\n1. Delete the existing draft in this thread\n2. Create a new draft with Stan sheet pricing')) return;
+  const el = document.getElementById('actions-result');
+  showResult(el, '⏳ Requoting from Stan for ' + currentMPN + '…');
+  try {
+    const r = await sapi('command-queue', { type: 'requote_stan', data: { mpn: currentMPN, thread_id: TID } });
+    showResult(el, r.ok ? '✔ Stan-quoted draft created for ' + currentMPN + ' — check your drafts in Gmail.' : JSON.stringify(r), !r.ok);
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
 
