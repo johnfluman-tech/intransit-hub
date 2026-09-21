@@ -4521,11 +4521,25 @@ select{background:#0f1923;border:1px solid #2a3f55;border-radius:6px;color:#e0e6
     <button class="btn btn-ghost" onclick="processNext()">Process Next Email</button>
     <button class="btn btn-ghost" onclick="sendNetComp()">Send to NetCOMPONENTS</button>
   </div>
-  <div class="btn-row" id="reverse-row" style="margin-top:8px">
-    <button class="btn" style="background:#c0392b;color:#fff" onclick="reverseOemRemoval()">&#x21A9; Reverse OEM Removal</button>
+  <div style="margin-top:8px">
+    <label style="font-size:10px;color:#8899aa;display:block;margin-bottom:2px">MPN (auto or type):</label>
+    <input id="action-mpn" type="text" placeholder="e.g. AD9510BCPZ" style="width:100%;box-sizing:border-box;background:#1a2535;border:1px solid #2a3a50;color:#e0e6ef;padding:4px 6px;border-radius:4px;font-size:11px">
   </div>
-  <div class="btn-row" id="requote-stan-row" style="margin-top:8px">
-    <button class="btn" style="background:#1a6b3c;color:#fff" onclick="requoteFromStan()">&#x21A9; Requote from Stan</button>
+  <div style="margin-top:4px;display:flex;gap:4px">
+    <div style="flex:1">
+      <label style="font-size:10px;color:#8899aa;display:block;margin-bottom:2px">QTY (Reverse only):</label>
+      <input id="action-qty" type="text" placeholder="e.g. 24000" style="width:100%;box-sizing:border-box;background:#1a2535;border:1px solid #2a3a50;color:#e0e6ef;padding:4px 6px;border-radius:4px;font-size:11px">
+    </div>
+  </div>
+  <div style="margin-top:4px">
+    <label style="font-size:10px;color:#8899aa;display:block;margin-bottom:2px">Notes (Reverse only):</label>
+    <input id="action-notes" type="text" value="OEM EXCESS! $500 MIN TP REQUIRED" style="width:100%;box-sizing:border-box;background:#1a2535;border:1px solid #2a3a50;color:#e0e6ef;padding:4px 6px;border-radius:4px;font-size:11px">
+  </div>
+  <div class="btn-row" id="reverse-row" style="margin-top:6px">
+    <button class="btn" style="background:#c0392b;color:#fff;width:100%" onclick="reverseOemRemoval()">&#x21A9; Reverse OEM Removal</button>
+  </div>
+  <div class="btn-row" id="requote-stan-row" style="margin-top:4px">
+    <button class="btn" style="background:#1a6b3c;color:#fff;width:100%" onclick="requoteFromStan()">&#x21A9; Requote from Stan</button>
   </div>
   <div class="result" id="actions-result"></div>
 </div>
@@ -4601,10 +4615,12 @@ async function init() {
   try {
     const ctx = await sapi('sidebar-context', { thread_id: TID });
     if (ctx.error) {
-      document.getElementById('thread-sub').textContent = 'Error: ' + ctx.error;
+      document.getElementById('thread-sub').textContent = 'Ctx error: ' + ctx.error;
       return;
     }
     if (ctx.subject) {
+      // Auto-fill MPN input when detected
+      document.getElementById('action-mpn').value = extractMPN(ctx.subject) || '';
       document.getElementById('thread-sub').textContent = '';
       document.getElementById('thread-card').style.display = '';
       document.getElementById('thread-subject').innerHTML = '<span>Subject:</span> ' + escHtml(ctx.subject);
@@ -4616,7 +4632,7 @@ async function init() {
         document.getElementById('chat-input').value = 'What should I do with this RFQ for ' + currentMPN + '?';
       }
     } else {
-      document.getElementById('thread-sub').textContent = 'Thread loaded — no subject detected.';
+      document.getElementById('thread-sub').textContent = 'No subject (ctx keys: ' + Object.keys(ctx).join(',') + ')';
     }
     if (ctx.draftId) {
       currentDraftId = ctx.draftId;
@@ -4684,42 +4700,35 @@ async function processNext() {
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
 
+function getActionMPN() {
+  const inp = (document.getElementById('action-mpn').value || '').trim().toUpperCase();
+  return inp || currentMPN || null;
+}
+
 async function reverseOemRemoval() {
-  let mpn = currentMPN;
-  if (!mpn) {
-    mpn = window.prompt('MPN not auto-detected. Enter MPN to reverse OEM removal:');
-    if (!mpn || !mpn.trim()) return;
-    mpn = mpn.trim().toUpperCase();
-  }
-  const qty = window.prompt('QTY for OEM EXCESS row?\n(Leave blank to use saved backup)', '');
-  if (qty === null) return;
-  const notes = window.prompt('OEM EXCESS listing notes?', 'OEM EXCESS! $500 MIN TP REQUIRED');
-  if (notes === null) return;
-  if (!confirm('Reverse OEM removal for ' + mpn + '?\n\nThis will:\n1. Re-add the row to OEM EXCESS\n2. Reset Forte status back to Open')) return;
+  const mpn = getActionMPN();
   const el = document.getElementById('actions-result');
-  showResult(el, '&#x23F3; Reversing removal for ' + mpn + '...');
+  if (!mpn) { showResult(el, 'Enter MPN in the field above first.', true); return; }
+  const qty = (document.getElementById('action-qty').value || '').trim();
+  const notes = (document.getElementById('action-notes').value || '').trim() || 'OEM EXCESS! $500 MIN TP REQUIRED';
+  showResult(el, 'Reversing OEM removal for ' + mpn + '...');
   const cmdData = { mpn };
-  if (qty.trim()) cmdData.row_data = [mpn, '', '', qty.trim(), notes.trim() || 'OEM EXCESS! $500 MIN TP REQUIRED'];
+  if (qty) cmdData.row_data = [mpn, '', '', qty, notes];
   try {
     const r = await sapi('command-queue', { type: 'reverse_oem_removal', data: cmdData });
-    showResult(el, r.ok ? '&#x2714; OEM EXCESS row restored and Forte status reset for ' + mpn : JSON.stringify(r), !r.ok);
+    showResult(el, r.ok ? '&#x2714; OEM EXCESS restored + Forte reset for ' + mpn : JSON.stringify(r), !r.ok);
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
 
 async function requoteFromStan() {
-  let mpn = currentMPN;
-  if (!mpn) {
-    mpn = window.prompt('MPN not auto-detected. Enter MPN to requote from Stan:');
-    if (!mpn || !mpn.trim()) return;
-    mpn = mpn.trim().toUpperCase();
-  }
-  if (!TID) { alert('No thread ID — reopen the sidebar from a Gmail thread.'); return; }
-  if (!confirm('Delete current draft and create a new Stan-quoted draft for ' + mpn + '?\n\nThis will:\n1. Delete the existing draft in this thread\n2. Create a new draft with Stan sheet pricing')) return;
+  const mpn = getActionMPN();
   const el = document.getElementById('actions-result');
-  showResult(el, '&#x23F3; Requoting from Stan for ' + mpn + '...');
+  if (!mpn) { showResult(el, 'Enter MPN in the field above first.', true); return; }
+  if (!TID) { showResult(el, 'No thread ID — reopen sidebar from a Gmail thread.', true); return; }
+  showResult(el, 'Requoting from Stan for ' + mpn + '...');
   try {
     const r = await sapi('command-queue', { type: 'requote_stan', data: { mpn, thread_id: TID } });
-    showResult(el, r.ok ? '&#x2714; Stan-quoted draft created for ' + mpn + ' — check your drafts in Gmail.' : JSON.stringify(r), !r.ok);
+    showResult(el, r.ok ? '&#x2714; Stan-quoted draft created for ' + mpn + ' — check Gmail drafts.' : JSON.stringify(r), !r.ok);
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
 
