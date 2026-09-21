@@ -4682,11 +4682,18 @@ async function processNext() {
 
 async function reverseOemRemoval() {
   if (!currentMPN) { alert('No MPN detected — open a David/Forte thread first.'); return; }
-  if (!confirm('Reverse OEM removal for ' + currentMPN + '?\n\nThis will:\n1. Re-add the row to OEM EXCESS from Deleted Rows\n2. Reset Forte status back to Open')) return;
+  // Prompt for OEM row details — allows restoring even when no D1 backup exists
+  const qty = window.prompt('QTY for OEM EXCESS row?\n(Leave blank to use saved backup)', '');
+  if (qty === null) return; // cancelled
+  const notes = window.prompt('OEM EXCESS listing notes?', 'OEM EXCESS! $500 MIN TP REQUIRED');
+  if (notes === null) return; // cancelled
+  if (!confirm('Reverse OEM removal for ' + currentMPN + '?\n\nThis will:\n1. Re-add the row to OEM EXCESS\n2. Reset Forte status back to Open')) return;
   const el = document.getElementById('actions-result');
   showResult(el, '⏳ Reversing removal for ' + currentMPN + '…');
+  const cmdData = { mpn: currentMPN };
+  if (qty.trim()) cmdData.row_data = [currentMPN, '', '', qty.trim(), notes.trim() || 'OEM EXCESS! $500 MIN TP REQUIRED'];
   try {
-    const r = await sapi('command-queue', { type: 'reverse_oem_removal', data: { mpn: currentMPN } });
+    const r = await sapi('command-queue', { type: 'reverse_oem_removal', data: cmdData });
     showResult(el, r.ok ? '✔ OEM EXCESS row restored and Forte status reset for ' + currentMPN : JSON.stringify(r), !r.ok);
   } catch(e) { showResult(el, 'Error: ' + e, true); }
 }
