@@ -4467,7 +4467,7 @@ select{background:#0f1923;border:1px solid #2a3f55;border-radius:6px;color:#e0e6
 </head>
 <body>
 <h1>Intransit Assistant</h1>
-<div class="sub" id="thread-sub">Loading thread infoâ€¦</div>
+<div class="sub" id="thread-sub">Loading thread info&#8230;</div>
 
 <!-- Thread info card -->
 <div class="card" id="thread-card" style="display:none">
@@ -4521,11 +4521,11 @@ select{background:#0f1923;border:1px solid #2a3f55;border-radius:6px;color:#e0e6
     <button class="btn btn-ghost" onclick="processNext()">Process Next Email</button>
     <button class="btn btn-ghost" onclick="sendNetComp()">Send to NetCOMPONENTS</button>
   </div>
-  <div class="btn-row" id="reverse-row" style="display:none;margin-top:8px">
-    <button class="btn" style="background:#c0392b;color:#fff" onclick="reverseOemRemoval()">↩ Reverse OEM Removal</button>
+  <div class="btn-row" id="reverse-row" style="margin-top:8px">
+    <button class="btn" style="background:#c0392b;color:#fff" onclick="reverseOemRemoval()">&#x21A9; Reverse OEM Removal</button>
   </div>
-  <div class="btn-row" id="requote-stan-row" style="display:none;margin-top:8px">
-    <button class="btn" style="background:#1a6b3c;color:#fff" onclick="requoteFromStan()">↩ Requote from Stan</button>
+  <div class="btn-row" id="requote-stan-row" style="margin-top:8px">
+    <button class="btn" style="background:#1a6b3c;color:#fff" onclick="requoteFromStan()">&#x21A9; Requote from Stan</button>
   </div>
   <div class="result" id="actions-result"></div>
 </div>
