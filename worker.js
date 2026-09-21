@@ -4595,8 +4595,15 @@ function extractMPN(s) {
 
 async function init() {
   if (!TID) { document.getElementById('thread-sub').textContent = 'No thread selected.'; return; }
+  // Always show action buttons when a thread is open — server handles validation
+  document.getElementById('reverse-row').style.display = '';
+  document.getElementById('requote-stan-row').style.display = '';
   try {
     const ctx = await sapi('sidebar-context', { thread_id: TID });
+    if (ctx.error) {
+      document.getElementById('thread-sub').textContent = 'Error: ' + ctx.error;
+      return;
+    }
     if (ctx.subject) {
       document.getElementById('thread-sub').textContent = '';
       document.getElementById('thread-card').style.display = '';
@@ -4604,15 +4611,12 @@ async function init() {
       document.getElementById('thread-from').innerHTML = '<span>From:</span> ' + escHtml(ctx.fromH || '');
       currentFromH = ctx.fromH || '';
       currentMPN = extractMPN(ctx.subject);
-      // Show Reverse OEM Removal button only on David/Forte threads
-      const _isDavid = (currentFromH || '').toLowerCase().includes('fortetechno.com') || (currentFromH || '').toLowerCase().includes('fortecomp.com');
-      document.getElementById('reverse-row').style.display = _isDavid ? '' : 'none';
-      // Requote from Stan button — shown whenever an MPN is detected (server checks Stan data)
-      document.getElementById('requote-stan-row').style.display = currentMPN ? '' : 'none';
       if (currentMPN) {
         document.getElementById('mpn-tag').textContent = currentMPN;
         document.getElementById('chat-input').value = 'What should I do with this RFQ for ' + currentMPN + '?';
       }
+    } else {
+      document.getElementById('thread-sub').textContent = 'Thread loaded — no subject detected.';
     }
     if (ctx.draftId) {
       currentDraftId = ctx.draftId;
@@ -4620,7 +4624,7 @@ async function init() {
       document.getElementById('draft-label').textContent = ctx.draftId ? 'Draft exists' : '';
       document.getElementById('draft-preview').textContent = ctx.draftPreview || '(draft on file â€" open Gmail to preview)';
     }
-  } catch(e) { document.getElementById('thread-sub').textContent = 'Error loading thread.'; }
+  } catch(e) { document.getElementById('thread-sub').textContent = 'Error: ' + String(e); }
 }
 
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
