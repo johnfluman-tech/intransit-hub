@@ -519,7 +519,9 @@ function extractAdviceText(htmlBody) {
 function extractBuyerEmail(fromRaw) {
   if (!fromRaw) return '';
   var m = fromRaw.match(/<([^>]+)>/);
-  return m ? m[1].trim() : fromRaw.trim();
+  if (m) return m[1].trim();
+  var emailMatch = fromRaw.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  return emailMatch ? emailMatch[0].trim() : fromRaw.trim();
 }
 
 

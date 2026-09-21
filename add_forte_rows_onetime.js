@@ -1,6 +1,41 @@
 // ONE-TIME scripts — paste into Apps Script and run as needed
 
 // ─────────────────────────────────────────────────────────────────
+// restore10662021_35H_Sep14()
+// Reverses accidental no-stk removal of 10-662021-35H on 9/14/2026.
+// 1. Re-adds OEM EXCESS row (HEILIND ELECTRONICS, 10000 pcs)
+// 2. Restores Forte row 2555 col K to QUOTED
+// 3. Restores Forte row 4522 col K to Open
+// 4. Clears black/white background formatting on both restored rows
+// Run ONCE.
+// ─────────────────────────────────────────────────────────────────
+function restore10662021_35H_Sep14() {
+  var FORTE_ID = '1DbZsEC8AsZY8BGpBils7toGf517jn-oqT0MUNyTi_e4';
+  var OEM_ID   = '1FSYIiFFEd5jrSNoxngjI0d8ZI3Qfyq_c8GzfcK6XQu4';
+
+  // 1. Re-add OEM EXCESS row
+  var oemSheet = SpreadsheetApp.openById(OEM_ID).getSheets()[0];
+  oemSheet.appendRow(['10-662021-35H', 'HEILIND ELECTRONICS', '', 10000, 'OEM EXCESS! $500 MIN TP REQUIRED']);
+  Logger.log('Re-added OEM EXCESS row for 10-662021-35H');
+
+  // 2. Restore Forte rows
+  var forteSheet = SpreadsheetApp.openById(FORTE_ID).getSheets()[0];
+  var restorations = [
+    { row: 2555, status: 'QUOTED' },
+    { row: 4522, status: 'Open'   },
+  ];
+  restorations.forEach(function(r) {
+    // Set col K (col 11) back to original status
+    forteSheet.getRange(r.row, 11).setValue(r.status);
+    // Clear background/font color on entire row to remove black/white formatting
+    forteSheet.getRange(r.row, 1, 1, 12).setBackground(null).setFontColor(null);
+    Logger.log('Restored Forte row ' + r.row + ' to ' + r.status);
+  });
+
+  Logger.log('Done — restore10662021_35H_Sep14 complete');
+}
+
+// ─────────────────────────────────────────────────────────────────
 // retryAuditDraftsViaREST_Aug18()
 // GmailApp hit daily quota — this uses Gmail REST API (UrlFetchApp) instead.
 // Gets all failed fix-queue items, dedupes by thread, creates drafts via REST.
@@ -798,5 +833,8 @@ function addForteRows_Sep11_2026() {
   addToForteSheet('2302785-2', 50, 153, 'US', '');
   addToForteSheet('88E1111-B2-BAB2I000', 360, 6, 'CN', '');
   addToForteSheet('TPS54618CQRTERQ1', 4150, 1.50, 'HK', '');
-  Logger.log('Done: 4 rows added.');
+  addToForteSheet('ST25DV04KC-JF6D3', 5000, 0.37, 'CN', '');
+  addToForteSheet('PCA82C251T/YM', 7273, 0.38, 'CN', '');
+  addToForteSheet('950-FL-DS/05', 1000, 1.80, 'US', '');
+  Logger.log('Done: 7 rows added.');
 }
