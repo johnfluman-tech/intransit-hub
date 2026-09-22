@@ -852,7 +852,7 @@ async function extractMpnFromThread(subject, content, env) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 40,
-        system: 'Extract the electronic component part number (MPN) from this email thread. Return ONLY valid JSON: {"mpn":"PART-NUMBER"} or {"mpn":null}. No markdown, no explanation.\n\nRules:\n- RFQ numbers, PO numbers, order reference numbers in the SUBJECT (e.g. "RFQ B26000486264", "PO #12345", "Order 987654") are NOT part numbers â€" ignore them.\n- Look for explicit labels in the body: "PN:", "Part Number:", "MPN:", "Part:", "Item:".\n- Also look for a standalone alphanumeric token (letters+numbers, or all digits 4+ chars) that appears alone on its own line in the body after purchasing language like "quote", "need", "request", "pcs", "pieces" â€" that standalone value is likely the MPN.\n- If the body has a pattern like "quote Npcs\\nXXXXX" or "quote XXXXX", XXXXX is the MPN.\n- Pattern "BRAND MPN QTY" (e.g. "WECO 950-FL-DS/05   1K", "TI SN74HC595N 500pcs"): the MPN is the second token (after the brand name), NOT the brand. Brand names are short, one word, well-known company names (WECO, TI, ST, NXP, etc.).\n- If the subject is just a brand name (no digits, â‰¤8 chars), ignore the subject and extract MPN from the body.\n- Prefer body MPNs over subject MPNs.',
+        system: 'Extract the electronic component part number (MPN) from this email thread. Return ONLY valid JSON: {"mpn":"PART-NUMBER"} or {"mpn":null}. No markdown, no explanation.\n\nRules:\n- RFQ numbers, PO numbers, order reference numbers in the SUBJECT (e.g. "RFQ B26000486264", "PO #12345", "Order 987654") are NOT part numbers â€" ignore them.\n- Look for explicit labels in the body: "PN:", "Part Number:", "MPN:", "Part #", "part #", "Part:", "Item:". The value after these labels IS the part number - extract it even if all digits (e.g. "part # 1935860" gives "1935860").\n- Also look for a standalone alphanumeric token (letters+numbers, or all digits 4+ chars) that appears alone on its own line in the body after purchasing language like "quote", "need", "request", "pcs", "pieces" â€" that standalone value is likely the MPN.\n- If the body has a pattern like "quote Npcs\\nXXXXX" or "quote XXXXX", XXXXX is the MPN.\n- Pattern "BRAND MPN QTY" (e.g. "WECO 950-FL-DS/05   1K", "TI SN74HC595N 500pcs"): the MPN is the second token (after the brand name), NOT the brand. Brand names are short, one word, well-known company names (WECO, TI, ST, NXP, etc.).\n- If the subject is just a brand name (no digits, â‰¤8 chars), ignore the subject and extract MPN from the body.\n- Prefer body MPNs over subject MPNs.',
         messages: [{ role: 'user', content: `Subject: ${subject || ''}\n\n${(content || '').substring(0, 3000)}` }],
       })
     });
@@ -1274,7 +1274,10 @@ async function handleEmailAgent(request, env) {
   // Only fires when there are no own IN STOCK rows (WH3/Warehouse rows don't count as own stock).
   // Checks thread_content for buyer TP in multiple forms before skipping â€" ensures tpQ reply emails
   // (where buyer already gave TP in plain text) are not caught by this guard.
-  if (oem_results.length > 0 && (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
+  // Bug 91 fix: skip TP pre-check for ICSSource listing-reply threads ("RE: Showing available") —
+  // buyer already saw our listed price; asking for a TP is wrong. Route to msg_checking instead.
+  const _isListingReply = /showing available/i.test(subject || '');
+  if (oem_results.length > 0 && !_isListingReply && (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
     const hasBuyerTp = _tpDetect(thread_content);
     // Stan QUOTED takes priority — if Stan has a quoted price for this MPN, let the
     // deterministic engine handle it as stan_quoted instead of firing TP request here.
@@ -1427,6 +1430,7 @@ async function handleEmailAgent(request, env) {
     const _hasTp    = _tpDetect(thread_content);
     const _tpMatch = (thread_content || '').match(/tgtprice=([\d.]+)/i) ||
       (thread_content || '').match(/(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*([\d.]+)/i) ||
+      (thread_content || '').match(/\bprice\s*[:=]\s*\$?([\d.]+)/i) ||
       (thread_content || '').match(/(?:target|tgt)\s*[:=]\s*\$?([\d.]+)/i) ||
       (thread_content || '').match(/t\/p\s*[:=]?\s*\$?([\d.]+)/i) ||
       (thread_content || '').match(/\btp\s*[:=]\s*\$?([\d.]+)/i) ||
@@ -1464,10 +1468,18 @@ async function handleEmailAgent(request, env) {
       if (_hasTp) { _act = 'bill_handle'; _body = DRAFT_TEMPLATES.bill_handle; _rsn = 'BILL EXT+TP'; }
       else        { _act = _has2k ? 'request_tp_2000' : 'request_tp_500'; _rsn = 'BILL EXT no TP'; }
     } else if (_hasOem) {
-      _act = 'msg_checking'; _body = DRAFT_TEMPLATES.msg_checking; _rsn = 'OEM EXCESS+TP';
-      // Build forte_entry if no 60-day duplicate and we have qty + TP
-      if ((forte_results || []).length === 0 && _tpVal && _buyerQty && requestMpn) {
-        _forteEntry = { mpn: requestMpn, qty: _buyerQty, target_price: _tpVal, country: _senderCtry };
+      const _minVal = _has2k ? 2000 : 500;
+      if (_tpVal && _buyerQty && (_tpVal * _buyerQty) < _minVal) {
+        _act = 'below_min_line';
+        const _minNeeded = Math.ceil(_minVal / _tpVal);
+        _body = `Thank you for your inquiry. Our minimum line value for this item is $${_minVal}. At your target price of $${_tpVal} per piece, we would require a minimum of ${_minNeeded} pieces. If you are able to adjust your quantity, please let us know and we will get right back to you. Thank you for the opportunity.`;
+        _rsn = `OEM EXCESS+TP but $${(_tpVal*_buyerQty).toFixed(2)} < $${_minVal} min`;
+      } else {
+        _act = 'msg_checking'; _body = DRAFT_TEMPLATES.msg_checking; _rsn = 'OEM EXCESS+TP';
+        // Build forte_entry if no 60-day duplicate and we have qty + TP
+        if ((forte_results || []).length === 0 && _tpVal && _buyerQty && requestMpn) {
+          _forteEntry = { mpn: requestMpn, qty: _buyerQty, target_price: _tpVal, country: _senderCtry };
+        }
       }
     } else if (_stanQ) {
       _act = 'stan_quoted'; _body = buildStanQuotedBody(_stanQ, in_stock_results); _rsn = 'Stan QUOTED only';
@@ -2907,9 +2919,10 @@ async function workerDeleteOemRow(env, mpn, rowNum) {
   // Delete from bottom up so row indices stay valid
   matches.sort((a, b) => b - a);
   for (const rn of matches) {
-    await sheetsBatchUpdate(env, OEM_SHEET_ID, [{
+    const delRes = await sheetsBatchUpdate(env, OEM_SHEET_ID, [{
       deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rn - 1, endIndex: rn } }
     }]);
+    if (delRes.error) throw new Error('OEM delete row error (mpn=' + mpn + ' row=' + rn + '): ' + JSON.stringify(delRes.error));
   }
 }
 
@@ -3182,7 +3195,7 @@ function stripQuoted(text) {
   const lines = [], src = text.split('\n');
   for (const ln of src) {
     if (ln.trimStart().startsWith('>')) continue;
-    if (/^(From:|On .+ wrote:|-{3,}\s*Original)/i.test(ln.trim())) break;
+    if (/^(From:|On .+ wrote:|-{3,}\s*(?:Original|Replied|Forwarded|Reply))/i.test(ln.trim())) break;
     lines.push(ln);
   }
   return lines.join('\n').trim();
@@ -3232,6 +3245,15 @@ async function buildScanPayload(threadId, token, env) {
   });
   const sender = firstBuyer ? extractEmailAddr(getHdr(firstBuyer, 'From')) : '';
   const mpnHint = extractMpnHint(subject);
+  // Body scan for explicit "part # NNNN" labels — catches all-numeric MPNs missed by extractMpnHint (e.g. Phoenix 1935860)
+  let _bodyMpnHint = null;
+  if (!mpnHint && firstBuyer) {
+    const _bt = stripQuoted(extractMimeText(firstBuyer.payload) || '');
+    const _bm = _bt.match(/\bpart\s*(?:number|no\.?|#)\s*([A-Z0-9][A-Z0-9\-]{3,})/i)
+      || _bt.match(/\b(?:MPN|P\/N|PN)\s*:?\s*([A-Z0-9][A-Z0-9\-]{3,})/i)
+      || _bt.match(/\b\d+\s*pcs?\s+([A-Za-z][A-Za-z0-9\-\.\/]{4,})/i);  // "40pcs SDSDQAF3-016G-I"
+    if (_bm) _bodyMpnHint = _bm[1].replace(/[-.,;:]+$/, '').toUpperCase();
+  }
   const isICS = lastFrom.toLowerCase().includes('icsource') || lastFrom.toLowerCase().includes('autosend');
   const payload = {
     thread_id:       threadId,
@@ -3246,7 +3268,8 @@ async function buildScanPayload(threadId, token, env) {
     current_labels:  thread.labelIds || [],
     prior_quotes:    'None found',
   };
-  if (mpnHint && /[A-Za-z]/.test(mpnHint) && /[0-9]/.test(mpnHint) && mpnHint.length >= 5) payload.mpn = mpnHint;
+  const _effectiveMpn = mpnHint || _bodyMpnHint;
+  if (_effectiveMpn && /[0-9]/.test(_effectiveMpn) && _effectiveMpn.length >= 4) payload.mpn = _effectiveMpn;
 
   // Subject-only emails: subject has MPN+qty but body is empty â€" inject [PARSED_RFQ] so agent can act
   const bodyText = parts.slice(2).join('\n').replace(/--- Msg \d+ \| From:[^\n]*---/g, '').trim();
@@ -3490,7 +3513,7 @@ async function cronScanInbox(env) {
 
   const [rfqRes, tpRes, agentRes] = await Promise.all([
     gGet('/messages?q=' + rfqQ   + '&maxResults=10'),
-    gGet('/messages?q=' + tpQ    + '&maxResults=10'),
+    gGet('/messages?q=' + tpQ    + '&maxResults=25'),
     gGet('/messages?q=' + agentQ + '&maxResults=10'),
   ]);
 
@@ -3836,7 +3859,12 @@ async function cronCheckDavidNoStock(env) {
       }
 
       if (nostockLabelId) addLabels.push(nostockLabelId);
-      const mpn = extractMpnHint(subject);
+      // extractMpnHint requires letters+digits; David subjects often start with all-numeric part numbers
+      // Strip the #NNNN forte-row suffix, then grab the first token as MPN fallback
+      const _subjectCore = subject.replace(/#\d+\b/g, '').trim();
+      const _subjectFirstToken = _subjectCore.split(/\s+/)[0];
+      const mpn = extractMpnHint(subject)
+        || (_subjectFirstToken && _subjectFirstToken.length >= 4 && /[0-9]/.test(_subjectFirstToken) ? _subjectFirstToken.toUpperCase() : null);
       const rowMatch = subject.match(/#(\d+)/);
       const row = rowMatch ? parseInt(rowMatch[1], 10) : null;
 
