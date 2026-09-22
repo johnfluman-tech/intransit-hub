@@ -1261,13 +1261,18 @@ async function handleEmailAgent(request, env) {
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|usd|per\s*pc)/i.test(tcLC) ||
       /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(tcLC) ||
       /usd\s*[\d]+(?:\.\d+)?/i.test(tcLC) ||
-      /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(thread_content);
-    if (!hasBuyerTp) {
+      /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(thread_content) ||
+      /(?:order|price|priced?|@)\s*@\s*\$?[\d]+(?:\.\d+)?/i.test(tcLC) ||
+      /(?:^|[\s,;])@\s*\$?[\d]+(?:\.\d+)?(?:\s|$)/m.test(thread_content);
+    // Stan QUOTED takes priority — if Stan has a quoted price for this MPN, let the
+    // deterministic engine handle it as stan_quoted instead of firing TP request here.
+    const _hasStanQuoted = (stan_results || []).some(r => r.status === 'QUOTED' && r.colB);
+    if (!hasBuyerTp && !_hasStanQuoted) {
       const has2k = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
       const _tpTpl = has2k
         ? 'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.'
         : 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.';
-      await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: OEM pre-check â€" no buyer TP, returning ${has2k ? 'request_tp_2000' : 'request_tp_500'}`, { subject, mpn: requestMpn });
+      await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: OEM pre-check — no buyer TP, returning ${has2k ? 'request_tp_2000' : 'request_tp_500'}`, { subject, mpn: requestMpn });
       return json({ action: has2k ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Deterministic: OEM EXCESS exists, buyer gave no TP', mpn: requestMpn, buyer_email: null, draft_body: _tpTpl, forte_entry: null, oem_delete_row: null });
     }
   }
@@ -1414,12 +1419,16 @@ async function handleEmailAgent(request, env) {
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|usd|per\s*pc)/i.test(_tcLC2) ||
       /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(_tcLC2) ||
       /usd\s*[\d]+(?:\.\d+)?/i.test(_tcLC2) ||
-      /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(thread_content);
+      /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(thread_content) ||
+      /(?:order|price|priced?|@)\s*@\s*\$?[\d]+(?:\.\d+)?/i.test(_tcLC2) ||
+      /(?:^|[\s,;])@\s*\$?[\d]+(?:\.\d+)?(?:\s|$)/m.test(thread_content);
     const _tpMatch = (thread_content || '').match(/tgtprice=([\d.]+)/i) ||
       (thread_content || '').match(/(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*([\d.]+)/i) ||
       (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|usd|per\s*pc)/i) ||
       (thread_content || '').match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
-      (thread_content || '').match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m);
+      (thread_content || '').match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m) ||
+      (thread_content || '').match(/(?:order|price|priced?|@)\s*@\s*\$?([\d]+(?:\.\d+)?)/i) ||
+      (thread_content || '').match(/(?:^|[\s,;])@\s*\$?([\d]+(?:\.\d+)?)(?:\s|$)/m);
     const _tpVal = _tpMatch ? parseFloat(_tpMatch[1]) : null;
 
     // Extract buyer qty from thread content
@@ -2942,7 +2951,7 @@ async function handleGetGmailMessage(env, msgId) {
 // GET /api/gmail/sidebar-context?thread_id=X â€" returns thread + draft info for sidebar card
 // Replaces two GmailApp calls (getThreadById + getDrafts) with one REST call, no quota hit.
 async function handleGmailSidebarContext(url, env) {
-  const threadId = url.searchParams.get('thread_id');
+  const threadId = cleanThreadId(url.searchParams.get('thread_id'));
   if (!threadId) return json({ error: 'missing thread_id' }, 400);
   const [threadData, draftsData] = await Promise.all([
     gmailGet(env, '/threads/' + threadId + '?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject'),
@@ -3753,11 +3762,19 @@ async function cronCheckDavidNoStock(env) {
       const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
       const lastMsg = msgs[msgs.length - 1];
       const subject = getHdr(msgs[0], 'Subject');
-      const bodyAll = msgs.map(m => extractMimeText(m.payload)).join('\n').toLowerCase();
+      // Only scan the most recent message FROM David — full thread scan caused false removals
+      // when older David messages had distributor "No stk" lines (Bug 58/59).
+      const _davidDomains = ['fortetechno.com', 'fortecomp.com'];
+      const _davidMsgs = msgs.filter(m => {
+        const _f = ((m.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
+        return _davidDomains.some(d => _f.toLowerCase().includes(d));
+      });
+      const _lastDavidMsg = _davidMsgs.length ? _davidMsgs[_davidMsgs.length - 1] : lastMsg;
+      const bodyAll = extractMimeText(_lastDavidMsg.payload).toLowerCase();
       const checkText = subject.toLowerCase() + '\n' + bodyAll;
       const addLabels = processedLabelId ? [processedLabelId] : [];
 
-      // If email looks like a competitor price list, it's market pricing â€" not a no-stock signal
+      // If last David message looks like a competitor price list, skip
       if (isMarketPricingEmail(bodyAll)) {
         await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
         await hubLog(env, 'email_automation', 'run', 'cronCheckDavidNoStock: skipped market-pricing thread tid=' + tid);
@@ -3875,6 +3892,19 @@ async function cronSendDailyCostReport(env) {
 
 // â"€â"€ Phase 6: processCommandQueue in worker â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function normalizeMPN(s) { return String(s || '').trim().toLowerCase().replace(/[-\s]/g, ''); }
+function cleanThreadId(id) {
+  let s = String(id || '').replace(/^thread-f:/i, '').replace(/^thread:/i, '').trim();
+  // Apps Script threadId is a large decimal number; Gmail REST API needs the hex equivalent
+  if (/^\d{10,}$/.test(s)) { try { s = BigInt(s).toString(16); } catch(e) { /* keep as-is */ } }
+  return s;
+}
+// Extract real MPN from a string that may be a full email subject ("BROKER PRICING : MAX3845UCQ+ #4491 CHECK" → "MAX3845UCQ+")
+const _MPN_GENERIC_SRV = new Set(['QUOTE','QUOTES','RFQ','RFQS','REQUEST','REQUESTS','INQUIRY','INQUIRE','ORDER','ORDERS','OFFER','OFFERS','INFO','PRICE','PRICING','STOCK','PURCHASE','BUY','NEED','SALE','SALES','CHECK','OEM','BROKER','RE']);
+function extractMPNFromText(s) {
+  if (!s) return null;
+  const tokens = String(s).toUpperCase().split(/[\s,;|\/\[\]()\-:]+/);
+  return tokens.find(t => t.length >= 4 && /[A-Z]/.test(t) && /[0-9]/.test(t) && !_MPN_GENERIC_SRV.has(t)) || null;
+}
 
 async function cronProcessCommandQueue(env) {
   // Query D1 directly â€" avoids timeout/network issues from self-HTTP calls in cron context
@@ -4014,7 +4044,9 @@ async function cronProcessCommandQueue(env) {
 
       } else if (cmd.type === 'reverse_oem_removal') {
         // Restore a falsely-removed OEM EXCESS row from D1 backup + reset Forte status
-        const mpn = (data.mpn || '').trim();
+        const _rawMpn = (data.mpn || '').trim();
+        // If mpn looks like a full subject (contains spaces), extract the real MPN from it
+        const mpn = _rawMpn.includes(' ') ? (extractMPNFromText(_rawMpn) || _rawMpn) : _rawMpn;
         if (!mpn) throw new Error('reverse_oem_removal: mpn required');
         // 1. Try D1 backup (saved by oem_remove handler before deletion)
         let restoredRow = data.row_data || null; // allow caller to provide explicit row_data fallback
@@ -4049,7 +4081,7 @@ async function cronProcessCommandQueue(env) {
           });
         }
         // Delete any draft in the thread + restore thread to inbox (if thread_id provided)
-        const revThreadId = (data.thread_id || '').trim();
+        const revThreadId = cleanThreadId((data.thread_id || '').trim());
         let deletedDrafts = 0;
         if (revThreadId) {
           const revDraftList = await gGet('/drafts?maxResults=200');
@@ -4200,7 +4232,7 @@ async function cronProcessCommandQueue(env) {
 
       } else if (cmd.type === 'requote_stan') {
         const mpn = (data.mpn || '').trim();
-        const threadId = (data.thread_id || '').trim();
+        const threadId = cleanThreadId((data.thread_id || '').trim());
         if (!mpn) throw new Error('requote_stan: mpn required');
         if (!threadId) throw new Error('requote_stan: thread_id required');
         // Fetch Stan data from web app
@@ -4724,7 +4756,10 @@ async function processNext() {
 
 function getActionMPN() {
   const inp = (document.getElementById('action-mpn').value || '').trim().toUpperCase();
-  return inp || currentMPN || null;
+  const raw = inp || (currentMPN ? currentMPN.toUpperCase() : null);
+  if (!raw) return null;
+  // If the value contains spaces it's probably a pasted subject — extract just the MPN
+  return raw.includes(' ') ? (extractMPN(raw) || raw) : raw;
 }
 
 async function reverseOemRemoval() {
