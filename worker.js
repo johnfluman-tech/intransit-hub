@@ -1275,16 +1275,7 @@ async function handleEmailAgent(request, env) {
   // Checks thread_content for buyer TP in multiple forms before skipping â€" ensures tpQ reply emails
   // (where buyer already gave TP in plain text) are not caught by this guard.
   if (oem_results.length > 0 && (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
-    const tcLC = (thread_content || '').toLowerCase();
-    const hasBuyerTp =
-      /tgtprice=\d/i.test(thread_content) ||
-      /(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*[\d.]/i.test(tcLC) ||
-      /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|usd|per\s*pc)/i.test(tcLC) ||
-      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(tcLC) ||
-      /usd\s*[\d]+(?:\.\d+)?/i.test(tcLC) ||
-      /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(thread_content) ||
-      /(?:order|price|priced?|@)\s*@\s*\$?[\d]+(?:\.\d+)?/i.test(tcLC) ||
-      /(?:^|[\s,;])@\s*\$?[\d]+(?:\.\d+)?(?:\s|$)/m.test(thread_content);
+    const hasBuyerTp = _tpDetect(thread_content);
     // Stan QUOTED takes priority — if Stan has a quoted price for this MPN, let the
     // deterministic engine handle it as stan_quoted instead of firing TP request here.
     const _hasStanQuoted = (stan_results || []).some(r => r.status === 'QUOTED' && r.colB);
@@ -1433,19 +1424,13 @@ async function handleEmailAgent(request, env) {
     const _billOnly = (oem_results || []).length > 0 && (oem_results || []).every(r => /BILL EXT/i.test(r.notes || ''));
     const _hasOem   = (oem_results || []).some(r => !/BILL EXT/i.test(r.notes || ''));
     const _has2k    = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
-    const _tcLC2    = (thread_content || '').toLowerCase();
-    const _hasTp    =
-      /tgtprice=\d/i.test(thread_content) ||
-      /(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*[\d.]/i.test(_tcLC2) ||
-      /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|usd|per\s*pc)/i.test(_tcLC2) ||
-      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(_tcLC2) ||
-      /usd\s*[\d]+(?:\.\d+)?/i.test(_tcLC2) ||
-      /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(thread_content) ||
-      /(?:order|price|priced?|@)\s*@\s*\$?[\d]+(?:\.\d+)?/i.test(_tcLC2) ||
-      /(?:^|[\s,;])@\s*\$?[\d]+(?:\.\d+)?(?:\s|$)/m.test(thread_content);
+    const _hasTp    = _tpDetect(thread_content);
     const _tpMatch = (thread_content || '').match(/tgtprice=([\d.]+)/i) ||
       (thread_content || '').match(/(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*([\d.]+)/i) ||
-      (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|usd|per\s*pc)/i) ||
+      (thread_content || '').match(/(?:target|tgt)\s*[:=]\s*\$?([\d.]+)/i) ||
+      (thread_content || '').match(/t\/p\s*[:=]?\s*\$?([\d.]+)/i) ||
+      (thread_content || '').match(/\btp\s*[:=]\s*\$?([\d.]+)/i) ||
+      (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
       (thread_content || '').match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
       (thread_content || '').match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m) ||
       (thread_content || '').match(/(?:order|price|priced?|@)\s*@\s*\$?([\d]+(?:\.\d+)?)/i) ||
@@ -1489,6 +1474,30 @@ async function handleEmailAgent(request, env) {
     const _finalTp = (_act === 'msg_checking' || _act === 'bill_handle') ? (_tpVal || 0.01) : _tpVal;
     decision = { action: _act, reasoning: _rsn, mpn: requestMpn || null, buyer_email: null, forte_entry: _forteEntry, target_price: _finalTp, draft_body: _body };
     } // end else (_isDavidThread)
+  }
+
+  // Shared TP detection helper — single source of truth used by BOTH the OEM pre-check
+  // (hasBuyerTp) and the deterministic engine (_hasTp). Previously two separate blocks that
+  // diverged on every fix (Bugs 62-71). All pattern changes must now happen here only.
+  // Bugs fixed: "target:" alone (62), "tgt:" abbrev (63), "T/P:" format (64), "tp:" label (65),
+  // "ea" suffix (66), "/ea" suffix (67), "price:" label (68), extraction misses "ea" (69),
+  // duplicate blocks diverging (70), "per ea" not recognized (71).
+  function _tpDetect(tc) {
+    const _lc = (tc || '').toLowerCase();
+    return (
+      /tgtprice=\d/i.test(tc) ||
+      /(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*[\d.]/i.test(_lc) ||
+      /(?:target|tgt)\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
+      /t\/p\s*[:=]?\s*\$?[\d.]/i.test(_lc) ||
+      /\btp\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
+      /\bprice\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
+      /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
+      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(_lc) ||
+      /usd\s*[\d]+(?:\.\d+)?/i.test(_lc) ||
+      /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(tc) ||
+      /(?:order|price|priced?|@)\s*@\s*\$?[\d]+(?:\.\d+)?/i.test(_lc) ||
+      /(?:^|[\s,;])@\s*\$?[\d]+(?:\.\d+)?(?:\s|$)/m.test(tc)
+    );
   }
 
   // Lock wording for fixed-template actions; own_stock/stan_quoted are dynamic — leave as-is
