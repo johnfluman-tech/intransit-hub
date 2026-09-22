@@ -1208,13 +1208,34 @@ async function handleEmailAgent(request, env) {
   // Return no_action so the cron removes the rfq label and retries next cycle.
   if (!inventoryLookupSucceeded) {
     // Improvement #2: before giving up, check if the netCOMPONENTS Description field in the
-    // email body contains "Warehouse#N" — if so, synthesize a WH3 in_stock row so the existing
-    // WH3 guards can fire even without a successful web app lookup.
+    // email body contains "Warehouse#N" — if so, synthesize a WH3 in_stock row.
+    // Bug 61 fix: also fetch Stan sheet directly so we get QUOTED data even when web app failed.
+    // Without the Stan check, synthesized WH3 → add_to_stan even when Stan already has QUOTED.
     const wh3InBody = /Warehouse#\d/i.test(thread_content || '');
     if (wh3InBody && requestMpn) {
+      // Try direct Stan sheet lookup to recover QUOTED data lost with web app failure
+      try {
+        const _sTok = await getGmailToken(env);
+        const _sResp = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${STAN_SHEET_ID}/values/A1:H500?majorDimension=ROWS`,
+          { headers: { Authorization: 'Bearer ' + _sTok } }
+        );
+        if (_sResp.ok) {
+          const _sData = await _sResp.json();
+          const _nrmS = s => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const _reqNS = _nrmS(requestMpn);
+          for (const _sRow of (_sData.values || [])) {
+            // A=status, B=colB, C=colC, D=date, E=mpn, F=country
+            if (_nrmS(_sRow[4] || '') === _reqNS && (_sRow[0] || '').toUpperCase() === 'QUOTED' && _sRow[1]) {
+              stan_results = [{ status: 'QUOTED', colB: _sRow[1], colC: _sRow[2] || '', date: _sRow[3] || '', mpn: _sRow[4] || '', country: _sRow[5] || '' }];
+              break;
+            }
+          }
+        }
+      } catch(_e) { /* stan direct lookup failed — stan_results stays empty */ }
       in_stock_results = [{ row: 0, mpn: requestMpn, man: '', dc: '', qty: 0, notes: 'Warehouse#3 (from email body — web app timed out)' }];
-      inventoryLookupSucceeded = true; // allow guards to fire with this synthesized row
-      await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: WH3 detected in email body — synthesizing in_stock row for ${requestMpn}`, { subject });
+      inventoryLookupSucceeded = true;
+      await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: WH3 in email body — synthesized in_stock row; stan_results=${stan_results.length} rows from direct lookup`, { subject });
     } else {
       await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: inventory_lookup_failed — returning no_action for retry`, { subject });
       return json({ action: 'no_action', reasoning: 'inventory_lookup_failed — will retry next cron run', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
