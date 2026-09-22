@@ -1431,7 +1431,11 @@ async function handleEmailAgent(request, env) {
       (thread_content || '').match(/t\/p\s*[:=]?\s*\$?([\d.]+)/i) ||
       (thread_content || '').match(/\btp\s*[:=]\s*\$?([\d.]+)/i) ||
       (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
+      (thread_content || '').match(/([\d]+(?:\.\d+)?)\s*usd\b/i) ||    // "4usd", "4 usd"
       (thread_content || '').match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
+      (thread_content || '').match(/([\d]+(?:\.\d+)?)[$]/i) ||          // "4$", "4.50$"
+      (thread_content || '').match(/([\d]+(?:\.\d+)?)\s*dollars?\b/i) || // "4 dollars"
+      (thread_content || '').match(/([\d]+(?:\.\d+)?)\s*(?:\/pcs?|\/ea|per\s*(?:pc|ea|piece))\b/i) || // "4/pc"
       (thread_content || '').match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m) ||
       (thread_content || '').match(/(?:order|price|priced?|@)\s*@\s*\$?([\d]+(?:\.\d+)?)/i) ||
       (thread_content || '').match(/(?:^|[\s,;])@\s*\$?([\d]+(?:\.\d+)?)(?:\s|$)/m);
@@ -1492,8 +1496,11 @@ async function handleEmailAgent(request, env) {
       /\btp\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
       /\bprice\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
-      /[\d]+(?:\.\d+)?\s*usd\s*(?:\/pcs?|each|per)/i.test(_lc) ||
+      /[\d]+(?:\.\d+)?\s*usd\b/i.test(_lc) ||           // Bug 72: "4usd", "4 usd" — no trailing unit needed
       /usd\s*[\d]+(?:\.\d+)?/i.test(_lc) ||
+      /[\d]+(?:\.\d+)?[$]/i.test(_lc) ||                // Bug 73: "4$", "4.50$" trailing dollar sign
+      /[\d]+(?:\.\d+)?\s*dollars?\b/i.test(_lc) ||      // Bug 74: "4 dollars", "4 dollar"
+      /[\d]+(?:\.\d+)?\s*(?:\/pcs?|\/ea|per\s*(?:pc|ea|piece))\b/i.test(_lc) || // Bug 75: "4/pc" with no $
       /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(tc) ||
       /(?:order|price|priced?|@)\s*@\s*\$?[\d]+(?:\.\d+)?/i.test(_lc) ||
       /(?:^|[\s,;])@\s*\$?[\d]+(?:\.\d+)?(?:\s|$)/m.test(tc)
