@@ -1421,6 +1421,10 @@ async function handleEmailAgent(request, env) {
         decision = { action: 'no_action', reasoning: 'Deterministic: David thread — latest message has no no-stk signal (historical content ignored)', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null };
       }
     } else {
+    // Internal sender (e.g. John's own sent "Ok, removed from listing" is last msg after a reversal) — skip entirely
+    if (_lastFromLC2.includes('intransittech.com')) {
+      decision = { action: 'no_action', reasoning: 'Deterministic: last sender is @intransittech.com — internal, no action', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null };
+    } else {
     const _own  = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
     const _wh3  = (in_stock_results || []).filter(r => /Warehouse#\d/i.test(r.notes || ''));
     const _stanQ = (stan_results || []).find(r => r.status === 'QUOTED' && r.colB);
@@ -1462,8 +1466,16 @@ async function handleEmailAgent(request, env) {
     if (_own.length > 0) {
       _act = 'own_stock'; _rsn = 'Own IN STOCK';
     } else if (_wh3.length > 0 && !_hasOem) {
-      if (_stanQ) { _act = 'stan_quoted'; _body = buildStanQuotedBody(_stanQ, in_stock_results); _rsn = 'WH3+Stan QUOTED'; }
-      else        { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3 only'; }
+      if (_stanQ) {
+        // Only use stan_quoted when Stan's MPN exactly matches the buyer's MPN (ignoring standard packaging suffixes).
+        // Variant suffix mismatch (e.g. -5, #TRPBF vs buyer's base MPN) → add_to_stan so Stan can confirm first.
+        const _normStanFn = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/(NOPB|TRPBF|PBF|TR)$/, '');
+        const _stanMpnNorm = _normStanFn(_stanQ.mpn || '');
+        const _reqMpnNorm  = _normStanFn(requestMpn || '');
+        const _stanMpnExact = _stanMpnNorm && _reqMpnNorm && (_stanMpnNorm === _reqMpnNorm);
+        if (_stanMpnExact) { _act = 'stan_quoted'; _body = buildStanQuotedBody(_stanQ, in_stock_results); _rsn = 'WH3+Stan QUOTED'; }
+        else               { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3+Stan variant mismatch'; }
+      } else        { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3 only'; }
     } else if (_billOnly) {
       if (_hasTp) { _act = 'bill_handle'; _body = DRAFT_TEMPLATES.bill_handle; _rsn = 'BILL EXT+TP'; }
       else        { _act = _has2k ? 'request_tp_2000' : 'request_tp_500'; _rsn = 'BILL EXT no TP'; }
@@ -1489,6 +1501,7 @@ async function handleEmailAgent(request, env) {
     // msg_checking/bill_handle guards check target_price > 0; use 0.01 sentinel when TP text found but no parseable number
     const _finalTp = (_act === 'msg_checking' || _act === 'bill_handle') ? (_tpVal || 0.01) : _tpVal;
     decision = { action: _act, reasoning: _rsn, mpn: requestMpn || null, buyer_email: null, forte_entry: _forteEntry, target_price: _finalTp, draft_body: _body };
+    } // end inner else (non-internal sender)
     } // end else (_isDavidThread)
   }
 
@@ -3309,6 +3322,19 @@ async function buildScanPayload(threadId, token, env) {
         else if (ncPt.tgtPrice !== null) nc.tgtPrice = ncPt.tgtPrice;
       }
     }
+    // Bug 84 fix: if still no TgtPrice, scan subsequent NC relay messages for buyer-updated TP
+    if (nc && nc.tgtPrice === null && msgs.length > 1) {
+      for (let i = 1; i < msgs.length; i++) {
+        const mFrom = getHdr(msgs[i], 'From').toLowerCase();
+        if (!mFrom.includes('messagesend@netcomponents.com')) continue;
+        const mHtml = extractMimeText(msgs[i].payload, true);
+        const mParsed = mHtml ? parseNetCompHTML(mHtml) : null;
+        if (mParsed && mParsed.tgtPrice !== null) { nc.tgtPrice = mParsed.tgtPrice; break; }
+        const mPlain = extractMimeText(msgs[i].payload, false);
+        const mPt = mPlain ? parseNetCompPlainText(mPlain) : null;
+        if (mPt && mPt.tgtPrice !== null) { nc.tgtPrice = mPt.tgtPrice; break; }
+      }
+    }
     if (nc && nc.qtyReq) {
       let rLine = '[PARSED_RFQ: QtyReq=' + nc.qtyReq;
       if (nc.tgtPrice !== null && nc.tgtPrice !== undefined) rLine += ', TgtPrice=' + nc.tgtPrice;
@@ -3527,9 +3553,11 @@ async function cronScanInbox(env) {
   // to avoid repeated crashes. Counter resets to 0 after a clean run.
   const errCountRow = await env.DB.prepare("SELECT value FROM rules WHERE type='cron_state' AND key='subrequest_error_count'").first().catch(() => null);
   const subreqErrorCount = errCountRow ? parseInt(errCountRow.value) || 0 : 0;
-  const processLimit = subreqErrorCount > 0 ? 1 : 3;
+  // Per-type limits: each queue type gets its own slot budget so a full rfqQ can't starve tpQ.
+  // Bug fix: previously a single processLimit of 3 was shared — 3 rfq threads → 0 tp threads processed.
+  const limitEach = subreqErrorCount > 0 ? 1 : 3;
   if (subreqErrorCount > 0) {
-    await hubLog(env, 'email_automation', 'run', `cronScanInbox: adaptive throttle active (${subreqErrorCount} prior errors) — processing ${processLimit} thread(s)`);
+    await hubLog(env, 'email_automation', 'run', `cronScanInbox: adaptive throttle active (${subreqErrorCount} prior errors) — processing ${limitEach}/type`);
   }
 
   // Build toProcess FIRST â€" only label threads we're actually going to process.
@@ -3538,10 +3566,10 @@ async function cronScanInbox(env) {
   const rfqSet = new Set(rfqThreads);
   const tpDedupe = tpThreads.filter(t => !rfqSet.has(t));
   const toProcess = [
-    ...rfqThreads.map(t => ({ tid: t, source: 'rfq' })),
-    ...tpDedupe.map(t => ({ tid: t, source: 'tp' })),
-    ...agentThreads.filter(t => !rfqSet.has(t) && !tpDedupe.includes(t)).map(t => ({ tid: t, source: 'agent' })),
-  ].slice(0, processLimit);
+    ...rfqThreads.slice(0, limitEach).map(t => ({ tid: t, source: 'rfq' })),
+    ...tpDedupe.slice(0, limitEach).map(t => ({ tid: t, source: 'tp' })),
+    ...agentThreads.filter(t => !rfqSet.has(t) && !tpDedupe.includes(t)).slice(0, limitEach).map(t => ({ tid: t, source: 'agent' })),
+  ];
 
   // Label only the threads we're about to process â€" unprocessed threads stay unlabeled and get caught next cron run
   const labelOps = [];
@@ -3790,7 +3818,7 @@ async function cronCheckDavidNoStock(env) {
   const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
 
   // Only explicit phrases David uses to mean he has no stock â€" NOT market commentary
-  const NO_STK = ['no stk','no stock','cant share'];
+  const NO_STK = ['no stk','no stock','cant share','part sold','stk sold','sold out','all sold'];
   // Market-pricing emails list competitor distributors + prices â€" never treat as no-stock
   const MARKET_DISTRIBUTORS = ['newark','mouser','avnet','digikey','arrow','future','turandot','winsun','vrg','bettering','element14','rs components','farnell'];
   function isMarketPricingEmail(text) {
@@ -4160,7 +4188,8 @@ async function cronProcessCommandQueue(env) {
           const revAllLabels = await gGet('/labels');
           const revLabelMap = {};
           (revAllLabels.labels || []).forEach(l => { revLabelMap[l.name] = l.id; });
-          const revRemoveIds = ['oem-rfq-incoming-processed','oem-tp-processed','oem-nostock-seen','oem-agent-processed']
+          // Keep oem-rfq-incoming-processed — removing it causes cron to re-process David threads on next run (Bug: "Sent offer" → false remove_oem)
+          const revRemoveIds = ['oem-tp-processed','oem-nostock-seen','oem-agent-processed']
             .map(n => revLabelMap[n]).filter(Boolean);
           await gPost(`/threads/${revThreadId}/modify`, {
             addLabelIds: ['INBOX'],
