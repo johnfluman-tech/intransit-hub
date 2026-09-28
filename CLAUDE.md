@@ -43,6 +43,17 @@ https://script.google.com/macros/s/AKfycbyuuBmiYVW5mKI82D5YQGPh1nNGLJZzlLKoxuOdt
 - Always use PowerShell `Invoke-WebRequest -MaximumRedirection 5` — WebFetch gets stuck in redirects.
 - Returns JSON: `{ oem_excess: [...], in_stock: [...], stan_sheet: [...], forte_sheet: [...] }`
 
+## COMMAND QUEUE API
+```
+POST https://intransit-hub.intransit-sales.workers.dev/api/command-queue
+Authorization: Bearer InTransit!Hub#2026
+Content-Type: application/json
+
+{ "type": "add_forte_entry", "mpn": "...", "qty": N, "targetPrice": N, "country": "XX", "historyNote": "" }
+```
+- Auth header is `Authorization: Bearer [HUB_SECRET]` — NOT `X-Hub-Secret`
+- Types: `add_forte_entry` | `remove_oem_mpn`
+
 ---
 
 ## FORTE SHEET — COLUMN LAYOUT
