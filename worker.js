@@ -190,6 +190,8 @@ export default {
   async scheduled(event, env, ctx) {
     if (event.cron === '0 8 * * *') {
       ctx.waitUntil(cronSendDailyCostReport(env));
+      // Log retention: app_logs hit 192k rows and pushed D1 to 97% of the daily read cap (Oct 1 2026)
+      ctx.waitUntil(env.DB.prepare("DELETE FROM app_logs WHERE created_at < datetime('now','-30 days')").run().catch(() => {}));
     } else {
       ctx.waitUntil(Promise.all([
         cronProcessFixQueue(env),
