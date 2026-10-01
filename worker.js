@@ -1389,14 +1389,14 @@ async function handleEmailAgent(request, env) {
   // Claude picks the action; the worker locks the text. No improvisation possible.
   // Build structured stan_quoted draft: extract price from colB, pull DC/QTY from in_stock_results
   function buildStanQuotedBody(stanRow, inStockRows) {
-    const mpn  = (stanRow.mpn  || '').trim();
-    const colB = (stanRow.colB || '').trim();
-    const colC = (stanRow.colC || '').trim();
+    const mpn  = String(stanRow.mpn  || '').trim();
+    const colB = String(stanRow.colB || '').trim();
+    const colC = String(stanRow.colC || '').trim();
     const priceMatch = colB.match(/\$(\d+(?:\.\d+)?)/);
     const priceStr   = priceMatch ? `$${parseFloat(priceMatch[1]).toFixed(2)}` : '$[FILL IN]';
     const notes      = colB.replace(/\$\d+(?:\.\d+)?/, '').replace(/\s{2,}/g, ' ').trim();
     const rows       = Array.isArray(inStockRows) ? inStockRows : [];
-    const dc         = (rows[0] && rows[0].dc) ? rows[0].dc.trim() : '';
+    const dc         = (rows[0] && rows[0].dc) ? String(rows[0].dc).trim() : '';  // web app returns numeric DCs (2016) — .trim() crashed whole thread
     const qty        = rows.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
     let body = `This is our stock\n\nMPN: ${mpn}${dc ? '\nDC: ' + dc : ''}\nQTY in stock: ${qty || '?'}\nPrice: ${priceStr}`;
     if (notes) body += `\n\n${notes}`;
@@ -1480,7 +1480,9 @@ async function handleEmailAgent(request, env) {
     let _sigCtry = null;
     const _phM = (thread_content || '').match(/(?:\+|\b00)\s?(\d{1,3})[\s.\-()]+\d/);
     if (_phM) { for (let L = 3; L >= 1 && !_sigCtry; L--) _sigCtry = _phoneCtry[_phM[1].slice(0, L)] || null; }
-    const _senderCtry = _domCtry[_tld] || _sigCtry || 'CN';
+    // Known buyer domains (rules type='domain_country') beat guessing — questcomp.com has no ccTLD and no phone in body
+    const _knownCtry = await env.DB.prepare("SELECT value FROM rules WHERE type='domain_country' AND key=?").bind(_sdrDomain).first().catch(() => null);
+    const _senderCtry = _knownCtry?.value || _domCtry[_tld] || _sigCtry || 'CN';
 
     let _act, _body = null, _rsn, _forteEntry = null;
     if (_own.length > 0) {
@@ -3591,7 +3593,19 @@ async function cronScanInbox(env) {
   ]);
 
   const rfqThreads   = [...new Set((rfqRes.messages   || []).map(m => m.threadId))];
-  const tpThreads    = [...new Set((tpRes.messages    || []).map(m => m.threadId))];
+  let   tpThreads    = [...new Set((tpRes.messages    || []).map(m => m.threadId))];
+  // Gmail search is per-message: once a thread is archived, the buyer's NEW reply has INBOX but not
+  // oem-rfq-incoming-processed (labels don't carry to later messages), so tpQ never matches it
+  // (TDA21590AUMA1 / Quest "$4.00 ea" sat unprocessed). Intersect labeled threads with inbox threads.
+  try {
+    const [labRes, inbRes] = await Promise.all([
+      gGet('/threads?maxResults=200&q=' + encodeURIComponent('label:oem-rfq-incoming-processed -label:oem-tp-processed newer_than:30d')),
+      gGet('/threads?maxResults=200&q=' + encodeURIComponent('in:inbox newer_than:30d -from:partalert@netcomponents.com')),
+    ]);
+    const inbox = new Set((inbRes.threads || []).map(t => t.id));
+    const orphans = (labRes.threads || []).map(t => t.id).filter(id => inbox.has(id) && !tpThreads.includes(id));
+    if (orphans.length) tpThreads = [...orphans, ...tpThreads];
+  } catch (_) {}
   const agentThreads = [...new Set((agentRes.messages || []).map(m => m.threadId))];
 
   await hubLog(env, 'email_automation', 'run', `cronScanInbox: rfq=${rfqThreads.length} tp=${tpThreads.length} agent=${agentThreads.length}`);
@@ -3612,9 +3626,19 @@ async function cronScanInbox(env) {
   // Deduplicate: netCOMPONENTS threads appear in both rfqQ and tpQ; only process as rfq on first encounter.
   const rfqSet = new Set(rfqThreads);
   const tpDedupe = tpThreads.filter(t => !rfqSet.has(t));
+  // Threads where staff replied last are waiting on the buyer — skip them up front so they stop
+  // eating the tp slots every run (1 cheap metadata call each, max 8 checks).
+  const tpPick = [];
+  for (const t of tpDedupe.slice(0, 8)) {
+    if (tpPick.length >= limitEach) break;
+    const md = await gGet('/threads/' + t + '?format=metadata&metadataHeaders=From').catch(() => null);
+    const lm = (md?.messages || []).filter(m => !(m.labelIds || []).includes('DRAFT')).pop();
+    const lf = ((lm?.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
+    if (!/@intransittech\.com/i.test(lf)) tpPick.push(t);
+  }
   const toProcess = [
     ...rfqThreads.slice(0, limitEach).map(t => ({ tid: t, source: 'rfq' })),
-    ...tpDedupe.slice(0, limitEach).map(t => ({ tid: t, source: 'tp' })),
+    ...tpPick.map(t => ({ tid: t, source: 'tp' })),
     ...agentThreads.filter(t => !rfqSet.has(t) && !tpDedupe.includes(t)).slice(0, limitEach).map(t => ({ tid: t, source: 'agent' })),
   ];
 
