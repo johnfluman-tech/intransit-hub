@@ -1500,7 +1500,10 @@ async function handleEmailAgent(request, env) {
     }
     // msg_checking/bill_handle guards check target_price > 0; use 0.01 sentinel when TP text found but no parseable number
     const _finalTp = (_act === 'msg_checking' || _act === 'bill_handle') ? (_tpVal || 0.01) : _tpVal;
-    decision = { action: _act, reasoning: _rsn, mpn: requestMpn || null, buyer_email: null, forte_entry: _forteEntry, target_price: _finalTp, draft_body: _body };
+    // QTY fallback rule: buyer's qty, else our WH3 stock qty — Stan/RFQ sheet col G must never be blank
+    const _wh3Qty = _wh3.reduce((s, r) => s + (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0), 0);
+    const _decQty = _buyerQty || (_act === 'add_to_stan' || _act === 'stan_quoted' ? (_wh3Qty || null) : null);
+    decision = { action: _act, reasoning: _rsn, mpn: requestMpn || null, buyer_email: null, forte_entry: _forteEntry, target_price: _finalTp, qty: _decQty, draft_body: _body };
     } // end inner else (non-internal sender)
     } // end else (_isDavidThread)
   }
