@@ -2869,13 +2869,21 @@ async function sheetsGetMeta(env, spreadsheetId) {
   return r.json();
 }
 
+// Same part, different packaging (MAX17498BATE+ vs +T, #PBF, TRPBF, /NOPB) must count as already on Forte.
+// Grade/variant differences (C vs I, -R7, DCKR vs DCK) stay distinct.
+function forteKey(s) {
+  let k = String(s || '').trim().toUpperCase(), prev;
+  do { prev = k; k = k.replace(/(?:\+T|\+TR|[-\/#]?T&R|[-\/#]?TRPBF|[-\/#]?PBF|\/NOPB|[-\/#]TR)$/, '').trim(); } while (k !== prev);
+  return k.replace(/[^A-Z0-9]/g, '');
+}
+
 async function workerCheckForteForMPN(env, mpn, days) {
   const rows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
   const cutoff = Date.now() - (days || 60) * 86400000;
   const matches = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (!r[1] || r[1].trim().toLowerCase() !== mpn.trim().toLowerCase()) continue;
+    if (!r[1] || forteKey(r[1]) !== forteKey(mpn)) continue;
     const d = r[0] ? new Date(r[0]).getTime() : 0;
     const status = (r[10] || '').trim();
     matches.push({ row: i + 1, date: r[0], status, recent: d >= cutoff });
@@ -2888,7 +2896,7 @@ async function workerBuildForteHistory(env, mpn) {
   const entries = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (!r[1] || r[1].trim().toLowerCase() !== mpn.trim().toLowerCase()) continue;
+    if (!r[1] || forteKey(r[1]) !== forteKey(mpn)) continue;
     const dt = r[0] ? new Date(r[0]) : null;
     const dateStr = dt ? (dt.getMonth()+1) + '/' + dt.getDate() + '/' + dt.getFullYear() : '?';
     let line = dateStr;
