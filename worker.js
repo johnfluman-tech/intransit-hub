@@ -1291,7 +1291,7 @@ async function handleEmailAgent(request, env) {
     return json({ action: 'still_checking', reasoning: 'Buyer follow-up after msg_checking; Forte row ' + (_openForte.row || '?') + ' open, no OEM price yet', mpn: requestMpn, buyer_email: null, draft_body: 'We are still checking on it. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.', forte_entry: null, oem_delete_row: null });
   }
   if (oem_results.length > 0 && !_isListingReply && (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
-    const hasBuyerTp = _tpDetect(thread_content);
+    const hasBuyerTp = _tpDetect(thread_content) || _lastMsgTp(body.last_msg_body) !== null;
     // Stan QUOTED takes priority — if Stan has a quoted price for this MPN, let the
     // deterministic engine handle it as stan_quoted instead of firing TP request here.
     const _hasStanQuoted = (stan_results || []).some(r => r.status === 'QUOTED' && r.colB);
@@ -1444,7 +1444,7 @@ async function handleEmailAgent(request, env) {
     const _billOnly = (oem_results || []).length > 0 && (oem_results || []).every(r => /BILL EXT/i.test(r.notes || ''));
     const _hasOem   = (oem_results || []).some(r => !/BILL EXT/i.test(r.notes || ''));
     const _has2k    = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
-    const _hasTp    = _tpDetect(thread_content);
+    const _hasTp    = _tpDetect(thread_content) || _lastMsgTp(body.last_msg_body) !== null;
     const _tpMatch = (thread_content || '').match(/tgtprice=([\d.]+)/i) ||
       (thread_content || '').match(/(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*([\d.]+)/i) ||
       (thread_content || '').match(/\bprice\s*[:=]\s*\$?([\d.]+)/i) ||
@@ -1462,7 +1462,7 @@ async function handleEmailAgent(request, env) {
       (thread_content || '').match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m) ||
       (thread_content || '').match(/(?:order|price|priced?|@)\s*@\s*\$?([\d]+(?:\.\d+)?)/i) ||
       (thread_content || '').match(/(?:^|[\s,;])@\s*\$?([\d]+(?:\.\d+)?)(?:\s|$)/m);
-    const _tpVal = _tpMatch ? parseFloat(_tpMatch[1]) : null;
+    const _tpVal = _tpMatch ? parseFloat(_tpMatch[1]) : _lastMsgTp(body.last_msg_body);
 
     // Extract buyer qty from thread content
     const _qtyM = (thread_content || '').match(/QtyReq=(\d+)/i) ||
@@ -1482,7 +1482,9 @@ async function handleEmailAgent(request, env) {
     if (_phM) { for (let L = 3; L >= 1 && !_sigCtry; L--) _sigCtry = _phoneCtry[_phM[1].slice(0, L)] || null; }
     // Known buyer domains (rules type='domain_country') beat guessing — questcomp.com has no ccTLD and no phone in body
     const _knownCtry = await env.DB.prepare("SELECT value FROM rules WHERE type='domain_country' AND key=?").bind(_sdrDomain).first().catch(() => null);
-    const _senderCtry = _knownCtry?.value || _domCtry[_tld] || _sigCtry || 'CN';
+    // US address in signature/listing ("Bellmore, NY 11710", "Clearwater, FL  33760") — optonline.net etc. have no ccTLD
+    const _usAddr = /\b(?:A[LKZR]|C[AOT]|D[EC]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\s+\d{5}(?:-\d{4})?(?!\d)/.test(thread_content || '') ? 'US' : null;
+    const _senderCtry = _knownCtry?.value || _domCtry[_tld] || _sigCtry || _usAddr || 'CN';
 
     let _act, _body = null, _rsn, _forteEntry = null;
     if (_own.length > 0) {
@@ -1536,6 +1538,16 @@ async function handleEmailAgent(request, env) {
   // Bugs fixed: "target:" alone (62), "tgt:" abbrev (63), "T/P:" format (64), "tp:" label (65),
   // "ea" suffix (66), "/ea" suffix (67), "price:" label (68), extraction misses "ea" (69),
   // duplicate blocks diverging (70), "per ea" not recognized (71).
+  // Buyer's own latest message (quotes stripped): bare "$1.75" / "around 1.75" with no unit (Precision Logic,
+  // MAX17498BATE+). Scoped to last_msg_body so our "$500 minimum" and the listing's "$500 MIN TP REQUIRED" can't count.
+  function _lastMsgTp(lb) {
+    const t = String(lb || '').replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ');
+    const m = t.match(/\$\s*(\d+(?:\.\d+)?)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
+      t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i);
+    const v = m ? parseFloat(m[1]) : null;
+    return v && v > 0 && v < 100000 ? v : null;
+  }
+
   function _tpDetect(tc) {
     const _lc = (tc || '').toLowerCase();
     return (
@@ -3493,6 +3505,8 @@ async function executeDecisionCron(decision, payload, token, env) {
     if (draft.error) throw new Error('Draft create: ' + JSON.stringify(draft.error));
     const draftMsgId = draft?.id || draft?.message?.id;
     await hubLog(env, 'email_automation', 'draft_created', 'cronScanInbox: draft (' + action + ') for ' + (decision.mpn || '?'), { threadId });
+    // Remember we answered this buyer message — if John deletes the draft, don't re-create it (MAX17498BATE+ was re-drafted 3x)
+    if (payload.last_message_id) await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('drafted_msg', ?, ?)").bind(payload.last_message_id, threadId).run().catch(() => {});
 
     // Improvement #10: mark agent_decisions as completed with the gmail_draft_id
     if (decision.id && draftMsgId) {
@@ -3702,7 +3716,7 @@ async function cronScanInbox(env) {
 
       const payload = await buildScanPayload(tid, token, env);
       if (!payload) continue;
-      if (await env.DB.prepare("SELECT 1 FROM rules WHERE type='acked_msg' AND key=?").bind(payload.last_message_id).first()) continue;
+      if (await env.DB.prepare("SELECT 1 FROM rules WHERE type IN ('acked_msg','drafted_msg') AND key=?").bind(payload.last_message_id).first()) continue;
 
       // Call handleEmailAgent directly (no HTTP round-trip) via fake Request
       const fakeReq = new Request('https://x/api/email-agent', {
@@ -4313,8 +4327,10 @@ async function cronProcessCommandQueue(env) {
       } else if (cmd.type === 'delete_thread_drafts') {
         const threadId = (data.thread_id || '').trim();
         if (!threadId) throw new Error('No thread_id provided');
-        const draftList = await gGet('/drafts?maxResults=200');
-        const matches = (draftList.drafts || []).filter(d => d.message?.threadId === threadId);
+        // Draft list stubs carry message.id but NOT message.threadId (same as Bug 39) — match via the thread's message ids
+        const [draftList, th] = await Promise.all([gGet('/drafts?maxResults=200'), gGet('/threads/' + threadId + '?format=minimal')]);
+        const tMsgIds = new Set((th.messages || []).map(m => m.id));
+        const matches = (draftList.drafts || []).filter(d => tMsgIds.has(d.message?.id));
         for (const d of matches) await gDel('/drafts/' + d.id);
         await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: delete_thread_drafts ${threadId} (${matches.length} deleted)`);
 
