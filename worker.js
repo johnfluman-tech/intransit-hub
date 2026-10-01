@@ -1070,6 +1070,7 @@ async function handleEmailAgent(request, env) {
     try {
       const mpn0 = body.mpn || await extractMpnFromThread(subject, thread_content, env);
       if (mpn0) {
+        if (!body.mpn) body.mpn = mpn0;  // AI-extracted MPN must reach routing, else forte_entry is silently dropped
         const inv = await lookupInventory(mpn0);
         // Require valid array fields â€" a truthy error payload like {"error":"..."} must not
         // set inventoryLookupSucceeded=true with empty arrays, which would wrongly trigger
@@ -1438,6 +1439,7 @@ async function handleEmailAgent(request, env) {
       (thread_content || '').match(/(?:target|tgt)\s*[:=]\s*\$?([\d.]+)/i) ||
       (thread_content || '').match(/t\/p\s*[:=]?\s*\$?([\d.]+)/i) ||
       (thread_content || '').match(/\btp\s*[:=]\s*\$?([\d.]+)/i) ||
+      (thread_content || '').match(/\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?(\d+(?:\.\d+)?)/i) ||
       (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
       (thread_content || '').match(/([\d]+(?:\.\d+)?)\s*usd\b/i) ||    // "4usd", "4 usd"
       (thread_content || '').match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
@@ -1460,7 +1462,12 @@ async function handleEmailAgent(request, env) {
     const _sdrDomain = (sender || '').replace(/.*@/, '').toLowerCase();
     const _domCtry = { cn: 'CN', hk: 'HK', nl: 'NL', de: 'DE', jp: 'JP', tw: 'TW', ca: 'CA', uk: 'GB', au: 'AU', kr: 'KR', sg: 'SG', in: 'IN', fr: 'FR' };
     const _tld = _sdrDomain.split('.').pop();
-    const _senderCtry = _domCtry[_tld] || 'CN';
+    // Generic TLD (.com/.net): use the buyer's signature phone code before defaulting to CN
+    const _phoneCtry = { '1':'US','7':'RU','31':'NL','32':'BE','33':'FR','34':'ES','39':'IT','41':'CH','43':'AT','44':'GB','45':'DK','46':'SE','47':'NO','48':'PL','49':'DE','52':'MX','55':'BR','60':'MY','61':'AU','62':'ID','63':'PH','65':'SG','66':'TH','81':'JP','82':'KR','84':'VN','86':'CN','90':'TR','91':'IN','351':'PT','353':'IE','358':'FI','420':'CZ','852':'HK','886':'TW','972':'IL' };
+    let _sigCtry = null;
+    const _phM = (thread_content || '').match(/(?:\+|\b00)\s?(\d{1,3})[\s.\-()]+\d/);
+    if (_phM) { for (let L = 3; L >= 1 && !_sigCtry; L--) _sigCtry = _phoneCtry[_phM[1].slice(0, L)] || null; }
+    const _senderCtry = _domCtry[_tld] || _sigCtry || 'CN';
 
     let _act, _body = null, _rsn, _forteEntry = null;
     if (_own.length > 0) {
@@ -1522,6 +1529,7 @@ async function handleEmailAgent(request, env) {
       /(?:target|tgt)\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
       /t\/p\s*[:=]?\s*\$?[\d.]/i.test(_lc) ||
       /\btp\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
+      /\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?\d/i.test(_lc) ||   // "tp at 0.5" (Goldney)
       /\bprice\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
       /[\d]+(?:\.\d+)?\s*usd\b/i.test(_lc) ||           // Bug 72: "4usd", "4 usd" — no trailing unit needed
@@ -3196,14 +3204,32 @@ function decodeGmailBase64(str) {
   } catch(e) { return ''; }
 }
 
+function htmlToText(html) {
+  return String(html || '')
+    .replace(/<(style|script|head)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<\/t[dh]>/gi, ' | ')
+    .replace(/<br\s*\/?>|<\/(?:tr|p|div|li|h\d)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+    .replace(/[ \t]+/g, ' ').replace(/ *\n[ \n]*/g, '\n').trim();
+}
+
+// HTML-only emails (no text/plain part) were read as empty → MPN never found (Goldney 7114-5623-02)
 function extractMimeText(payload, wantHtml = false) {
+  const t = _extractMimePart(payload, wantHtml);
+  if (t || wantHtml) return t;
+  return htmlToText(_extractMimePart(payload, true));
+}
+
+function _extractMimePart(payload, wantHtml) {
   if (!payload) return '';
   const plain = payload.mimeType === 'text/plain' && payload.body?.data;
   const html  = payload.mimeType === 'text/html'  && payload.body?.data;
   if (!wantHtml && plain) return decodeGmailBase64(payload.body.data);
   if (wantHtml  && html)  return decodeGmailBase64(payload.body.data);
   if (payload.parts) {
-    for (const p of payload.parts) { const t = extractMimeText(p, wantHtml); if (t) return t; }
+    for (const p of payload.parts) { const t = _extractMimePart(p, wantHtml); if (t) return t; }
   }
   return '';
 }
