@@ -4006,8 +4006,13 @@ function extractMPNFromText(s) {
 
 async function cronProcessCommandQueue(env) {
   // Query D1 directly â€" avoids timeout/network issues from self-HTTP calls in cron context
+  // A command killed mid-run (worker timeout / subrequest cap) never reaches done/failed — fail it so it can't block the queue
+  await env.DB.prepare(
+    "UPDATE command_queue SET status='failed', error='timed out while running (worker killed)', updated_at=datetime('now') WHERE status='running' AND updated_at < datetime('now','-10 minutes')"
+  ).run();
+  // Heavy send_datamaster_email (30-60s) runs last so it can't starve quick sheet commands
   const { results: commands } = await env.DB.prepare(
-    "SELECT * FROM command_queue WHERE status='pending' ORDER BY created_at ASC LIMIT 10"
+    "SELECT * FROM command_queue WHERE status='pending' ORDER BY (type='send_datamaster_email') ASC, created_at ASC LIMIT 5"
   ).all();
   if (!commands?.length) return;
   await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: ${commands.length} pending`);
@@ -4019,6 +4024,7 @@ async function cronProcessCommandQueue(env) {
 
   for (const cmd of commands) {
     try {
+      await env.DB.prepare("UPDATE command_queue SET status='running', updated_at=datetime('now') WHERE id=?").bind(cmd.id).run();
       const data = JSON.parse(cmd.data || '{}');
       const now = new Date();
       const today = (now.getMonth()+1) + '/' + now.getDate() + '/' + now.getFullYear();
@@ -4105,7 +4111,7 @@ async function cronProcessCommandQueue(env) {
         if (hasRecent) {
           await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: add_forte_entry 60-day skip ${mpn}`);
         } else {
-          await workerAddToForteSheet(env, mpn, qty, data.tp || data.buyer_tp || '', data.country || '');
+          await workerAddToForteSheet(env, mpn, qty, data.tp || data.buyer_tp || data.targetPrice || data.target_price || '', data.country || '');
           await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: add_forte_entry ${mpn} qty=${qty}`);
         }
 
