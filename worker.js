@@ -1465,7 +1465,7 @@ async function handleEmailAgent(request, env) {
     let _act, _body = null, _rsn, _forteEntry = null;
     if (_own.length > 0) {
       _act = 'own_stock'; _rsn = 'Own IN STOCK';
-    } else if (_wh3.length > 0 && !_hasOem) {
+    } else if (_wh3.length > 0) {  // Bug fix: WH3 always takes priority over OEM EXCESS (XCF08PVOG48C incident)
       if (_stanQ) {
         // Only use stan_quoted when Stan's MPN exactly matches the buyer's MPN (ignoring standard packaging suffixes).
         // Variant suffix mismatch (e.g. -5, #TRPBF vs buyer's base MPN) → add_to_stan so Stan can confirm first.
@@ -1582,7 +1582,7 @@ async function handleEmailAgent(request, env) {
     if (hasOwnStock) {
       decision.action = 'own_stock';
       decision.draft_body = null; // own_stock price block below will build it
-    } else if (hasWarehouse && !hasNonBillOem) {
+    } else if (hasWarehouse) {  // Bug fix: WH3 takes priority over OEM EXCESS
       const stanQuotedRow = (stan_results || []).find(r => r.status === 'QUOTED' && r.colB);
       if (stanQuotedRow) {
         decision.action = 'stan_quoted';
@@ -1682,11 +1682,13 @@ async function handleEmailAgent(request, env) {
         decision._correction_reason = 'msg_checking but all in_stock are WH3 and Stan has QUOTED — corrected to stan_quoted';
         decision.action    = 'stan_quoted';
         decision.draft_body = buildStanQuotedBody(stanQuotedRowMsg, in_stock_results);
+        decision.forte_entry = null;  // Bug fix: WH3 items never go to Forte
       } else {
         decision._corrected_from    = 'msg_checking';
         decision._correction_reason = 'msg_checking but all in_stock are WH3 — corrected to add_to_stan';
         decision.action    = 'add_to_stan';
         decision.draft_body = DRAFT_TEMPLATES.add_to_stan;
+        decision.forte_entry = null;  // Bug fix: WH3 items never go to Forte
       }
     }
   }

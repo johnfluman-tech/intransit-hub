@@ -402,7 +402,11 @@ function executeDecision(decision, thread) {
       updateForteSheet(decision.mpn);
     }
   }
-  if (decision.forte_entry) {
+  // Safety guard: forte_entry is valid only for OEM EXCESS actions — never for WH3/own_stock/bill paths.
+  // XCF08PVOG48C incident: worker correctly overrides to add_to_stan but stale forte_entry can survive if
+  // the WH3 guard in worker.js fires AFTER forte_entry was set. This whitelist is the last line of defence.
+  var FORTE_ALLOWED_ACTIONS = ['msg_checking', 'below_min_line', 'still_checking'];
+  if (decision.forte_entry && FORTE_ALLOWED_ACTIONS.indexOf(action) >= 0) {
     var fe = decision.forte_entry;
     if (fe.mpn && fe.qty) {
       var existing = checkForteForMPN(fe.mpn, 60);
@@ -410,6 +414,8 @@ function executeDecision(decision, thread) {
       if (!hasRecent) addToForteSheet(fe.mpn, fe.qty, fe.target_price || '', fe.country || '', '');
       else hubLog('run', 'Forte 60-day skip: ' + fe.mpn);
     }
+  } else if (decision.forte_entry && FORTE_ALLOWED_ACTIONS.indexOf(action) < 0) {
+    hubLog('warn', 'Forte blocked: action=' + action + ' is not allowed to write Forte — forte_entry cleared', { mpn: decision.forte_entry.mpn });
   }
   if (decision.draft_body) {
     var replyTo = decision.buyer_email || extractBuyerEmail(lastMsg.getFrom());
