@@ -52,7 +52,9 @@ Content-Type: application/json
 { "type": "add_forte_entry", "mpn": "...", "qty": N, "targetPrice": N, "country": "XX", "historyNote": "" }
 ```
 - Auth header is `Authorization: Bearer [HUB_SECRET]` — NOT `X-Hub-Secret`
-- Types: `add_forte_entry` | `remove_oem_mpn`
+- Types: `add_forte_entry` | `remove_oem_mpn` | `update_forte_cells`
+- `update_forte_cells`: `{ "type":"update_forte_cells", "row":4644, "mpn":"88E1112-C2-NNC1C000", "cells":{"D":10} }`. Edits existing Forte cells in place; refuses if col B of that row isn't the MPN. Use this to fix a Forte row, never append a duplicate.
+- After POSTing, trigger `POST /api/command-queue/process`. The first run right after a deploy can hit the old worker version; if it fails with "Unknown command type," re-queue it.
 
 ---
 

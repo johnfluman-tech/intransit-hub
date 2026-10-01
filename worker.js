@@ -1278,6 +1278,18 @@ async function handleEmailAgent(request, env) {
   // Bug 91 fix: skip TP pre-check for ICSSource listing-reply threads ("RE: Showing available") —
   // buyer already saw our listed price; asking for a TP is wrong. Route to msg_checking instead.
   const _isListingReply = /showing available/i.test(subject || '');
+  // Follow-up after our "checking on it" (88E1112-C2-NNC1C000: buyer said "ok thanks", automation asked for TP twice).
+  // Ack → no reply. TP restated / question → still_checking. Only while an Open Forte row has no John Buy/Quoted price.
+  const _priorChecking = /we are (?:still )?checking on (?:it|this)/i.test(thread_content);
+  const _openForte = (forte_results || []).find(r => /^open$/i.test(String(r.status || '').trim()));
+  if (_priorChecking && _openForte && !_openForte.johnQuoted && !_openForte.johnBuy && oem_results.length > 0 &&
+      (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
+    const _lb = String(body.last_msg_body || '');
+    const _isAck = !_tpDetect(_lb) && !/\?|quote|price|update|status|news|how much|advise|when|lead ?time/i.test(_lb) &&
+      /\b(ok|okay|thanks?|thank you|noted|received|looking forward)\b/i.test(_lb);
+    if (_isAck) return json({ action: 'no_action', reasoning: 'buyer_ack after msg_checking — no reply needed', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+    return json({ action: 'still_checking', reasoning: 'Buyer follow-up after msg_checking; Forte row ' + (_openForte.row || '?') + ' open, no OEM price yet', mpn: requestMpn, buyer_email: null, draft_body: 'We are still checking on it. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.', forte_entry: null, oem_delete_row: null });
+  }
   if (oem_results.length > 0 && !_isListingReply && (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
     const hasBuyerTp = _tpDetect(thread_content);
     // Stan QUOTED takes priority — if Stan has a quoted price for this MPN, let the
@@ -1440,6 +1452,7 @@ async function handleEmailAgent(request, env) {
       (thread_content || '').match(/t\/p\s*[:=]?\s*\$?([\d.]+)/i) ||
       (thread_content || '').match(/\btp\s*[:=]\s*\$?([\d.]+)/i) ||
       (thread_content || '').match(/\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?(\d+(?:\.\d+)?)/i) ||
+      (thread_content || '').match(/\b(?:tp|target(?:\s*price)?)\s*\$\s*(\d+(?:\.\d+)?)/i) ||
       (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
       (thread_content || '').match(/([\d]+(?:\.\d+)?)\s*usd\b/i) ||    // "4usd", "4 usd"
       (thread_content || '').match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
@@ -1530,6 +1543,7 @@ async function handleEmailAgent(request, env) {
       /t\/p\s*[:=]?\s*\$?[\d.]/i.test(_lc) ||
       /\btp\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
       /\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?\d/i.test(_lc) ||   // "tp at 0.5" (Goldney)
+      /\b(?:tp|target(?:\s*price)?)\s*\$\s*\d/i.test(_lc) ||                 // "TP $10" (Fuzhou Yongbo)
       /\bprice\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
       /[\d]+(?:\.\d+)?\s*usd\b/i.test(_lc) ||           // Bug 72: "4usd", "4 usd" — no trailing unit needed
@@ -3324,8 +3338,10 @@ async function buildScanPayload(threadId, token, env) {
     }
   }
 
-  if (isICS) {
-    const icsHtml = extractMimeText(lastMsg.payload, true) || extractMimeText(lastMsg.payload);
+  // Buyer follow-ups ("TP $10", "ok thanks") are plain replies — the TP/qty still live in the original IC Source table
+  const _icsMsg = isICS ? lastMsg : msgs.find(m => /icsource|autosend/i.test(getHdr(m, 'From')));
+  if (_icsMsg) {
+    const icsHtml = extractMimeText(_icsMsg.payload, true) || extractMimeText(_icsMsg.payload);
     payload.icsource_html = icsHtml;
     // Pre-extract buyer email at code level â€" don't rely on AI to avoid SAFETY ABORT
     if (icsHtml) {
@@ -3654,6 +3670,7 @@ async function cronScanInbox(env) {
 
       const payload = await buildScanPayload(tid, token, env);
       if (!payload) continue;
+      if (await env.DB.prepare("SELECT 1 FROM rules WHERE type='acked_msg' AND key=?").bind(payload.last_message_id).first()) continue;
 
       // Call handleEmailAgent directly (no HTTP round-trip) via fake Request
       const fakeReq = new Request('https://x/api/email-agent', {
@@ -3668,6 +3685,10 @@ async function cronScanInbox(env) {
         const why = !decision ? 'null_decision' : decision.error ? 'error:'+decision.error : 'no_action';
         await hubLog(env, 'email_automation', 'debug', `cronScanInbox: ${source} skip action=${why} tid=${tid} mpn=${payload.mpn||'?'}`, { reasoning: decision?.reasoning });
         // Improvement #8: log no_action to pending_issues so missed emails are visible in the dashboard
+        if (decision?.reasoning?.startsWith('buyer_ack')) {
+          await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, tid).run().catch(() => {});
+          continue;
+        }
         const isInventoryRetry = decision?.reasoning?.includes('inventory_lookup_failed');
         if (!isInventoryRetry) {
           await env.DB.prepare("INSERT INTO pending_issues (type, thread_id, subject, details, created_at) VALUES (?, ?, ?, ?, datetime('now'))")
@@ -4140,6 +4161,22 @@ async function cronProcessCommandQueue(env) {
           await workerAddToForteSheet(env, mpn, qty, data.tp || data.buyer_tp || data.targetPrice || data.target_price || '', data.country || '');
           await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: add_forte_entry ${mpn} qty=${qty}`);
         }
+
+      } else if (cmd.type === 'update_forte_cells') {
+        // { row, mpn, cells: { D: 10, H: 5.5 } } — writes only if col B of that row matches mpn
+        const row = parseInt(data.row);
+        const cells = data.cells || {};
+        if (!row || !data.mpn || !Object.keys(cells).length) throw new Error('update_forte_cells: row, mpn, cells required');
+        const cur = ((await sheetsGet(env, FORTE_SHEET_ID, `B${row}`)).values || [[]])[0][0] || '';
+        if (normalizeMPN(cur) !== normalizeMPN(data.mpn)) throw new Error(`update_forte_cells: row ${row} is "${cur}", not ${data.mpn}`);
+        const upd = Object.entries(cells).filter(([c]) => /^[A-K]$/.test(c)).map(([c, v]) => ({ range: `${c}${row}`, values: [[v]] }));
+        const ft = await getGmailToken(env);
+        const vj = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values:batchUpdate`, {
+          method: 'POST', headers: { Authorization: 'Bearer ' + ft, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: upd }),
+        }).then(r => r.json());
+        if (vj.error) throw new Error('update_forte_cells: ' + JSON.stringify(vj.error));
+        await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: update_forte_cells row ${row} ${data.mpn} ${JSON.stringify(cells)}`);
 
       } else if (cmd.type === 'replace_oem_row') {
         // Correct a wrongly-restored OEM EXCESS row: delete existing row by MPN, append correct row_data
