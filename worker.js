@@ -839,10 +839,28 @@ CRITICAL: NEVER set action or draft_body to "claude". "claude" is NOT a valid ac
 // â"€â"€ Inventory self-lookup helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const OEM_WEB_APP = 'https://script.google.com/macros/s/AKfycbyuuBmiYVW5mKI82D5YQGPh1nNGLJZzlLKoxuOdtmOUwUe75VlhhakqgwKooZu5LHFK/exec?key=baSDJ%23444FE%268';
 
+// Sheets return all-digit MPNs (5602192) and DCs (2016) as numbers — every .trim()/.toUpperCase() downstream
+// then crashes the whole thread (Vyrian 5602192, Bug 91). Coerce text fields to strings once, at the source.
+const _INV_TEXT_FIELDS = ['mpn', 'man', 'dc', 'notes', 'colB', 'colC', 'status', 'country', 'history', 'johnQuoted', 'johnBuy', 'buyerTP'];
+function normInvRows(rows) {
+  if (!Array.isArray(rows)) return rows;
+  return rows.map(r => {
+    if (!r || typeof r !== 'object') return r;
+    const o = { ...r };
+    for (const f of _INV_TEXT_FIELDS) if (o[f] !== undefined && o[f] !== null && typeof o[f] !== 'string') o[f] = String(o[f]);
+    return o;
+  });
+}
+function normInv(inv) {
+  if (!inv || typeof inv !== 'object') return inv;
+  for (const k of ['oem_excess', 'in_stock', 'stan_sheet', 'forte_sheet']) if (Array.isArray(inv[k])) inv[k] = normInvRows(inv[k]);
+  return inv;
+}
+
 async function lookupInventory(mpn) {
   try {
     const resp = await fetch(`${OEM_WEB_APP}&mpn=${encodeURIComponent(mpn)}`, { redirect: 'follow' });
-    return resp.ok ? await resp.json() : null;
+    return resp.ok ? normInv(await resp.json()) : null;
   } catch(e) { return null; }
 }
 
@@ -861,7 +879,7 @@ async function extractMpnFromThread(subject, content, env) {
     const data = await res.json();
     await logApiCost(env, 'claude-haiku-4-5-20251001', 'mpn-extract', data.usage, null, null);
     const parsed = JSON.parse(data.content[0].text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim());
-    return parsed.mpn || null;
+    return parsed.mpn ? String(parsed.mpn).trim() : null;
   } catch(e) { return null; }
 }
 
@@ -1060,10 +1078,10 @@ async function handleEmailAgent(request, env) {
     }
   }
   // Use let so we can override if Apps Script sends empty/no inventory (new slim mode)
-  let oem_results      = body.oem_results      ?? null;
-  let in_stock_results = body.in_stock_results ?? null;
-  let stan_results     = body.stan_results     ?? null;
-  let forte_results    = body.forte_results    ?? null;
+  let oem_results      = normInvRows(body.oem_results      ?? null);
+  let in_stock_results = normInvRows(body.in_stock_results ?? null);
+  let stan_results     = normInvRows(body.stan_results     ?? null);
+  let forte_results    = normInvRows(body.forte_results    ?? null);
 
   // Self-lookup: if Apps Script sends raw thread without pre-fetched inventory,
   // worker extracts MPN via AI (reads full body, not regex on subject) then fetches inventory.
@@ -2019,7 +2037,7 @@ async function handleGetInstockRow(url, env) {
   const tok = await getGmailToken(env);
   const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${IN_STOCK_ID}/values/A${row}:K${row}`, { headers: { Authorization: 'Bearer ' + tok } }).then(r => r.json());
   const vals = (res.values || [[]])[0] || [];
-  return json({ row, mpn: vals[0]||'', man: vals[1]||'', dc: vals[2]||'', qty: vals[3]||'', notes: vals[4]||'', price_to_quote: vals[5]||'' });
+  return json({ row, mpn: vals[0]||'', man: vals[1]||'', dc: vals[2]||'', qty: vals[3]||'', notes: vals[4]||'', price_to_quote: vals[5]||'', raw: vals });
 }
 
 async function handleGetForteRow(url, env) {
@@ -3761,8 +3779,17 @@ async function cronScanInbox(env) {
           }
         } catch(e2) {}
       }
-      // Remove the rfq label on exception too — let the next cron retry rather than permanently skipping
-      if (rfqLabelId) await gPost('/threads/' + tid + '/modify', { removeLabelIds: [rfqLabelId] }).catch(() => {});
+      // Remove the rfq AND agent labels on exception so the next cron retries (agent label was never removed →
+      // Vyrian 5602192 crashed once and sat forever). Give up after 3 crashes and surface it as a pending issue.
+      const _crash = await env.DB.prepare("SELECT value FROM rules WHERE type='crash_count' AND key=?").bind(tid).first().catch(() => null);
+      const _n = (_crash ? parseInt(_crash.value) || 0 : 0) + 1;
+      await env.DB.prepare(_crash ? "UPDATE rules SET value=? WHERE type='crash_count' AND key=?" : "INSERT INTO rules (value, type, key) VALUES (?, 'crash_count', ?)").bind(String(_n), tid).run().catch(() => {});
+      if (_n < 3) {
+        const _rm = [rfqLabelId, agentLabelId].filter(Boolean);
+        if (_rm.length) await gPost('/threads/' + tid + '/modify', { removeLabelIds: _rm }).catch(() => {});
+      } else {
+        await env.DB.prepare("INSERT INTO pending_issues (type, thread_id, subject, details, created_at) VALUES ('crash', ?, NULL, ?, datetime('now'))").bind(tid, String(e.message).slice(0, 500)).run().catch(() => {});
+      }
     }
   }
   // Improvement #9: reset subrequest error counter after a clean run (no errors)
