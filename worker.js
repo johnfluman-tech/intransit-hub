@@ -3564,8 +3564,8 @@ async function executeDecisionCron(decision, payload, token, env) {
       await hubLog(env, 'email_automation', 'error', 'cronScanInbox: SAFETY ABORT no external replyTo for ' + threadId);
       // Record it so the thread isn't rebuilt and aborted again every 5 minutes
       if (payload.last_message_id) await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, threadId).run().catch(() => {});
-      await env.DB.prepare("INSERT INTO pending_issues (type, thread_id, subject, details, created_at) VALUES ('safety_abort', ?, ?, ?, datetime('now'))")
-        .bind(threadId, payload.subject || null, JSON.stringify({ action, reasoning: decision.reasoning || null })).run().catch(() => {});
+      await env.DB.prepare("INSERT INTO pending_issues (thread_id, mpn, description, context) VALUES (?, ?, ?, ?)")
+        .bind(threadId, payload.mpn || null, '[safety_abort] ' + (payload.subject || ''), JSON.stringify({ action, reasoning: decision.reasoning || null })).run().catch(() => {});
       return;
     }
 
@@ -3876,8 +3876,8 @@ async function cronScanInbox(env) {
         const _tries = (_rc ? parseInt(_rc.value) || 0 : 0) + 1;
         await env.DB.prepare(_rc ? "UPDATE rules SET value=? WHERE type='retry_count' AND key=?" : "INSERT INTO rules (value, type, key) VALUES (?, 'retry_count', ?)").bind(String(_tries), _rk).run().catch(() => {});
         if (_tries >= 4) {
-          await env.DB.prepare("INSERT INTO pending_issues (type, thread_id, subject, details, created_at) VALUES (?, ?, ?, ?, datetime('now'))")
-            .bind('no_action', tid, payload?.subject || null, JSON.stringify({ why, reasoning: decision?.reasoning, source, tries: _tries })).run().catch(() => {});
+          await env.DB.prepare("INSERT INTO pending_issues (thread_id, mpn, description, context) VALUES (?, ?, ?, ?)")
+            .bind(tid, payload?.mpn || null, '[no_action] ' + (payload?.subject || ''), JSON.stringify({ why, reasoning: decision?.reasoning, source, tries: _tries })).run().catch(() => {});
           await _ack();
           await hubLog(env, 'email_automation', 'error', `cronScanInbox: gave up after ${_tries} tries tid=${tid} — logged to pending_issues`, { reasoning: decision?.reasoning });
           continue;
@@ -3911,7 +3911,7 @@ async function cronScanInbox(env) {
         const _rm = [rfqLabelId, agentLabelId].filter(Boolean);
         if (_rm.length) await gPost('/threads/' + tid + '/modify', { removeLabelIds: _rm }).catch(() => {});
       } else {
-        await env.DB.prepare("INSERT INTO pending_issues (type, thread_id, subject, details, created_at) VALUES ('crash', ?, NULL, ?, datetime('now'))").bind(tid, String(e.message).slice(0, 500)).run().catch(() => {});
+        await env.DB.prepare("INSERT INTO pending_issues (thread_id, mpn, description, context) VALUES (?, NULL, ?, NULL)").bind(tid, '[crash] ' + String(e.message).slice(0, 500)).run().catch(() => {});
       }
     }
   }
