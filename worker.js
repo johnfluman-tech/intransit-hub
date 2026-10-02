@@ -905,6 +905,12 @@ function parseICSourceHTML(html) {
       const addr = em[1].toLowerCase();
       if (!addr.includes('intransittech.com') && !addr.includes('icsource.com')) return em[1];
     }
+    // Plain-text layout ("*** sent to you from X via ICSource ***", "Email: buyer@x.com<br/>") has no mailto links
+    const plain = h.replace(/<[^>]+>/g, ' ').match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [];
+    for (const a of plain) {
+      const al = a.toLowerCase();
+      if (!al.includes('intransittech.com') && !al.includes('icsource.com') && !/noreply|no-reply/.test(al)) return a;
+    }
     return null;
   }
 
