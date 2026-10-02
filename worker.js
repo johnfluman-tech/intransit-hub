@@ -24,7 +24,7 @@ const CORS = {
 };
 
 const MODEL_PRICING = {
-  'claude-haiku-4-5-20251001': { input: 0.80,  output: 4.00  },
+  'claude-haiku-4-5-20251001': { input: 1.00,  output: 5.00  },
   'claude-sonnet-4-6':         { input: 3.00,  output: 15.00 },
 };
 
@@ -47,17 +47,6 @@ export default {
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
     if (url.pathname === '/api/version') return json({ v: 'gmail-v1' });
-    if (url.pathname === '/api/gmail-token-test') {
-      try {
-        const r = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: `client_id=${encodeURIComponent(env.GMAIL_CLIENT_ID)}&client_secret=${encodeURIComponent(env.GMAIL_CLIENT_SECRET)}&refresh_token=${encodeURIComponent(env.GMAIL_REFRESH_TOKEN)}&grant_type=refresh_token`
-        });
-        const text = await r.text();
-        return new Response(JSON.stringify({ status: r.status, body: text }), { headers: { 'Content-Type': 'application/json', ...CORS } });
-      } catch(e) { return new Response(JSON.stringify({ error: String(e) }), { headers: { 'Content-Type': 'application/json', ...CORS } }); }
-    }
 
     // Sidebar routes use HMAC token auth â€" no HUB_SECRET header needed (browser requests)
     if (url.pathname === '/sidebar' && request.method === 'GET') {
@@ -1077,6 +1066,39 @@ async function handleEmailAgent(request, env) {
       if (!body.mpn && ic.mpn)           body.mpn = ic.mpn;
     }
   }
+
+  // Thread guards — run BEFORE inventory lookup and every early-return shortcut (own_stock,
+  // still_checking, request_tp, no_bid, listing_removed) so none of them can bypass these rules.
+  // 'skip_thread:' reasons are acked by cronScanInbox (no retry until a new message arrives).
+  {
+    const _skip = why => json({ action: 'no_action', reasoning: 'skip_thread: ' + why, mpn: body.mpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+    const _lf = (body.last_from || '').toLowerCase();
+    // Never put buyer-facing drafts in any thread David/Forte is on (David no-stk handled by cronCheckDavidNoStock)
+    if (/fortetechno\.com|fortecomp\.com/.test(_lf) || /From:[^\n]*(fortetechno\.com|fortecomp\.com)/i.test(thread_content)) {
+      return _skip('David/Forte is on this thread');
+    }
+    if (_lf.includes('intransittech.com')) return _skip('last sender is @intransittech.com');
+    // Blocked domains — catches buyer domains buried in messagesend@/autosend@ bodies too
+    try {
+      const { results: blockRows } = await env.DB.prepare(`SELECT key FROM rules WHERE type = 'blocked_domain'`).all();
+      const blockedSet = new Set(
+        blockRows && blockRows.length
+          ? blockRows.map(r => r.key.toLowerCase())
+          : ['sourceschip.com','bulechip.com','feelchips.com','chip-wintrading.com','qizhongsmart.com',
+             'heshengwei.com','qixunmicro-ic.com','jxcsilicon.com','xhtx-ic.com','yudexin-tech.com',
+             'lepaitek.cn','amperium.com.tr','stjkelectronics.com']
+      );
+      const PASSTHROUGH_DOMAINS = new Set(['intransittech.com','netcomponents.com','icsource.com','gmail.com']);
+      const cands = [sender, icBuyerEmail, body.ics_buyer_email, body.nc_buyer_email]
+        .concat((thread_content || '').match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || []);
+      for (const email of cands) {
+        const domain = (email || '').replace(/.*@/, '').toLowerCase();
+        if (domain && !PASSTHROUGH_DOMAINS.has(domain) && blockedSet.has(domain)) {
+          return json({ action: 'no_bid', reasoning: `skip_thread: buyer domain ${domain} is blocked`, mpn: null, buyer_email: null, draft_body: null, forte_entry: null });
+        }
+      }
+    } catch(e) {}
+  }
   // Use let so we can override if Apps Script sends empty/no inventory (new slim mode)
   let oem_results      = normInvRows(body.oem_results      ?? null);
   let in_stock_results = normInvRows(body.in_stock_results ?? null);
@@ -1151,6 +1173,19 @@ async function handleEmailAgent(request, env) {
           if (val) toFetch[i].price_to_quote = val;
         });
       } catch(e) { /* price_to_quote stays null, fall through to D1 / FILL IN */ }
+    }
+  }
+
+  // Multi-MPN: the engine routes ONE part. If the first MPN has no inventory but an extra MPN does, promote that
+  // extra MPN — otherwise its merged rows get filtered out below and the buyer is told "no longer available".
+  if (Array.isArray(body.extra_mpns) && body.extra_mpns.length > 0 && body.mpn) {
+    const _hits = m => [...(oem_results || []), ...(in_stock_results || []), ...(stan_results || [])].some(r => isMpnMatch(m, r.mpn));
+    if (!_hits(body.mpn)) {
+      const _promo = body.extra_mpns.find(_hits);
+      if (_promo) {
+        await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: multi-MPN — ${body.mpn} has no stock, routing on ${_promo}`, { subject });
+        body.mpn = _promo;
+      }
     }
   }
 
@@ -1258,9 +1293,22 @@ async function handleEmailAgent(request, env) {
       inventoryLookupSucceeded = true;
       await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: WH3 in email body — synthesized in_stock row; stan_results=${stan_results.length} rows from direct lookup`, { subject });
     } else {
-      await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: inventory_lookup_failed — returning no_action for retry`, { subject });
-      return json({ action: 'no_action', reasoning: 'inventory_lookup_failed — will retry next cron run', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+      const _why = requestMpn ? 'inventory_lookup_failed' : 'inventory_lookup_failed (mpn_not_found — no MPN could be extracted)';
+      await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: ${_why} — returning no_action for retry`, { subject });
+      return json({ action: 'no_action', reasoning: _why + ' — will retry next cron run', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
     }
+  }
+
+  // Stan variant rule: a Stan row only counts when its MPN (col E) is the buyer's EXACT part (NOPB/TRPBF/PBF/TR
+  // suffix ok). Variant rows (LTC3780EGN#TRPBF-5 vs LTC3780EGN) are set aside here, once, so no later
+  // stan_quoted path/guard can quote a different variant's price. NOTE: a colB "PART QUOTING [X] ending" remark
+  // does NOT disqualify an exact-MPN row — John wants those quoted verbatim (AR8035-AL1A, Sep 2026).
+  let stanVariantRows = [];
+  if (requestMpn && Array.isArray(stan_results) && stan_results.length > 0) {
+    const _nS = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/(NOPB|TRPBF|PBF|TR)$/, '');
+    const _isExactStan = r => _nS(r.mpn) === _nS(requestMpn);
+    stanVariantRows = stan_results.filter(r => !_isExactStan(r));
+    stan_results = stan_results.filter(_isExactStan);
   }
 
   // Deterministic own_stock pre-check: if exact-match non-warehouse IN STOCK rows exist,
@@ -1286,6 +1334,26 @@ async function handleEmailAgent(request, env) {
       const _totalQty = _exactOwn.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
       const _draftBody = `We have the following available:\n\nMPN: ${_mpnKey}${_r.man?'\nManufacturer: '+_r.man:''}${_r.dc?'\nDC: '+_r.dc:''}\nQTY: ${_totalQty||'?'}\nPrice: ${_priceStr}\n\nPlease let us know if you would like to proceed.`;
       return json({ action: 'own_stock', reasoning: 'Deterministic: exact own IN STOCK match â€" bypassing AI', mpn: requestMpn, buyer_email: null, draft_body: _draftBody, forte_entry: null, oem_delete_row: null });
+    }
+  }
+
+  // Similar-MPN rule (runs before TP/min-line/quote logic): buyer asked for X, our OEM/own stock only has a
+  // close variant (PMEG3020EJ vs PMEG3020EJ115, MAX232 vs MAX232A) → ask if they can use OUR part number first.
+  // NOPB / TR / T&R suffixes are the same part. Once we've asked, the buyer's answer flows through normally.
+  if (requestMpn && !/would you be able to use this part number/i.test(thread_content || '')) {
+    const _n = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    // OEM EXCESS often glues the package onto the MPN ("PCM1803ADBRSSOP-20") — same part, not a variant
+    const _base = s => _n(s).replace(/(?:TSSOP|SSOP|MSOP|SOIC|SOP|LQFP|TQFP|QFP|QFN|DFN|BGA|PDIP|DIP|PLCC|SOT|TO)\d*$/, '').replace(/(NOPB|T&R|TR)$/, '');
+    const _inv = [
+      ...(oem_results || []).map(r => r.mpn),
+      ...(in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).map(r => r.mpn),
+    ].filter(Boolean).map(String);
+    const _exact = _inv.some(m => _n(m) === _n(requestMpn) || _base(m) === _base(requestMpn));
+    const _similar = [...new Set(_inv.filter(m => isMpnMatch(requestMpn, m)))];
+    if (!_exact && _similar.length > 0) {
+      const _ours = _similar[0].trim();
+      return json({ action: 'ask_similar_mpn', reasoning: `Deterministic: buyer asked ${requestMpn}, inventory has variant ${_similar.join(', ')}`, mpn: requestMpn, buyer_email: null,
+        draft_body: `We have ${_ours} available — would you be able to use this part number? Please let us know and we will get back to you right away.`, forte_entry: null, oem_delete_row: null });
     }
   }
 
@@ -1376,32 +1444,7 @@ async function handleEmailAgent(request, env) {
     }
   }
 
-  // Pre-flight blocked-domain check â€" catches buyer domains buried in messagesend@/autosend@ bodies
-  // (the AI prompt lists blocked domains but can't reliably match them when the buyer email is inside body text)
-  try {
-    const { results: blockRows } = await env.DB.prepare(
-      `SELECT key FROM rules WHERE type = 'blocked_domain'`
-    ).all();
-    const blockedSet = new Set(
-      blockRows && blockRows.length
-        ? blockRows.map(r => r.key.toLowerCase())
-        : ['sourceschip.com','bulechip.com','feelchips.com','chip-wintrading.com','qizhongsmart.com',
-           'heshengwei.com','qixunmicro-ic.com','jxcsilicon.com','xhtx-ic.com','yudexin-tech.com',
-           'lepaitek.cn','amperium.com.tr','stjkelectronics.com']
-    );
-    const PASSTHROUGH_DOMAINS = new Set(['intransittech.com','netcomponents.com','icsource.com','gmail.com']);
-    const senderDomainLC = (sender || '').replace(/.*@/, '').toLowerCase();
-    if (blockedSet.has(senderDomainLC)) {
-      return json({ action: 'no_bid', reasoning: `Sender domain ${senderDomainLC} is blocked`, mpn: null, buyer_email: null, draft_body: null, forte_entry: null });
-    }
-    const emailsInBody = (thread_content || '').match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [];
-    for (const email of emailsInBody) {
-      const domain = email.replace(/.*@/, '').toLowerCase();
-      if (!PASSTHROUGH_DOMAINS.has(domain) && blockedSet.has(domain)) {
-        return json({ action: 'no_bid', reasoning: `Buyer domain ${domain} is blocked`, mpn: null, buyer_email: null, draft_body: null, forte_entry: null });
-      }
-    }
-  } catch(e) {}
+  // (blocked-domain, David and internal-thread guards run at the top of handleEmailAgent)
 
   let decision;
 
@@ -1434,7 +1477,7 @@ async function handleEmailAgent(request, env) {
     bill_handle:      'Bill will help with this request',
     add_to_stan:      'Our warehouse is checking on the details and I will update you as soon as possible. Thank you for your patience.',
     listing_removed:  'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.',
-    ask_similar_mpn:  'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.',
+    // ask_similar_mpn: no fixed template — the draft must name OUR inventory MPN (built in the similar-MPN pre-check)
   };
 
   // --- Deterministic decision engine (replaces Claude AI call) ---
@@ -1458,31 +1501,36 @@ async function handleEmailAgent(request, env) {
     if (_lastFromLC2.includes('intransittech.com')) {
       decision = { action: 'no_action', reasoning: 'Deterministic: last sender is @intransittech.com — internal, no action', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null };
     } else {
-    const _own  = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || ''));
+    // Own stock must be the buyer's exact part (NOPB/TR suffix ok) — a fuzzy web-app row must never be quoted as their MPN
+    const _nO = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), _bO = s => _nO(s).replace(/(NOPB|T&R|TR)$/, '');
+    const _own  = (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '') &&
+      (!requestMpn || _nO(r.mpn) === _nO(requestMpn) || _bO(r.mpn) === _bO(requestMpn)));
     const _wh3  = (in_stock_results || []).filter(r => /Warehouse#\d/i.test(r.notes || ''));
     const _stanQ = (stan_results || []).find(r => r.status === 'QUOTED' && r.colB);
     const _billOnly = (oem_results || []).length > 0 && (oem_results || []).every(r => /BILL EXT/i.test(r.notes || ''));
     const _hasOem   = (oem_results || []).some(r => !/BILL EXT/i.test(r.notes || ''));
     const _has2k    = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
     const _hasTp    = _tpDetect(thread_content) || _lastMsgTp(body.last_msg_body) !== null;
-    const _tpMatch = (thread_content || '').match(/tgtprice=([\d.]+)/i) ||
-      (thread_content || '').match(/(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*([\d.]+)/i) ||
-      (thread_content || '').match(/\bprice\s*[:=]\s*\$?([\d.]+)/i) ||
-      (thread_content || '').match(/(?:target|tgt)\s*[:=]\s*\$?([\d.]+)/i) ||
-      (thread_content || '').match(/t\/p\s*[:=]?\s*\$?([\d.]+)/i) ||
-      (thread_content || '').match(/\btp\s*[:=]\s*\$?([\d.]+)/i) ||
-      (thread_content || '').match(/\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?(\d+(?:\.\d+)?)/i) ||
-      (thread_content || '').match(/\b(?:tp|target(?:\s*price)?)\s*\$\s*(\d+(?:\.\d+)?)/i) ||
-      (thread_content || '').match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
-      (thread_content || '').match(/([\d]+(?:\.\d+)?)\s*usd\b/i) ||    // "4usd", "4 usd"
-      (thread_content || '').match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
-      (thread_content || '').match(/([\d]+(?:\.\d+)?)[$]/i) ||          // "4$", "4.50$"
-      (thread_content || '').match(/([\d]+(?:\.\d+)?)\s*dollars?\b/i) || // "4 dollars"
-      (thread_content || '').match(/([\d]+(?:\.\d+)?)\s*(?:\/pcs?|\/ea|per\s*(?:pc|ea|piece))\b/i) || // "4/pc"
-      (thread_content || '').match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m) ||
-      (thread_content || '').match(/(?:order|price|priced?|@)\s*@\s*\$?([\d]+(?:\.\d+)?)/i) ||
-      (thread_content || '').match(/(?:^|[\s,;])@\s*\$?([\d]+(?:\.\d+)?)(?:\s|$)/m);
-    const _tpVal = _tpMatch ? parseFloat(_tpMatch[1]) : _lastMsgTp(body.last_msg_body);
+    const _tcTp = _stripNotes(thread_content);  // never parse our own FORTE_QUOTED_PRICE note as the buyer's TP
+    const _tpMatch = _tcTp.match(/tgtprice=(\d*\.?\d+)/i) ||
+      _tcTp.match(/(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*(\d*\.?\d+)/i) ||
+      _tcTp.match(/\bprice\s*[:=]\s*\$?(\d*\.?\d+)/i) ||
+      _tcTp.match(/(?:target|tgt)\s*[:=]\s*\$?(\d*\.?\d+)/i) ||
+      _tcTp.match(/t\/p\s*[:=]?\s*\$?(\d*\.?\d+)/i) ||
+      _tcTp.match(/\btp\s*[:=]\s*\$?(\d*\.?\d+)/i) ||
+      _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?(\d+(?:\.\d+)?)/i) ||
+      _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s*\$\s*(\d+(?:\.\d+)?)/i) ||
+      _tcTp.match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
+      _tcTp.match(/([\d]+(?:\.\d+)?)\s*usd\b/i) ||    // "4usd", "4 usd"
+      _tcTp.match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
+      _tcTp.match(/([\d]+(?:\.\d+)?)[$]/i) ||          // "4$", "4.50$"
+      _tcTp.match(/([\d]+(?:\.\d+)?)\s*dollars?\b/i) || // "4 dollars"
+      _tcTp.match(/([\d]+(?:\.\d+)?)\s*(?:\/pcs?|\/ea|per\s*(?:pc|ea|piece))\b/i) || // "4/pc"
+      _tcTp.match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m) ||
+      _tcTp.match(/(?:order|price|priced?|@)\s*@\s*\$?([\d]+(?:\.\d+)?)/i) ||
+      _tcTp.match(/(?:^|[\s,;])@\s*\$?([\d]+(?:\.\d+)?)(?:\s|$)/m);
+    const _tpParsed = _tpMatch ? parseFloat(_tpMatch[1]) : NaN;
+    const _tpVal = (_tpParsed > 0 && _tpParsed < 100000) ? _tpParsed : _lastMsgTp(body.last_msg_body);  // NaN/0 → no TP
 
     // Extract buyer qty from thread content
     const _qtyM = (thread_content || '').match(/QtyReq=(\d+)/i) ||
@@ -1525,7 +1573,12 @@ async function handleEmailAgent(request, env) {
       else        { _act = _has2k ? 'request_tp_2000' : 'request_tp_500'; _rsn = 'BILL EXT no TP'; }
     } else if (_hasOem) {
       const _minVal = _has2k ? 2000 : 500;
-      if (_tpVal && _buyerQty && (_tpVal * _buyerQty) < _minVal) {
+      if (!_tpVal) {
+        // No usable TP (pre-check bypassed, or "no target price") → always ask; never msg_checking at a $0.01 sentinel.
+        // If we already told the buyer we're checking, a follow-up gets "still checking", not a second TP request.
+        if (/we are checking on it now/i.test(thread_content || '')) { _act = 'still_checking'; _body = DRAFT_TEMPLATES.still_checking; _rsn = 'OEM EXCESS, already checking, no new TP'; }
+        else { _act = _has2k ? 'request_tp_2000' : 'request_tp_500'; _body = DRAFT_TEMPLATES[_act]; _rsn = 'OEM EXCESS, no usable TP'; }
+      } else if (_buyerQty && (_tpVal * _buyerQty) < _minVal) {
         _act = 'below_min_line';
         const _minNeeded = Math.ceil(_minVal / _tpVal);
         _body = `Thank you for your inquiry. Our minimum line value for this item is $${_minVal}. At your target price of $${_tpVal} per piece, we would require a minimum of ${_minNeeded} pieces. If you are able to adjust your quantity, please let us know and we will get right back to you. Thank you for the opportunity.`;
@@ -1539,11 +1592,14 @@ async function handleEmailAgent(request, env) {
       }
     } else if (_stanQ) {
       _act = 'stan_quoted'; _body = buildStanQuotedBody(_stanQ, in_stock_results); _rsn = 'Stan QUOTED only';
+    } else if (stanVariantRows.length > 0) {
+      _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'Stan has a different variant only — warehouse to confirm';
     } else {
       _act = 'no_bid'; _rsn = 'No inventory';
     }
     // msg_checking/bill_handle guards check target_price > 0; use 0.01 sentinel when TP text found but no parseable number
-    const _finalTp = (_act === 'msg_checking' || _act === 'bill_handle') ? (_tpVal || 0.01) : _tpVal;
+    // (msg_checking always has a real _tpVal now; sentinel kept only for bill_handle, whose TP text may be unparseable)
+    const _finalTp = _act === 'bill_handle' ? (_tpVal || 0.01) : _tpVal;
     // QTY fallback rule: buyer's qty, else our WH3 stock qty — Stan/RFQ sheet col G must never be blank
     const _wh3Qty = _wh3.reduce((s, r) => s + (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0), 0);
     const _decQty = _buyerQty || (_act === 'add_to_stan' || _act === 'stan_quoted' ? (_wh3Qty || null) : null);
@@ -1568,17 +1624,22 @@ async function handleEmailAgent(request, env) {
     return v && v > 0 && v < 100000 ? v : null;
   }
 
+  // Our own injected notes ([FORTE_QUOTED_PRICE: John previously quoted $0.40/each...]) must never be read as the buyer's TP
+  function _stripNotes(tc) { return String(tc || '').replace(/^\[(?:FORTE_QUOTED_PRICE|SIMILAR_MPN|EXTRA_MPN_INVENTORY)[^\n]*\n*/gm, ''); }
+
   function _tpDetect(tc) {
+    tc = _stripNotes(tc);
     const _lc = (tc || '').toLowerCase();
+    // Every pattern needs a real digit — "No target price." used to match on the trailing "." (→ $0.01 decline)
     return (
       /tgtprice=\d/i.test(tc) ||
-      /(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*[\d.]/i.test(_lc) ||
-      /(?:target|tgt)\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
-      /t\/p\s*[:=]?\s*\$?[\d.]/i.test(_lc) ||
-      /\btp\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
+      /(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*\.?\d/i.test(_lc) ||
+      /(?:target|tgt)\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
+      /t\/p\s*[:=]?\s*\$?\.?\d/i.test(_lc) ||
+      /\btp\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?\d/i.test(_lc) ||   // "tp at 0.5" (Goldney)
       /\b(?:tp|target(?:\s*price)?)\s*\$\s*\d/i.test(_lc) ||                 // "TP $10" (Fuzhou Yongbo)
-      /\bprice\s*[:=]\s*\$?[\d.]/i.test(_lc) ||
+      /\bprice\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
       /[\d]+(?:\.\d+)?\s*usd\b/i.test(_lc) ||           // Bug 72: "4usd", "4 usd" — no trailing unit needed
       /usd\s*[\d]+(?:\.\d+)?/i.test(_lc) ||
@@ -3314,7 +3375,9 @@ function extractMpnHint(subject) {
   if (!subject) return null;
   const cleaned = subject.replace(/--.*$/, '').trim();
   const tokens = cleaned.split(/[\s,;|\/\[\]()]+/);
-  const cands = tokens.filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 4 && !/^\d+(pcs?|k|m|units?)?$/i.test(t) && !_MPN_GENERIC_WORDS.has(t.toUpperCase()));
+  const cands = tokens.filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 4 && !/^\d+(pcs?|k|m|units?)?$/i.test(t) && !_MPN_GENERIC_WORDS.has(t.toUpperCase())
+    // Buyer reference numbers (VRFQ184567, RFQ-12345, PO#5521, REQ00912) are not MPNs
+    && !/^[A-Z]{0,3}(RFQ|RFP|PO|REQ|INQ|QUO|QTE|CASE|TKT)[-#_:]?\d{3,}$/i.test(t));
   return cands[0] || null;
 }
 
@@ -3481,6 +3544,10 @@ async function executeDecisionCron(decision, payload, token, env) {
       a.includes('messagesend@netcomponents') || a.includes('autosend@icsource') || a.includes('partalert@netcomponents');
     if (isRelay(replyTo)) {
       await hubLog(env, 'email_automation', 'error', 'cronScanInbox: SAFETY ABORT no external replyTo for ' + threadId);
+      // Record it so the thread isn't rebuilt and aborted again every 5 minutes
+      if (payload.last_message_id) await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, threadId).run().catch(() => {});
+      await env.DB.prepare("INSERT INTO pending_issues (type, thread_id, subject, details, created_at) VALUES ('safety_abort', ?, ?, ?, datetime('now'))")
+        .bind(threadId, payload.subject || null, JSON.stringify({ action, reasoning: decision.reasoning || null })).run().catch(() => {});
       return;
     }
 
@@ -3738,6 +3805,15 @@ async function cronScanInbox(env) {
       if (!payload) continue;
       if (await env.DB.prepare("SELECT 1 FROM rules WHERE type IN ('acked_msg','drafted_msg') AND key=?").bind(payload.last_message_id).first()) continue;
 
+      // No external buyer anywhere (all senders internal/Forte, no IC Source/netCOMPONENTS buyer) → nothing to reply to.
+      // Ack it so it isn't rebuilt every run (root cause of the own_stock → SAFETY ABORT loop).
+      const _ext = payload.ics_buyer_email || payload.nc_buyer_email || payload.sender || '';
+      if (!_ext || /intransittech\.com|messagesend@netcomponents|autosend@icsource|partalert@netcomponents/i.test(_ext)) {
+        await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, tid).run().catch(() => {});
+        await hubLog(env, 'email_automation', 'run', `cronScanInbox: ${source} skip — no external buyer on thread tid=${tid}`);
+        continue;
+      }
+
       // Call handleEmailAgent directly (no HTTP round-trip) via fake Request
       const fakeReq = new Request('https://x/api/email-agent', {
         method: 'POST',
@@ -3751,17 +3827,27 @@ async function cronScanInbox(env) {
         const why = !decision ? 'null_decision' : decision.error ? 'error:'+decision.error : 'no_action';
         await hubLog(env, 'email_automation', 'debug', `cronScanInbox: ${source} skip action=${why} tid=${tid} mpn=${payload.mpn||'?'}`, { reasoning: decision?.reasoning });
         // Improvement #8: log no_action to pending_issues so missed emails are visible in the dashboard
-        if (decision?.reasoning?.startsWith('buyer_ack')) {
-          await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, tid).run().catch(() => {});
+        const _ack = () => env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, tid).run().catch(() => {});
+        if (decision?.reasoning?.startsWith('buyer_ack') || decision?.reasoning?.startsWith('skip_thread')) {
+          await _ack();
           continue;
         }
-        const isInventoryRetry = decision?.reasoning?.includes('inventory_lookup_failed');
-        if (!isInventoryRetry) {
+        // Retry a few runs (transient web-app/Haiku failures), then give up: log ONE pending issue and ack the
+        // message so it stops looping. Counter is per message, so a new buyer reply gets a fresh set of retries.
+        const _rk = 'retry:' + payload.last_message_id;
+        const _rc = await env.DB.prepare("SELECT value FROM rules WHERE type='retry_count' AND key=?").bind(_rk).first().catch(() => null);
+        const _tries = (_rc ? parseInt(_rc.value) || 0 : 0) + 1;
+        await env.DB.prepare(_rc ? "UPDATE rules SET value=? WHERE type='retry_count' AND key=?" : "INSERT INTO rules (value, type, key) VALUES (?, 'retry_count', ?)").bind(String(_tries), _rk).run().catch(() => {});
+        if (_tries >= 4) {
           await env.DB.prepare("INSERT INTO pending_issues (type, thread_id, subject, details, created_at) VALUES (?, ?, ?, ?, datetime('now'))")
-            .bind('no_action', tid, payload?.subject || null, JSON.stringify({ why, reasoning: decision?.reasoning, source })).run().catch(() => {});
+            .bind('no_action', tid, payload?.subject || null, JSON.stringify({ why, reasoning: decision?.reasoning, source, tries: _tries })).run().catch(() => {});
+          await _ack();
+          await hubLog(env, 'email_automation', 'error', `cronScanInbox: gave up after ${_tries} tries tid=${tid} — logged to pending_issues`, { reasoning: decision?.reasoning });
+          continue;
         }
-        // Remove the rfq label so the cron retries this thread next run instead of permanently skipping it
-        if (rfqLabelId) await gPost('/threads/' + tid + '/modify', { removeLabelIds: [rfqLabelId] }).catch(() => {});
+        // Remove rfq AND agent labels so whichever queue found it retries next run (agent label was never removed before)
+        const _rmL = [rfqLabelId, agentLabelId].filter(Boolean);
+        if (_rmL.length) await gPost('/threads/' + tid + '/modify', { removeLabelIds: _rmL }).catch(() => {});
         continue;
       }
       await executeDecisionCron(decision, payload, token, env);
