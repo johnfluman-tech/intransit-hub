@@ -1199,7 +1199,19 @@ async function handleEmailAgent(request, env) {
   // Filter oem_results to exact/close MPN matches â€" removes fuzzy hits like "MPM" matching
   // "MPM3650GQW-P" or concatenated rows like "MPM3650GQW-PMPM3650GQW-Z" that wrongly trigger
   // the OEM override and force msg_checking on warehouse-only inventory.
-  const requestMpn = body.mpn || (Array.isArray(in_stock_results) && in_stock_results[0] && in_stock_results[0].mpn) || null;
+  let requestMpn = body.mpn || (Array.isArray(in_stock_results) && in_stock_results[0] && in_stock_results[0].mpn) || null;
+  // Bug 101: buyer wrote the MPN with a space ("BD82QM57 SLGZQ" — Intel S-spec) and extraction stopped at the
+  // space. If MPN + the next token equals one of our inventory MPNs, that's the buyer's real (exact) part.
+  if (requestMpn && thread_content) {
+    const _nJ = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const _escJ = requestMpn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const _nextTok = (thread_content.match(new RegExp(_escJ + '[ \\t]+([A-Za-z0-9][A-Za-z0-9\\-]{1,9})\\b', 'i')) || [])[1];
+    if (_nextTok) {
+      const _joined = _nJ(requestMpn + _nextTok);
+      const _hit = [...(oem_results || []), ...(in_stock_results || [])].find(r => _nJ(r.mpn) === _joined);
+      if (_hit) requestMpn = String(_hit.mpn).trim();
+    }
+  }
   if (requestMpn && Array.isArray(oem_results) && oem_results.length > 0) {
     oem_results = oem_results.filter(r => isMpnMatch(requestMpn, r.mpn));
   }
@@ -1347,7 +1359,8 @@ async function handleEmailAgent(request, env) {
   // Similar-MPN rule (runs before TP/min-line/quote logic): buyer asked for X, our OEM/own stock only has a
   // close variant (PMEG3020EJ vs PMEG3020EJ115, MAX232 vs MAX232A) → ask if they can use OUR part number first.
   // NOPB / TR / T&R suffixes are the same part. Once we've asked, the buyer's answer flows through normally.
-  if (requestMpn && !/would you be able to use this part number/i.test(thread_content || '')) {
+  // \s+ — the sent reply's plain-text part wraps lines ("use this part\nnumber"), Bug 101
+  if (requestMpn && !/would\s+you\s+be\s+able\s+to\s+use\s+this\s+part\s+number/i.test(thread_content || '')) {
     const _n = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     // OEM EXCESS often glues the package onto the MPN ("PCM1803ADBRSSOP-20") — same part, not a variant
     const _base = s => _n(s).replace(/(?:TSSOP|SSOP|MSOP|SOIC|SOP|LQFP|TQFP|QFP|QFN|DFN|BGA|PDIP|DIP|PLCC|SOT|TO)\d*$/, '').replace(/(NOPB|T&R|TR)$/, '');
