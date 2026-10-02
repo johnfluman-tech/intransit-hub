@@ -103,7 +103,8 @@ export default {
 
       if (p === '/api/issues'    && m === 'GET')  return handleGetIssues(url, env);
       if (p === '/api/issues'    && m === 'POST') return handlePostIssue(request, env);
-      if (p === '/api/self-heal'   && m === 'POST') return handleSelfHeal(request, env);
+      // Self-heal (Claude rewrites worker.js and auto-deploys) turned OFF by John 2026-10-02 — fixes go through Claude Code
+      if (p === '/api/self-heal'   && m === 'POST') return json({ error: 'self-heal is disabled' }, 410);
       if (p === '/api/audit-draft' && m === 'POST') return handleAuditDraft(request, env);
       if (p === '/api/cost-report' && m === 'GET')  return handleCostReport(url, env);
       if (p === '/api/stan-sheet'  && m === 'GET')  return handleGetStanSheet(env);
@@ -2923,7 +2924,10 @@ async function sheetsGet(env, spreadsheetId, range) {
   const token = await getGmailToken(env);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
   const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
-  return r.json();
+  // A 429/5xx must NOT look like an empty sheet — callers would then skip the duplicate check and append twice
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error('Sheets read failed (' + r.status + '): ' + JSON.stringify(d.error || '').slice(0, 200));
+  return d;
 }
 
 async function sheetsAppend(env, spreadsheetId, range, values) {
@@ -2934,7 +2938,9 @@ async function sheetsAppend(env, spreadsheetId, range, values) {
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
     body: JSON.stringify({ range, values }),
   });
-  return r.json();
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error('Sheets append failed (' + r.status + '): ' + JSON.stringify(d.error || '').slice(0, 200));
+  return d;
 }
 
 async function sheetsBatchUpdate(env, spreadsheetId, requests) {
@@ -2959,7 +2965,9 @@ async function sheetsGetMeta(env, spreadsheetId) {
   const token = await getGmailToken(env);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`;
   const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
-  return r.json();
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error('Sheets meta failed (' + r.status + ')');
+  return d;
 }
 
 // Same part, different packaging (MAX17498BATE+ vs +T, #PBF, TRPBF, /NOPB) must count as already on Forte.
@@ -3042,7 +3050,9 @@ async function workerDeleteOemRow(env, mpn, rowNum) {
   const sheetMeta = sheets.find(s => (s.properties?.title || '').toLowerCase() === OEM_SHEET_NAME.toLowerCase()) || sheets[0];
   const sheetId = sheetMeta?.properties?.sheetId ?? 0;
 
-  if (rowNum) {
+  // Row numbers go stale as soon as any row above is deleted — when we know the MPN, always re-find it by MPN.
+  // Row-number delete is only a last resort when no MPN was recorded.
+  if (rowNum && !mpn) {
     // Delete by exact row number (0-based index = rowNum - 1)
     const res = await sheetsBatchUpdate(env, OEM_SHEET_ID, [{
       deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rowNum - 1, endIndex: rowNum } }
@@ -3172,6 +3182,8 @@ async function handleSentQuotes(url, env) {
   if (!mpn) return json({ error: 'mpn required' }, 400);
 
   const JOHN_EMAIL = 'john.fluman@intransittech.com';
+  // getHdr was never defined in this scope — every thread threw and prior quotes always came back empty
+  const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
   let threadIds = [];
   const queries = [
     `in:sent subject:"${mpn}"`,
@@ -3551,11 +3563,28 @@ async function executeDecisionCron(decision, payload, token, env) {
       return;
     }
 
+    // Reply-all: everyone already on the thread (buyer's colleagues, Bill or other staff) stays on the reply.
+    // Never include relays (netCOMPONENTS/IC Source), David/Forte, or John himself.
+    const replyAll = [];
     // Improvement #4: skip draft creation if thread already has a draft — prevents duplicate
     // drafts when a thread is retried after a subrequest crash mid-execution.
     try {
       const gGet2 = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
-      const tMeta = await gGet2('/threads/' + threadId + '?format=metadata&metadataHeaders=From');
+      const tMeta = await gGet2('/threads/' + threadId + '?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc');
+      const _seen = new Set([replyTo.toLowerCase()]);
+      for (const m of (tMeta.messages || [])) {
+        if ((m.labelIds || []).includes('DRAFT')) continue;
+        for (const h of (m.payload?.headers || [])) {
+          if (!/^(from|to|cc)$/i.test(h.name)) continue;
+          for (const a of (h.value.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [])) {
+            const al = a.toLowerCase();
+            if (_seen.has(al) || al === 'john.fluman@intransittech.com' || /^(rfq|sales|websiterfq|info|purchasing)@intransittech\.com$/.test(al) ||
+                (isRelay(al) && !al.endsWith('@intransittech.com')) ||
+                /fortetechno\.com|fortecomp\.com|netcomponents\.com|icsource\.com|noreply|no-reply/.test(al)) continue;
+            _seen.add(al); replyAll.push(a);
+          }
+        }
+      }
       const hasExistingDraft = (tMeta.messages || []).some(m => (m.labelIds || []).includes('DRAFT'));
       if (hasExistingDraft) {
         await hubLog(env, 'email_automation', 'run', `executeDecision: skip draft — thread already has a draft (${action}) tid=${threadId}`);
@@ -3577,9 +3606,11 @@ async function executeDecisionCron(decision, payload, token, env) {
     const subject = rawSubj.match(/^re:/i) ? rawSubj : 'Re: ' + rawSubj;
     const msgId = payload._last_msg_id_hdr;
     const refs  = payload._last_refs;
-    const ccEmail = action === 'bill_handle' ? 'bill.pratt@intransittech.com' : null;
+    // BILL EXT + buyer TP: Bill always CC'd so he sees the buyer's replies (unless he's already on the To line)
+    const _billOnThread = replyAll.some(a => /^bill\.pratt@intransittech\.com$/i.test(a));
+    const ccEmail = (action === 'bill_handle' && !_billOnThread) ? 'bill.pratt@intransittech.com' : null;
     const htmlBody = '<div dir="ltr">' + String(decision.draft_body).replace(/\n/g, '<br>') + SIG_HTML + '</div>';
-    const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + replyTo];
+    const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + [replyTo, ...replyAll].join(', ')];
     if (ccEmail) mimeLines.push('Cc: ' + ccEmail);
     mimeLines.push('Subject: ' + subject, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8');
     if (msgId) {
