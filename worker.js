@@ -1573,8 +1573,12 @@ async function handleEmailAgent(request, env) {
       const _lbm = String(body.last_msg_body || '');
       const _offerQty = parseInt(_minOffer[1]);
       const _statedQty = (_lbm.match(/\b(\d{1,7})\s*(?:pcs?|pieces|units|ea)\b/i) || [])[1];
+      const _oemQty = (oem_results || []).reduce((s, r) => s + (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0), 0);
+      const _neg = /\b(no|not|can'?t|cannot|unable|too (?:much|many|high))\b/i.test(_lbm);
       if (_statedQty && parseInt(_statedQty) >= _offerQty) _buyerQty = parseInt(_statedQty);
-      else if (!/\b(no|not|can'?t|cannot|unable|too (?:much|many|high))\b/i.test(_lbm) &&
+      // "Pl quote for complete qty" → our whole OEM EXCESS qty (MBR0580S17, Source Technologi)
+      else if (!_neg && _oemQty >= _offerQty && /\b(complete|full|entire|total|whole|all)\s+(?:the\s+)?(qty|quantity|lot|stock|pcs|pieces)\b|\btake\s+(?:them\s+)?all\b/i.test(_lbm)) _buyerQty = _oemQty;
+      else if (!_neg &&
                /\b(ok|okay|fine|yes|sure|agree[ds]?|accept(?:ed)?|works|go ahead|proceed|confirm(?:ed)?|deal|good)\b/i.test(_lbm)) _buyerQty = _offerQty;
       else _minOfferOpen = true;
     }
