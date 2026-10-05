@@ -1578,7 +1578,12 @@ async function handleEmailAgent(request, env) {
     const _knownCtry = await env.DB.prepare("SELECT value FROM rules WHERE type='domain_country' AND key=?").bind(_sdrDomain).first().catch(() => null);
     // US address in signature/listing ("Bellmore, NY 11710", "Clearwater, FL  33760") — optonline.net etc. have no ccTLD
     const _usAddr = /\b(?:A[LKZR]|C[AOT]|D[EC]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\s+\d{5}(?:-\d{4})?(?!\d)/.test(thread_content || '') ? 'US' : null;
-    const _senderCtry = _knownCtry?.value || _domCtry[_tld] || _sigCtry || _usAddr || 'CN';
+    // netCOMPONENTS listing names the country right before "Telephone:" ("…H9B 3K9CanadaTelephone:+1-514…") — Bug 105: BESA got CN
+    const _ncCtryNames = { 'canada':'CA','china':'CN','hong kong':'HK','united states':'US','usa':'US','taiwan':'TW','germany':'DE','netherlands':'NL','united kingdom':'GB','france':'FR','italy':'IT','japan':'JP','korea':'KR','south korea':'KR','singapore':'SG','india':'IN','philippines':'PH','malaysia':'MY','australia':'AU','israel':'IL','mexico':'MX','spain':'ES','sweden':'SE','poland':'PL','turkey':'TR','vietnam':'VN','thailand':'TH','brazil':'BR','switzerland':'CH','austria':'AT','belgium':'BE','denmark':'DK','finland':'FI','ireland':'IE','portugal':'PT','czech republic':'CZ','hungary':'HU','romania':'RO','united arab emirates':'AE' };
+    const _ncM = (thread_content || '').match(/([A-Za-z][A-Za-z ]{2,30}?)\s*Telephone:/);
+    let _ncCtry = null;
+    if (_ncM) { const _w = _ncM[1].toLowerCase(); for (const k of Object.keys(_ncCtryNames).sort((a, b) => b.length - a.length)) if (_w.endsWith(k)) { _ncCtry = _ncCtryNames[k]; break; } }
+    const _senderCtry = _knownCtry?.value || _domCtry[_tld] || _ncCtry || _sigCtry || _usAddr || 'CN';
 
     let _act, _body = null, _rsn, _forteEntry = null;
     if (_own.length > 0) {
@@ -1602,7 +1607,7 @@ async function handleEmailAgent(request, env) {
       if (!_tpVal) {
         // No usable TP (pre-check bypassed, or "no target price") → always ask; never msg_checking at a $0.01 sentinel.
         // If we already told the buyer we're checking, a follow-up gets "still checking", not a second TP request.
-        if (/we are checking on it now/i.test(thread_content || '')) { _act = 'still_checking'; _body = DRAFT_TEMPLATES.still_checking; _rsn = 'OEM EXCESS, already checking, no new TP'; }
+        if (/we are (?:still )?checking on (?:it|this)/i.test(thread_content || '')) { _act = 'still_checking'; _body = DRAFT_TEMPLATES.still_checking; _rsn = 'OEM EXCESS, already checking, no new TP'; }
         else { _act = _has2k ? 'request_tp_2000' : 'request_tp_500'; _body = DRAFT_TEMPLATES[_act]; _rsn = 'OEM EXCESS, no usable TP'; }
       } else if (_buyerQty && (_tpVal * _buyerQty) < _minVal) {
         _act = 'below_min_line';
@@ -1612,7 +1617,9 @@ async function handleEmailAgent(request, env) {
       } else {
         _act = 'msg_checking'; _body = DRAFT_TEMPLATES.msg_checking; _rsn = 'OEM EXCESS+TP';
         // Build forte_entry if no 60-day duplicate and we have qty + TP
-        if ((forte_results || []).length === 0 && _tpVal && _buyerQty && requestMpn) {
+        // 60-day duplicate rule — old rows (SAK-XC167 2024, S-100 May) must not block a new entry (Bug 105)
+        const _recentForte = (forte_results || []).filter(r => { const d = Date.parse(r.date); return isNaN(d) || (Date.now() - d) < 60 * 86400000; });
+        if (_recentForte.length === 0 && _tpVal && _buyerQty && requestMpn) {
           _forteEntry = { mpn: requestMpn, qty: _buyerQty, target_price: _tpVal, country: _senderCtry };
         }
       }
@@ -4130,7 +4137,9 @@ async function cronCheckDavidNoStock(env) {
       });
       const _lastDavidMsg = _davidMsgs.length ? _davidMsgs[_davidMsgs.length - 1] : lastMsg;
       const bodyAll = extractMimeText(_lastDavidMsg.payload).toLowerCase();
-      const checkText = subject.toLowerCase() + '\n' + bodyAll;
+      // John's rule: remove ONLY when David's SUBJECT says no stk. Body included quoted history —
+      // "RE: A-0412" ("Are we going to get a PO?") matched John's old "sheet say no stk" line (Bug 104).
+      const checkText = getHdr(_lastDavidMsg, 'Subject').toLowerCase();
       const addLabels = processedLabelId ? [processedLabelId] : [];
 
       // If last David message looks like a competitor price list, skip
