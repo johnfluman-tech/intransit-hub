@@ -1215,6 +1215,24 @@ async function handleEmailAgent(request, env) {
       if (_hit) requestMpn = String(_hit.mpn).trim();
     }
   }
+  // Bug 107: plain-text RFQ tables glue cells together ("PanasonicAQY221R2M1Y120" = MFR|MPN|QTY), so the
+  // extracted MPN swallowed the qty and we asked R&A "can you use AQY221R2M1Y?" — their own part.
+  // Glued to a letter on the left + inventory MPN + only digits after → the digits are QtyReq.
+  if (requestMpn && thread_content && /\d$/.test(requestMpn)) {
+    const _nG = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const _escG = requestMpn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp('[A-Za-z]' + _escG, 'i').test(thread_content)) {
+      const _a = _nG(requestMpn);
+      const _base = [...(oem_results || []), ...(in_stock_results || [])].map(r => String(r.mpn || '').trim())
+        .filter(m => { const b = _nG(m); return b.length >= 5 && _a.startsWith(b) && /^\d{1,7}$/.test(_a.slice(b.length)); })
+        .sort((x, y) => _nG(y).length - _nG(x).length)[0];
+      if (_base) {
+        const _gQty = _a.slice(_nG(_base).length);
+        if (!/QtyReq=/i.test(thread_content)) thread_content = `[PARSED_RFQ: MPN=${_base}, QtyReq=${_gQty}]\n` + thread_content;
+        requestMpn = _base; body.mpn = _base;
+      }
+    }
+  }
   if (requestMpn && Array.isArray(oem_results) && oem_results.length > 0) {
     oem_results = oem_results.filter(r => isMpnMatch(requestMpn, r.mpn));
   }
