@@ -882,6 +882,9 @@ function isMpnMatch(requestMpn, resultMpn) {
   const a = norm(requestMpn);
   const b = norm(resultMpn);
   if (a === b) return true;
+  // One OEM cell can list two parts: "ISO1640DWR  /ADUM2250ARWZ-RL" (Bug 103) — match either side of a spaced slash
+  const _segs = String(resultMpn).split(/\s+\/\s*|\s*\/\s+/).filter(Boolean);
+  if (_segs.length > 1) return _segs.some(seg => isMpnMatch(requestMpn, seg));
   const shorter = a.length <= b.length ? a : b;
   const longer  = a.length <= b.length ? b : a;
   // One must start with the other and the trailing suffix â‰¤ 6 chars
@@ -1368,7 +1371,8 @@ async function handleEmailAgent(request, env) {
       ...(oem_results || []).map(r => r.mpn),
       ...(in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).map(r => r.mpn),
     ].filter(Boolean).map(String);
-    const _exact = _inv.some(m => _n(m) === _n(requestMpn) || _base(m) === _base(requestMpn));
+    // Split "ISO1640DWR  /ADUM2250ARWZ-RL" style two-part cells so either part counts as exact (Bug 103)
+    const _exact = _inv.flatMap(m => [m, ...m.split(/\s+\/\s*|\s*\/\s+/)]).some(m => _n(m) === _n(requestMpn) || _base(m) === _base(requestMpn));
     const _similar = [...new Set(_inv.filter(m => isMpnMatch(requestMpn, m)))];
     if (!_exact && _similar.length > 0) {
       const _ours = _similar[0].trim();
@@ -1389,11 +1393,13 @@ async function handleEmailAgent(request, env) {
   // Follow-up after our "checking on it" (88E1112-C2-NNC1C000: buyer said "ok thanks", automation asked for TP twice).
   // Ack → no reply. TP restated / question → still_checking. Only while an Open Forte row has no John Buy/Quoted price.
   const _priorChecking = /we are (?:still )?checking on (?:it|this)/i.test(thread_content);
-  const _openForte = (forte_results || []).find(r => /^open$/i.test(String(r.status || '').trim()));
+  // Blank status = open too (TLC27L4BIDR row 4620 had no status → buyer got a 2nd TP request, Bug 103)
+  const _openForte = (forte_results || []).find(r => /^(open)?$/i.test(String(r.status || '').trim()));
   if (_priorChecking && _openForte && !_openForte.johnQuoted && !_openForte.johnBuy && oem_results.length > 0 &&
       (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
     const _lb = String(body.last_msg_body || '');
-    const _isAck = !_tpDetect(_lb) && !/\?|quote|price|update|status|news|how much|advise|when|lead ?time/i.test(_lb) &&
+    // "still waiting your quotation ... we want to place the order" is NOT an ack (TLC27L4BIDR, Bug 103)
+    const _isAck = !_tpDetect(_lb) && !/\?|quot|price|update|status|news|how much|advise|when|lead ?time|wait|order|\bpo\b|need|please/i.test(_lb) &&
       /\b(ok|okay|thanks?|thank you|noted|received|looking forward)\b/i.test(_lb);
     if (_isAck) return json({ action: 'no_action', reasoning: 'buyer_ack after msg_checking — no reply needed', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
     return json({ action: 'still_checking', reasoning: 'Buyer follow-up after msg_checking; Forte row ' + (_openForte.row || '?') + ' open, no OEM price yet', mpn: requestMpn, buyer_email: null, draft_body: 'We are still checking on it. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.', forte_entry: null, oem_delete_row: null });
@@ -3710,7 +3716,8 @@ async function cronScanInbox(env) {
     if (blockedThreads.length) {
       await Promise.all(blockedThreads.map(async tid => {
         try {
-          const tData = await gGet('/threads/' + tid + '?format=metadata&metadataHeaders=From,Subject,Message-ID,To,References');
+          // Gmail needs one metadataHeaders param per header — a comma list returned no headers → blank To/"(no subject)" drafts (Bug 103)
+          const tData = await gGet('/threads/' + tid + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=To&metadataHeaders=References');
           const msgs = tData.messages || [];
           const lastMsg = msgs[msgs.length - 1] || {};
           const subject = getHdr(lastMsg, 'Subject') || '(no subject)';
@@ -3719,6 +3726,7 @@ async function cronScanInbox(env) {
           const refs    = getHdr(lastMsg, 'References') || '';
           const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
           const toAddr = extractEmailAddr(fromHdr);
+          if (!toAddr || !toAddr.includes('@')) throw new Error('no sender address — skipping blocked draft');
           const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + toAddr, 'Subject: ' + replySubj, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8'];
           if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
           mimeLines.push('', 'This is a blocked sender');
