@@ -1564,7 +1564,20 @@ async function handleEmailAgent(request, env) {
       (thread_content || '').match(/qty\s*req\w*\s*[:=]?\s*(\d{1,7})/i) ||
       (thread_content || '').match(/\b(\d{1,7})\s*pcs?\b/i) ||
       (thread_content || '').match(/qty\s*[:=]\s*(\d{1,7})/i);
-    const _buyerQty = _qtyM ? parseInt(_qtyM[1]) : null;
+    let _buyerQty = _qtyM ? parseInt(_qtyM[1]) : null;
+    // We already sent below_min_line ("require a minimum of 50 pieces") → the buyer's reply answers it.
+    // Accept ("That's fine") or a qty ≥ min → use that qty; anything else → leave it for John, never repeat the offer (6098-9412, Bug 106)
+    const _minOffer = (thread_content || '').match(/we would require a minimum of\s+(\d+)\s+pieces/i);
+    let _minOfferOpen = false;
+    if (_minOffer) {
+      const _lbm = String(body.last_msg_body || '');
+      const _offerQty = parseInt(_minOffer[1]);
+      const _statedQty = (_lbm.match(/\b(\d{1,7})\s*(?:pcs?|pieces|units|ea)\b/i) || [])[1];
+      if (_statedQty && parseInt(_statedQty) >= _offerQty) _buyerQty = parseInt(_statedQty);
+      else if (!/\b(no|not|can'?t|cannot|unable|too (?:much|many|high))\b/i.test(_lbm) &&
+               /\b(ok|okay|fine|yes|sure|agree[ds]?|accept(?:ed)?|works|go ahead|proceed|confirm(?:ed)?|deal|good)\b/i.test(_lbm)) _buyerQty = _offerQty;
+      else _minOfferOpen = true;
+    }
     // Extract country from sender domain
     const _sdrDomain = (sender || '').replace(/.*@/, '').toLowerCase();
     const _domCtry = { cn: 'CN', hk: 'HK', nl: 'NL', de: 'DE', jp: 'JP', tw: 'TW', ca: 'CA', uk: 'GB', au: 'AU', kr: 'KR', sg: 'SG', in: 'IN', fr: 'FR' };
@@ -1609,6 +1622,8 @@ async function handleEmailAgent(request, env) {
         // If we already told the buyer we're checking, a follow-up gets "still checking", not a second TP request.
         if (/we are (?:still )?checking on (?:it|this)/i.test(thread_content || '')) { _act = 'still_checking'; _body = DRAFT_TEMPLATES.still_checking; _rsn = 'OEM EXCESS, already checking, no new TP'; }
         else { _act = _has2k ? 'request_tp_2000' : 'request_tp_500'; _body = DRAFT_TEMPLATES[_act]; _rsn = 'OEM EXCESS, no usable TP'; }
+      } else if (_minOfferOpen) {
+        _act = 'no_action'; _rsn = 'below_min_line already sent; buyer reply is not a clear accept — John to handle';
       } else if (_buyerQty && (_tpVal * _buyerQty) < _minVal) {
         _act = 'below_min_line';
         const _minNeeded = Math.ceil(_minVal / _tpVal);
