@@ -1689,7 +1689,9 @@ async function handleEmailAgent(request, env) {
   function _lastMsgTp(lb) {
     const t = String(lb || '').replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ');
     const m = t.match(/\$\s*(\d+(?:\.\d+)?)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
-      t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i);
+      t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
+      // "18u" = $18 (Chinese buyer shorthand; Fuzhou Yongbo "Dear，18u", Bug 108). \b after u rejects "10uF"/"18uH"
+      t.match(/(?:^|[^\w.])(\d+(?:\.\d+)?)\s?u\b(?![.\d])/im);
     const v = m ? parseFloat(m[1]) : null;
     return v && v > 0 && v < 100000 ? v : null;
   }
@@ -3443,6 +3445,23 @@ function stripQuoted(text) {
   return lines.join('\n').trim();
 }
 
+// Prior conversation (newest first) quoted under a draft. API-created drafts carry no history, so
+// Bill got a bare "Bill will help" with no RFQ/TP on MT25QL256ABA8ESF-0SIT (Bug 109).
+function buildQuotedHistory(messages) {
+  const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const hdr = (m, n) => ((m.payload?.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';
+  const sigCut = /\n\s*\*?Regards,?\*?\s*\n[\s\S]*$|\n\s*The information contained in this communication[\s\S]*$/i;
+  const blocks = (messages || []).filter(m => !(m.labelIds || []).includes('DRAFT')).reverse().map(m => {
+    const body = stripQuoted(extractMimeText(m.payload) || '').replace(sigCut, '').trim().substring(0, 4000);
+    return '<b>From:</b> ' + esc(hdr(m, 'from')) + '<br><b>Date:</b> ' + esc(hdr(m, 'date')) +
+      '<br><b>Subject:</b> ' + esc(hdr(m, 'subject')) + '<br><br>' + esc(body).replace(/\n/g, '<br>');
+  });
+  if (!blocks.length) return '';
+  return '<br><div>---------- Previous conversation ----------</div>' +
+    '<blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">' +
+    blocks.join('<hr style="border:0;border-top:1px solid #ddd;margin:12px 0">') + '</blockquote>';
+}
+
 function extractEmailAddr(raw) {
   if (!raw) return '';
   const m = raw.match(/<([^>]+)>/);
@@ -3678,7 +3697,15 @@ async function executeDecisionCron(decision, payload, token, env) {
     // BILL EXT + buyer TP: Bill always CC'd so he sees the buyer's replies (unless he's already on the To line)
     const _billOnThread = replyAll.some(a => /^bill\.pratt@intransittech\.com$/i.test(a));
     const ccEmail = (action === 'bill_handle' && !_billOnThread) ? 'bill.pratt@intransittech.com' : null;
-    const htmlBody = '<div dir="ltr">' + String(decision.draft_body).replace(/\n/g, '<br>') + SIG_HTML + '</div>';
+    // Bill is new to the thread — quote the whole conversation so he sees the RFQ and the buyer's TP
+    let _history = '';
+    if (action === 'bill_handle') {
+      try {
+        const _full = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/threads/' + threadId + '?format=full', { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+        _history = buildQuotedHistory(_full.messages);
+      } catch (e) { await hubLog(env, 'email_automation', 'error', 'executeDecision: bill_handle history fetch failed: ' + e.message, { threadId }); }
+    }
+    const htmlBody = '<div dir="ltr">' + String(decision.draft_body).replace(/\n/g, '<br>') + SIG_HTML + _history + '</div>';
     const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + [replyTo, ...replyAll].join(', ')];
     if (ccEmail) mimeLines.push('Cc: ' + ccEmail);
     mimeLines.push('Subject: ' + subject, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8');
