@@ -3477,7 +3477,9 @@ function extractMpnHint(subject) {
   const tokens = cleaned.split(/[\s,;|\/\[\]()]+/);
   const cands = tokens.filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 4 && !/^\d+(pcs?|k|m|units?)?$/i.test(t) && !_MPN_GENERIC_WORDS.has(t.toUpperCase())
     // Buyer reference numbers (VRFQ184567, RFQ-12345, PO#5521, REQ00912) are not MPNs
-    && !/^[A-Z]{0,3}(RFQ|RFP|PO|REQ|INQ|QUO|QTE|CASE|TKT)[-#_:]?\d{3,}$/i.test(t));
+    && !/^[A-Z]{0,3}(RFQ|RFP|PO|REQ|INQ|QUO|QTE|CASE|TKT)[-#_:]?\d{3,}$/i.test(t)
+    // Rebound refs "SPANSION_101-775921" / "ALTERA_101-775469" = MFR_ref#, not an MPN (Bug 110)
+    && !/^[A-Z]+_\d{2,}-\d{4,}$/i.test(t));
   return cands[0] || null;
 }
 
@@ -3512,8 +3514,11 @@ async function buildScanPayload(threadId, token, env) {
   let _bodyMpnHint = null;
   if (!mpnHint && firstBuyer) {
     const _bt = stripQuoted(extractMimeText(firstBuyer.payload) || '');
-    const _bm = _bt.match(/\bpart\s*(?:number|no\.?|#)\s*([A-Z0-9][A-Z0-9\-]{3,})/i)
-      || _bt.match(/\b(?:MPN|P\/N|PN)\s*:?\s*([A-Z0-9][A-Z0-9\-]{3,})/i)
+    // Rebound layout puts the table headers and values on separate lines: Quantity / MPN / Manufacturer / 4,000 / S29AL032D90BFI040 (Bug 110)
+    const _hdrWord = '(?!(?:manufacturer|mfr|mfg|quantity|qty|description|brand)\\b)';
+    const _bm = _bt.match(/\bQuantity\s*\n\s*MPN\s*\n\s*Manufacturer\s*\n\s*[\d,]+\s*\n\s*([A-Z0-9][A-Z0-9\-\.\/#]{3,})/i)
+      || _bt.match(new RegExp('\\bpart\\s*(?:number|no\\.?|#)\\s*' + _hdrWord + '([A-Z0-9][A-Z0-9\\-]{3,})', 'i'))
+      || _bt.match(new RegExp('\\b(?:MPN|P\\/N|PN)\\s*:?\\s*' + _hdrWord + '([A-Z0-9][A-Z0-9\\-]{3,})', 'i'))
       || _bt.match(/\b\d+\s*pcs?\s+([A-Za-z][A-Za-z0-9\-\.\/]{4,})/i);  // "40pcs SDSDQAF3-016G-I"
     if (_bm) _bodyMpnHint = _bm[1].replace(/[-.,;:]+$/, '').toUpperCase();
   }
