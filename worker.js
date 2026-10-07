@@ -3539,6 +3539,22 @@ async function buildScanPayload(threadId, token, env) {
   const _effectiveMpn = mpnHint || _bodyMpnHint;
   if (_effectiveMpn && /[0-9]/.test(_effectiveMpn) && _effectiveMpn.length >= 4) payload.mpn = _effectiveMpn;
 
+  // Multi-line RFQ follow-up about a line other than the subject's ("The PN CIC21P101NE ... enter 0.16 as a target"):
+  // route on that line, not the subject MPN — Emporium got the AR8035 stock quote re-sent (Bug 111)
+  if (msgs.length > 1 && payload.mpn) {
+    const _firstTxt = stripQuoted(extractMimeText(msgs[0].payload) || '');
+    const _esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const _hit = (payload.last_msg_body.match(/\b[A-Z0-9][A-Z0-9\-\/.#]{4,}[A-Z0-9]\b/gi) || [])
+      .filter(t => /[A-Za-z]/.test(t) && /\d/.test(t) && t.toUpperCase() !== payload.mpn.toUpperCase())
+      .find(t => new RegExp('(?:^|\\s)' + _esc(t) + '(?=\\s|$)', 'im').test(_firstTxt));
+    if (_hit) {
+      payload.mpn = _hit.toUpperCase();
+      const _line = (_firstTxt.match(new RegExp('^.*' + _esc(_hit) + '(.*)$', 'im')) || [])[1] || '';
+      const _q = (_line.match(/(?:^|\s)(\d[\d,]*)(?=\s|$)/) || [])[1];
+      if (_q) payload.thread_content = `[PARSED_RFQ: MPN=${payload.mpn}, QtyReq=${_q.replace(/,/g, '')}]\n` + payload.thread_content;
+    }
+  }
+
   // Subject-only emails: subject has MPN+qty but body is empty â€" inject [PARSED_RFQ] so agent can act
   const bodyText = parts.slice(2).join('\n').replace(/--- Msg \d+ \| From:[^\n]*---/g, '').trim();
   if (bodyText.length < 30 && payload.mpn) {
