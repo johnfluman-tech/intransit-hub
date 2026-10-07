@@ -3544,14 +3544,28 @@ async function buildScanPayload(threadId, token, env) {
   if (msgs.length > 1 && payload.mpn) {
     const _firstTxt = stripQuoted(extractMimeText(msgs[0].payload) || '');
     const _esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const _hit = (payload.last_msg_body.match(/\b[A-Z0-9][A-Z0-9\-\/.#]{4,}[A-Z0-9]\b/gi) || [])
+    // Buyer's reply may not name the part ("please quote at a minimum of 3125 pcs") — then the active line is
+    // the one our own last reply was about (the below_min offer naming CIC21P101NE)
+    const _ourLast = [...msgs].reverse().find(m => /intransittech\.com/i.test(getHdr(m, 'From')) && !(m.labelIds || []).includes('DRAFT'));
+    const _ctx = payload.last_msg_body + '\n' + (_ourLast ? stripQuoted(extractMimeText(_ourLast.payload) || '').substring(0, 1000) : '');
+    const _hit = (_ctx.match(/\b[A-Z0-9][A-Z0-9\-\/.#]{4,}[A-Z0-9]\b/gi) || [])
       .filter(t => /[A-Za-z]/.test(t) && /\d/.test(t) && t.toUpperCase() !== payload.mpn.toUpperCase())
       .find(t => new RegExp('(?:^|\\s)' + _esc(t) + '(?=\\s|$)', 'im').test(_firstTxt));
     if (_hit) {
       payload.mpn = _hit.toUpperCase();
       const _line = (_firstTxt.match(new RegExp('^.*' + _esc(_hit) + '(.*)$', 'im')) || [])[1] || '';
       const _q = (_line.match(/(?:^|\s)(\d[\d,]*)(?=\s|$)/) || [])[1];
-      if (_q) payload.thread_content = `[PARSED_RFQ: MPN=${payload.mpn}, QtyReq=${_q.replace(/,/g, '')}]\n` + payload.thread_content;
+      // Long threads get cut at 8000 chars, so our below_min offer and the line's TP can fall off the end —
+      // then "$10.00" from the other line's stock quote was read as the TP (Emporium, qty 2624 @ $10). Pin both up top.
+      const _ourTxt = _ourLast ? stripQuoted(extractMimeText(_ourLast.payload) || '') : '';
+      const _offer = _ourTxt.match(/we would require a minimum of\s+\d+\s+pieces/i);
+      const _tp = (_ourTxt.match(/at your target price of \$\s*(\d*\.?\d+)/i) || [])[1] ||
+        (payload.last_msg_body.match(/\$\s*(\d*\.?\d+)/) || [])[1] ||
+        (payload.last_msg_body.match(/(\d*\.\d+)\s+as\s+(?:a\s+|the\s+)?target/i) || [])[1];
+      const _fields = [`MPN=${payload.mpn}`];
+      if (_q) _fields.push(`QtyReq=${_q.replace(/,/g, '')}`);
+      if (_tp) _fields.push(`TgtPrice=${_tp}`);
+      payload.thread_content = `[PARSED_RFQ: ${_fields.join(', ')}]\n` + (_offer ? `[OUR_LAST_REPLY: ${_offer[0].trim()}]\n` : '') + payload.thread_content;
     }
   }
 
