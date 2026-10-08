@@ -1562,8 +1562,8 @@ async function handleEmailAgent(request, env) {
       _tcTp.match(/(?:target|tgt)\s*[:=]\s*\$?(\d*\.?\d+)/i) ||
       _tcTp.match(/t\/p\s*[:=]?\s*\$?(\d*\.?\d+)/i) ||
       _tcTp.match(/\btp\s*[:=]\s*\$?(\d*\.?\d+)/i) ||
-      _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?(\d+(?:\.\d+)?)/i) ||
-      _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s*\$\s*(\d+(?:\.\d+)?)/i) ||
+      _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?(\d*\.?\d+)/i) ||
+      _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s*\$\s*(\d*\.?\d+)/i) ||
       _tcTp.match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
       _tcTp.match(/([\d]+(?:\.\d+)?)\s*usd\b/i) ||    // "4usd", "4 usd"
       _tcTp.match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
@@ -1712,8 +1712,8 @@ async function handleEmailAgent(request, env) {
       /(?:target|tgt)\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /t\/p\s*[:=]?\s*\$?\.?\d/i.test(_lc) ||
       /\btp\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
-      /\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?\d/i.test(_lc) ||   // "tp at 0.5" (Goldney)
-      /\b(?:tp|target(?:\s*price)?)\s*\$\s*\d/i.test(_lc) ||                 // "TP $10" (Fuzhou Yongbo)
+      /\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?\.?\d/i.test(_lc) ||   // "tp at 0.5" (Goldney), "Target price is .19" (B2 Micro, Bug 117)
+      /\b(?:tp|target(?:\s*price)?)\s*\$\s*\.?\d/i.test(_lc) ||                 // "TP $10" (Fuzhou Yongbo)
       /\bprice\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
       /[\d]+(?:\.\d+)?\s*usd\b/i.test(_lc) ||           // Bug 72: "4usd", "4 usd" — no trailing unit needed
