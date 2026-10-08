@@ -1579,6 +1579,7 @@ async function handleEmailAgent(request, env) {
     // Extract buyer qty from thread content
     const _qtyM = (thread_content || '').match(/QtyReq=(\d+)/i) ||
       (thread_content || '').match(/NQTY=(\d+)/i) ||
+      (thread_content || '').match(/\bqty\s*[:=]?\s*(?:any\s+)?up\s+to\s+(\d{1,7})\b/i) ||  // "Qty: up to 250" (Quiksol, Bug 115)
       (thread_content || '').match(/qty\s*req\w*\s*[:=]?\s*(\d{1,7})/i) ||
       (thread_content || '').match(/\b(\d{1,7})\s*pcs?\b/i) ||
       (thread_content || '').match(/qty\s*[:=]\s*(\d{1,7})/i);
@@ -3473,12 +3474,23 @@ function extractEmailAddr(raw) {
 }
 
 const _MPN_GENERIC_WORDS = new Set(['QUOTE','QUOTES','RFQ','RFQS','REQUEST','REQUESTS','INQUIRY','INQUIRE','ORDER','ORDERS','OFFER','OFFERS','INFO','PRICE','PRICING','STOCK','PURCHASE','BUY','NEED','SALE','SALES']);
+// Another staff member (not John) passing an RFQ to John: "@John Fluman can you please help", "will be handled by John"
+function isStaffHandoffToJohn(from, snippet) {
+  if (!/@intransittech\.com/i.test(from || '') || /john\.fluman@|fluman@intransittech/i.test(from || '')) return false;
+  const s = String(snippet || '');
+  return /(?:@\s*)?John(?:\s+Fluman)?\b[^.]{0,80}\b(?:help|handle|quote|take care|look)|handled by\s+(?:@\s*)?John/i.test(s);
+}
+
 function extractMpnHint(subject) {
   if (!subject) return null;
   const cleaned = subject.replace(/--.*$/, '').trim();
   // "PN:ST3215SB32768H5HPWAA" / "P/N:XYZ" / "MPN#XYZ" — drop the label glued to the MPN (Vyrian, Bug 114)
   const tokens = cleaned.split(/[\s,;|\/\[\]()]+/).map(t => t.replace(/^(?:M?PN|N|PART|P\/N)[:#]+/i, '').replace(/[:#]+$/, ''));
-  const cands = tokens.filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 4 && !/^\d+(pcs?|k|m|units?)?$/i.test(t) && !_MPN_GENERIC_WORDS.has(t.toUpperCase())
+  // "RFQ 100726B / NXP": a mostly-numeric code right after RFQ/PO/REF is the buyer's ref, not an MPN (Bug 115).
+  // "RFQ # BMS13-60T27C02G020" keeps its MPN — only digits + up to 2 trailing letters are dropped.
+  const _refAfter = new Set(tokens.filter((t, i) => i > 0 && /^\d{4,}[A-Z]{0,2}$/i.test(t) &&
+    /^(?:RFQ|RFP|PO|REF|QUOTE|QTE|INQ|REQ|#)[#:]*$/i.test(tokens[i - 1] === '#' && i > 1 ? tokens[i - 2] : tokens[i - 1])));
+  const cands = tokens.filter(t => !_refAfter.has(t)).filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 4 && !/^\d+(pcs?|k|m|units?)?$/i.test(t) && !_MPN_GENERIC_WORDS.has(t.toUpperCase())
     // Buyer reference numbers (VRFQ184567, RFQ-12345, PO#5521, REQ00912) are not MPNs
     && !/^[A-Z]{0,3}(RFQ|RFP|PO|REQ|INQ|QUO|QTE|CASE|TKT)[-#_:]?\d{3,}$/i.test(t)
     // Rebound refs "SPANSION_101-775921" / "ALTERA_101-775469" = MFR_ref#, not an MPN (Bug 110)
@@ -3497,7 +3509,8 @@ async function buildScanPayload(threadId, token, env) {
   const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
   const lastFrom = getHdr(lastMsg, 'From');
   const lastFromEmail = extractEmailAddr(lastFrom).toLowerCase();
-  if (lastFromEmail.includes('intransittech.com')) return null; // John already replied last
+  const _handoff = isStaffHandoffToJohn(lastFrom, lastMsg.snippet);
+  if (lastFromEmail.includes('intransittech.com') && !_handoff) return null; // John already replied last
   const subject = getHdr(msgs[0], 'Subject');
   const parts = ['Subject: ' + subject, ''];
   for (let i = 0; i < msgs.length; i++) {
@@ -3513,12 +3526,19 @@ async function buildScanPayload(threadId, token, env) {
     return !f.includes('intransittech.com') && !f.includes('fortetechno.com') && !f.includes('fortecomp.com')
       && !f.includes('autosend@icsource') && !f.includes('messagesend@netcomponents') && !f.includes('partalert@netcomponents');
   });
-  const sender = firstBuyer ? extractEmailAddr(getHdr(firstBuyer, 'From')) : '';
+  // Staff handoff where the buyer wrote to Bill directly: the buyer's own message isn't in John's copy of the thread,
+  // so take the buyer from the external address on Bill's To/Cc line
+  const _handoffBuyer = (!firstBuyer && _handoff)
+    ? ((getHdr(lastMsg, 'To') + ',' + getHdr(lastMsg, 'Cc')).match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [])
+        .find(a => !/intransittech\.com|fortetechno\.com|fortecomp\.com/i.test(a)) || ''
+    : '';
+  const sender = firstBuyer ? extractEmailAddr(getHdr(firstBuyer, 'From')) : _handoffBuyer;
   const mpnHint = extractMpnHint(subject);
   // Body scan for explicit "part # NNNN" labels — catches all-numeric MPNs missed by extractMpnHint (e.g. Phoenix 1935860)
   let _bodyMpnHint = null;
-  if (!mpnHint && firstBuyer) {
-    const _bt = stripQuoted(extractMimeText(firstBuyer.payload) || '');
+  const _hintMsg = firstBuyer || (_handoff ? lastMsg : null);
+  if (!mpnHint && _hintMsg) {
+    const _bt = stripQuoted(extractMimeText(_hintMsg.payload) || '');
     // Rebound layout puts the table headers and values on separate lines: Quantity / MPN / Manufacturer / 4,000 / S29AL032D90BFI040 (Bug 110)
     const _hdrWord = '(?!(?:manufacturer|mfr|mfg|quantity|qty|description|brand)\\b)';
     const _bm = _bt.match(/\bQuantity\s*\n\s*MPN\s*\n\s*Manufacturer\s*\n\s*[\d,]+\s*\n\s*([A-Z0-9][A-Z0-9\-\.\/#]{3,})/i)
@@ -3946,7 +3966,9 @@ async function cronScanInbox(env) {
 
       if (source === 'rfq' || source === 'agent') {
         // Skip threads where staff already replied last â€" they're handled
-        if (lastIsStaff) {
+        // Exception: another staff member handing the RFQ to John ("This inquiry will be handled by @John Fluman ...
+        // can you please help with this one") — Bill/Quiksol P2020NSE2KFC sat unanswered (Bug 115)
+        if (lastIsStaff && !isStaffHandoffToJohn(lastFrom0, lastMsg0?.snippet)) {
           await hubLog(env, 'email_automation', 'run', `cronScanInbox: ${source} skip â€" staff already replied last tid=${tid}`);
           continue;
         }
