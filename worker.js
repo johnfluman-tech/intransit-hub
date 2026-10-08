@@ -876,6 +876,9 @@ async function extractMpnFromThread(subject, content, env) {
 // Returns true when resultMpn is close enough to requestMpn to be used for routing.
 // Accepts exact match, prefix match, and minor suffix differences (â‰¤3 chars).
 // Rejects significant variant differences (e.g. LP2951ACM vs LP2951ACMX-3.3/NOPB).
+// "target would be 1.50", "TP should be around $2" — modal phrasing the label-style TP patterns don't reach (Bug 118)
+const _TP_WOULD_BE = /\b(?:tp|target(?:\s*price)?)\s+(?:would|will|should|could|can|may|might)\s+be\s*(?:around|about|approx(?:imately)?\.?|~)?\s*\$?(\d*\.?\d+)/i;
+
 function isMpnMatch(requestMpn, resultMpn) {
   if (!requestMpn || !resultMpn) return false;
   const norm = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -1564,6 +1567,7 @@ async function handleEmailAgent(request, env) {
       _tcTp.match(/\btp\s*[:=]\s*\$?(\d*\.?\d+)/i) ||
       _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?(\d*\.?\d+)/i) ||
       _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s*\$\s*(\d*\.?\d+)/i) ||
+      _tcTp.match(_TP_WOULD_BE) ||
       _tcTp.match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
       _tcTp.match(/([\d]+(?:\.\d+)?)\s*usd\b/i) ||    // "4usd", "4 usd"
       _tcTp.match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
@@ -1573,7 +1577,7 @@ async function handleEmailAgent(request, env) {
       _tcTp.match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m) ||
       _tcTp.match(/(?:order|price|priced?|@)\s*@\s*\$?([\d]+(?:\.\d+)?)/i) ||
       _tcTp.match(/(?:^|[\s,;])@\s*\$?([\d]+(?:\.\d+)?)(?:\s|$)/m);
-    const _tpParsed = _tpMatch ? parseFloat(_tpMatch[1]) : NaN;
+    const _tpParsed = _tpMatch ? (_tpRangeHigh(_tcTp, _tpMatch) || parseFloat(_tpMatch[1])) : NaN;
     const _tpVal = (_tpParsed > 0 && _tpParsed < 100000) ? _tpParsed : _lastMsgTp(body.last_msg_body);  // NaN/0 → no TP
 
     // Extract buyer qty from thread content
@@ -1702,6 +1706,15 @@ async function handleEmailAgent(request, env) {
   // Our own injected notes ([FORTE_QUOTED_PRICE: John previously quoted $0.40/each...]) must never be read as the buyer's TP
   function _stripNotes(tc) { return String(tc || '').replace(/^\[(?:FORTE_QUOTED_PRICE|SIMILAR_MPN|EXTRA_MPN_INVENTORY)[^\n]*\n*/gm, ''); }
 
+  // Buyer gave a range ("$1.67-$1.90/ea", "1.50 – 1.75") — John takes the high end (Vision, Legacy; Bug 118)
+  function _tpRangeHigh(text, m) {
+    if (!m || m.index === undefined) return null;
+    const after = text.substring(m.index + m[0].length, m.index + m[0].length + 20);
+    const r = after.match(/^\s*(?:-|–|—|to)\s*\$?(\d*\.?\d+)/i);
+    const hi = r ? parseFloat(r[1]) : NaN;
+    return hi > parseFloat(m[1]) ? hi : null;
+  }
+
   function _tpDetect(tc) {
     tc = _stripNotes(tc);
     const _lc = (tc || '').toLowerCase();
@@ -1714,6 +1727,7 @@ async function handleEmailAgent(request, env) {
       /\btp\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?\.?\d/i.test(_lc) ||   // "tp at 0.5" (Goldney), "Target price is .19" (B2 Micro, Bug 117)
       /\b(?:tp|target(?:\s*price)?)\s*\$\s*\.?\d/i.test(_lc) ||                 // "TP $10" (Fuzhou Yongbo)
+      _TP_WOULD_BE.test(_lc) ||                                                 // "my target would be 1.50 – 1.75" (Legacy, Bug 118)
       /\bprice\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
       /[\d]+(?:\.\d+)?\s*usd\b/i.test(_lc) ||           // Bug 72: "4usd", "4 usd" — no trailing unit needed
@@ -3920,6 +3934,23 @@ async function cronScanInbox(env) {
     const inbox = new Set((inbRes.threads || []).map(t => t.id));
     const orphans = (labRes.threads || []).map(t => t.id).filter(id => inbox.has(id) && !tpThreads.includes(id));
     if (orphans.length) tpThreads = [...orphans, ...tpThreads];
+    // Reopen: a final label (e.g. a wrong no_bid) stuck on a thread, then John sent a TP request by hand and the
+    // buyer answered it — tpQ skips oem-tp-processed, so the TP reply was never seen (Legacy LMZ21700SILT, Bug 118).
+    // Only when our latest sent message is the TP request and the buyer wrote after it.
+    const reRes = await gGet('/threads?maxResults=20&q=' + encodeURIComponent('label:oem-tp-processed "need a target price to proceed" newer_than:14d'));
+    const reCand = (reRes.threads || []).map(t => t.id).filter(id => inbox.has(id) && !tpThreads.includes(id)).slice(0, 3);
+    for (const id of reCand) {
+      const md = await gGet('/threads/' + id + '?format=metadata&metadataHeaders=From').catch(() => null);
+      const ms = (md?.messages || []).filter(m => !(m.labelIds || []).includes('DRAFT'));
+      const fromOf = m => ((m.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
+      const lastOurs = [...ms].reverse().find(m => /@intransittech\.com/i.test(fromOf(m)));
+      const last = ms[ms.length - 1];
+      if (last && lastOurs && last !== lastOurs && /need a target price to proceed/i.test(lastOurs.snippet || '')) {
+        await gPost('/threads/' + id + '/modify', { removeLabelIds: ['Label_166'] });
+        await hubLog(env, 'email_automation', 'run', `cronScanInbox: reopened tid=${id} — buyer answered our TP request on a thread already labeled tp-processed`);
+        tpThreads = [id, ...tpThreads];
+      }
+    }
   } catch (_) {}
   const agentThreads = [...new Set((agentRes.messages || []).map(m => m.threadId))];
 
