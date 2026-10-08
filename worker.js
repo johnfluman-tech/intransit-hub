@@ -3537,7 +3537,9 @@ async function buildScanPayload(threadId, token, env) {
   if (content.length > 8000) content = content.substring(0, 8000) + '\n[truncated]';
   const firstBuyer = msgs.find(m => {
     const f = getHdr(m, 'From').toLowerCase();
-    return !f.includes('intransittech.com') && !f.includes('fortetechno.com') && !f.includes('fortecomp.com')
+    // Stan (amorelectronics.com) shares our W3 stock — never a buyer. A Stan reply in an old "can you help me
+    // answer this" thread got a stan_quoted "This is our stock" draft addressed to Stan himself (Bug 119)
+    return !f.includes('intransittech.com') && !f.includes('fortetechno.com') && !f.includes('fortecomp.com') && !f.includes('amorelectronics.com')
       && !f.includes('autosend@icsource') && !f.includes('messagesend@netcomponents') && !f.includes('partalert@netcomponents');
   });
   // Staff handoff where the buyer wrote to Bill directly: the buyer's own message isn't in John's copy of the thread,
@@ -3951,7 +3953,13 @@ async function cronScanInbox(env) {
       seen.add(m.threadId);
       if (seen.size > 5) break;
       if (await env.DB.prepare("SELECT 1 FROM rules WHERE type IN ('acked_msg','drafted_msg') AND key=?").bind(m.id).first().catch(() => null)) continue;
-      await hubLog(env, 'email_automation', 'run', `cronScanInbox: reopened tid=${m.threadId} — buyer wrote after the thread was labeled tp-processed`);
+      // Only when our latest sent message is the TP request — reopening a thread where John is negotiating by hand
+      // re-sent the old $2 own-stock quote to Han/4Star after John had moved on (Bug 118c)
+      const md = await gGet('/threads/' + m.threadId + '?format=metadata&metadataHeaders=From').catch(() => null);
+      const ours = (md?.messages || []).filter(x => !(x.labelIds || []).includes('DRAFT') &&
+        /@intransittech\.com/i.test(((x.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || ''));
+      if (!/need a target price to proceed/i.test(ours[ours.length - 1]?.snippet || '')) continue;
+      await hubLog(env, 'email_automation', 'run', `cronScanInbox: reopened tid=${m.threadId} — buyer answered our TP request after the thread was labeled tp-processed`);
       tpThreads = [m.threadId, ...tpThreads];
     }
   } catch (_) {}
@@ -4050,7 +4058,7 @@ async function cronScanInbox(env) {
       // No external buyer anywhere (all senders internal/Forte, no IC Source/netCOMPONENTS buyer) → nothing to reply to.
       // Ack it so it isn't rebuilt every run (root cause of the own_stock → SAFETY ABORT loop).
       const _ext = payload.ics_buyer_email || payload.nc_buyer_email || payload.sender || '';
-      if (!_ext || /intransittech\.com|messagesend@netcomponents|autosend@icsource|partalert@netcomponents/i.test(_ext)) {
+      if (!_ext || /intransittech\.com|amorelectronics\.com|messagesend@netcomponents|autosend@icsource|partalert@netcomponents/i.test(_ext)) {
         await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, tid).run().catch(() => {});
         await hubLog(env, 'email_automation', 'run', `cronScanInbox: ${source} skip — no external buyer on thread tid=${tid}`);
         continue;
