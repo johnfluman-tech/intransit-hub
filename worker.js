@@ -1691,8 +1691,10 @@ async function handleEmailAgent(request, env) {
     const m = t.match(/\$\s*(\d+(?:\.\d+)?)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
       t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
       // "18u" = $18 (Chinese buyer shorthand; Fuzhou Yongbo "Dear，18u", Bug 108). \b after u rejects "10uF"/"18uH"
-      t.match(/(?:^|[^\w.])(\d+(?:\.\d+)?)\s?u\b(?![.\d])/im);
-    const v = m ? parseFloat(m[1]) : null;
+      t.match(/(?:^|[^\w.])(\d+(?:\.\d+)?)\s?u\b(?![.\d])/im) ||
+      // European decimal comma "4,90 for 540 parts" (X Works, Bug 112). Max 2 decimals so "4,900 pcs" stays a qty
+      t.match(/(?:^|[^\w.,])(\d{1,4},\d{1,2})(?![\d,])\s*(?:usd|eur|\$|€|for\b|per\b|each|ea\b|\/\s*(?:pc|ea|unit))/im);
+    const v = m ? parseFloat(String(m[1]).replace(',', '.')) : null;
     return v && v > 0 && v < 100000 ? v : null;
   }
 
