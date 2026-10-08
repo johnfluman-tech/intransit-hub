@@ -3476,13 +3476,16 @@ const _MPN_GENERIC_WORDS = new Set(['QUOTE','QUOTES','RFQ','RFQS','REQUEST','REQ
 function extractMpnHint(subject) {
   if (!subject) return null;
   const cleaned = subject.replace(/--.*$/, '').trim();
-  const tokens = cleaned.split(/[\s,;|\/\[\]()]+/);
+  // "PN:ST3215SB32768H5HPWAA" / "P/N:XYZ" / "MPN#XYZ" — drop the label glued to the MPN (Vyrian, Bug 114)
+  const tokens = cleaned.split(/[\s,;|\/\[\]()]+/).map(t => t.replace(/^(?:M?PN|N|PART|P\/N)[:#]+/i, '').replace(/[:#]+$/, ''));
   const cands = tokens.filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 4 && !/^\d+(pcs?|k|m|units?)?$/i.test(t) && !_MPN_GENERIC_WORDS.has(t.toUpperCase())
     // Buyer reference numbers (VRFQ184567, RFQ-12345, PO#5521, REQ00912) are not MPNs
     && !/^[A-Z]{0,3}(RFQ|RFP|PO|REQ|INQ|QUO|QTE|CASE|TKT)[-#_:]?\d{3,}$/i.test(t)
     // Rebound refs "SPANSION_101-775921" / "ALTERA_101-775469" = MFR_ref#, not an MPN (Bug 110)
     && !/^[A-Z]+_\d{2,}-\d{4,}$/i.test(t));
-  return cands[0] || null;
+  // "CM1831 - 1F1T-14A624-AA-004": a short customer ref comes first; prefer a long hyphenated MPN (Bug 114)
+  const strong = cands.find(t => t.length >= 10 && /[A-Z0-9]-[A-Z0-9]/i.test(t));
+  return (cands[0] && cands[0].length < 8 && strong) ? strong : (cands[0] || null);
 }
 
 async function buildScanPayload(threadId, token, env) {
