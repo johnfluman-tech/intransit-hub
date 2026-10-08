@@ -3667,6 +3667,23 @@ async function buildScanPayload(threadId, token, env) {
     }
   }
 
+  // Alternates on a direct RFQ ("quote: LMZ21700SILR or LMZ21700SILT 946pcs") — extractMpnHint only takes the first,
+  // which we didn't stock, so it went no_bid while the SILT sat in OEM EXCESS. Collect the alternates so
+  // handleEmailAgent's multi-MPN promotion routes on whichever one we have (Bug 116)
+  if (payload.mpn && !payload.extra_mpns) {
+    const _altTxt = subject + '\n' + (firstBuyer ? stripQuoted(extractMimeText(firstBuyer.payload) || '').substring(0, 1000) : '');
+    const _escA = payload.mpn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const _tok = '[A-Z0-9][A-Z0-9\\-\\/.#]{3,}[A-Z0-9]';
+    const _sep = '\\s*(?:\\bor\\b|,|&|\\s\\/\\s)\\s*';
+    const _alts = [];
+    for (const m of _altTxt.matchAll(new RegExp(_escA + '((?:' + _sep + _tok + ')+)', 'gi'))) {
+      m[1].split(new RegExp(_sep, 'i')).map(s => s.trim().toUpperCase())
+        .filter(s => /[A-Z]/.test(s) && /\d/.test(s) && s.length >= 5 && s !== payload.mpn.toUpperCase() && !_alts.includes(s))
+        .forEach(s => _alts.push(s));
+    }
+    if (_alts.length) payload.extra_mpns = _alts;
+  }
+
   return payload;
 }
 
