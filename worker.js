@@ -3934,22 +3934,25 @@ async function cronScanInbox(env) {
     const inbox = new Set((inbRes.threads || []).map(t => t.id));
     const orphans = (labRes.threads || []).map(t => t.id).filter(id => inbox.has(id) && !tpThreads.includes(id));
     if (orphans.length) tpThreads = [...orphans, ...tpThreads];
-    // Reopen: a final label (e.g. a wrong no_bid) stuck on a thread, then John sent a TP request by hand and the
-    // buyer answered it — tpQ skips oem-tp-processed, so the TP reply was never seen (Legacy LMZ21700SILT, Bug 118).
-    // Only when our latest sent message is the TP request and the buyer wrote after it.
-    const reRes = await gGet('/threads?maxResults=20&q=' + encodeURIComponent('label:oem-tp-processed "need a target price to proceed" newer_than:14d'));
-    const reCand = (reRes.threads || []).map(t => t.id).filter(id => inbox.has(id) && !tpThreads.includes(id)).slice(0, 3);
-    for (const id of reCand) {
-      const md = await gGet('/threads/' + id + '?format=metadata&metadataHeaders=From').catch(() => null);
-      const ms = (md?.messages || []).filter(m => !(m.labelIds || []).includes('DRAFT'));
-      const fromOf = m => ((m.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
-      const lastOurs = [...ms].reverse().find(m => /@intransittech\.com/i.test(fromOf(m)));
-      const last = ms[ms.length - 1];
-      if (last && lastOurs && last !== lastOurs && /need a target price to proceed/i.test(lastOurs.snippet || '')) {
-        await gPost('/threads/' + id + '/modify', { removeLabelIds: ['Label_166'] });
-        await hubLog(env, 'email_automation', 'run', `cronScanInbox: reopened tid=${id} — buyer answered our TP request on a thread already labeled tp-processed`);
-        tpThreads = [id, ...tpThreads];
-      }
+  } catch (_) {}
+  // Reopen: a final label (e.g. a wrong no_bid) stuck on the thread, John then sent a TP request by hand and the buyer
+  // answered — tpQ skips oem-tp-processed, so the TP reply was never seen (Legacy LMZ21700SILT, Bug 118).
+  // Labels only stick to messages that existed when applied, so an unlabeled buyer message in a labeled thread arrived
+  // after the final action. Skip it once it's been drafted/acked so it doesn't loop.
+  try {
+    const [reMsgs, reLab] = await Promise.all([
+      gGet('/messages?maxResults=25&q=' + encodeURIComponent('in:inbox -label:oem-tp-processed -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com newer_than:3d')),
+      gGet('/threads?maxResults=200&q=' + encodeURIComponent('label:oem-tp-processed newer_than:30d')),
+    ]);
+    const labeled = new Set((reLab.threads || []).map(t => t.id));
+    const seen = new Set();
+    for (const m of (reMsgs.messages || [])) {  // newest first, so this is each thread's latest buyer message
+      if (!labeled.has(m.threadId) || seen.has(m.threadId) || tpThreads.includes(m.threadId)) continue;
+      seen.add(m.threadId);
+      if (seen.size > 5) break;
+      if (await env.DB.prepare("SELECT 1 FROM rules WHERE type IN ('acked_msg','drafted_msg') AND key=?").bind(m.id).first().catch(() => null)) continue;
+      await hubLog(env, 'email_automation', 'run', `cronScanInbox: reopened tid=${m.threadId} — buyer wrote after the thread was labeled tp-processed`);
+      tpThreads = [m.threadId, ...tpThreads];
     }
   } catch (_) {}
   const agentThreads = [...new Set((agentRes.messages || []).map(m => m.threadId))];
