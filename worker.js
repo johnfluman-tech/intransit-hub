@@ -1587,7 +1587,10 @@ async function handleEmailAgent(request, env) {
       _tcTp.match(/(?:order|price|priced?|@)\s*@\s*\$?([\d]+(?:\.\d+)?)/i) ||
       _tcTp.match(/(?:^|[\s,;])@\s*\$?([\d]+(?:\.\d+)?)(?:\s|$)/m);
     const _tpParsed = _tpMatch ? (_tpRangeHigh(_tcTp, _tpMatch) || parseFloat(_tpMatch[1])) : NaN;
-    const _tpVal = (_tpParsed > 0 && _tpParsed < 100000) ? _tpParsed : _lastMsgTp(body.last_msg_body);  // NaN/0 → no TP
+    // Follow-up with a revised price ("my math was wrong, can we do $0.17 x 3000") — the thread-wide match hits the
+    // buyer's earlier "$0.16 ea" first and re-sent below_min. The buyer's latest message wins (Express Tech, Bug 123)
+    const _lmTp = /--- Msg 2 \|/.test(thread_content || '') ? _lastMsgTp(body.last_msg_body) : null;
+    const _tpVal = _lmTp !== null ? _lmTp : (_tpParsed > 0 && _tpParsed < 100000) ? _tpParsed : _lastMsgTp(body.last_msg_body);  // NaN/0 → no TP
 
     // Extract buyer qty from thread content
     const _qtyM = (thread_content || '').match(/QtyReq=(\d+)/i) ||
@@ -1708,7 +1711,7 @@ async function handleEmailAgent(request, env) {
       t.match(/(?:^|[^\w.])(\d+(?:\.\d+)?)\s?u\b(?![.\d])/im) ||
       // European decimal comma "4,90 for 540 parts" (X Works, Bug 112). Max 2 decimals so "4,900 pcs" stays a qty
       t.match(/(?:^|[^\w.,])(\d{1,4},\d{1,2})(?![\d,])\s*(?:usd|eur|\$|€|for\b|per\b|each|ea\b|\/\s*(?:pc|ea|unit))/im);
-    const v = m ? parseFloat(String(m[1]).replace(',', '.')) : null;
+    const v = m ? (_tpRangeHigh(t, m) || parseFloat(String(m[1]).replace(',', '.'))) : null;  // range → high end
     return v && v > 0 && v < 100000 ? v : null;
   }
 
