@@ -878,7 +878,7 @@ async function extractMpnFromThread(subject, content, env) {
 // Rejects significant variant differences (e.g. LP2951ACM vs LP2951ACMX-3.3/NOPB).
 // "target would be 1.50", "TP should be around $2" — modal phrasing the label-style TP patterns don't reach (Bug 118)
 // "Target .40" / "Target 0.40" — bare number right after "target" (Hi-Tek EEE-FK1V681AQ, Bug 122). Not a qty ("target 50k pcs")
-const _TP_BARE = /\btarget(?:\s*price)?\s+\$?(\d*\.?\d+)(?![\d.]|\s*(?:k\b|pcs?\b|units?\b|pieces?\b|%))/i;
+const _TP_BARE = /\btarget(?:\s*price)?\s+\$?(\d*\.?\d+)(?!\d|\.\d|\s*(?:k\b|pcs?\b|units?\b|pieces?\b|%))/i;
 const _TP_WOULD_BE =/\b(?:tp|target(?:\s*price)?)\s+(?:would|will|should|could|can|may|might)\s+be\s*(?:around|about|approx(?:imately)?\.?|~)?\s*\$?(\d*\.?\d+)/i;
 
 function isMpnMatch(requestMpn, resultMpn) {
