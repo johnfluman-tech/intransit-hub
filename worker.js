@@ -3923,7 +3923,24 @@ async function cronScanInbox(env) {
     gGet('/messages?q=' + agentQ + '&maxResults=10'),
   ]);
 
-  const rfqThreads   = [...new Set((rfqRes.messages   || []).map(m => m.threadId))];
+  let   rfqThreads   = [...new Set((rfqRes.messages   || []).map(m => m.threadId))];
+  // Glued-qty subjects ("LPS25HBTR\t34667PCS", "VNQ830PTR-E 9404pcs") — Gmail indexes "34667PCS" as one word, so the
+  // "pcs" terms never match, and plain wording ("do you have a quote for this part") isn't in rfqQ (Bug 120).
+  // Check new inbox subjects in code instead; each message is looked at once (subj_checked).
+  try {
+    const gl = await gGet('/messages?maxResults=15&q=' + encodeURIComponent('in:inbox -label:oem-rfq-incoming-processed -label:oem-agent-processed -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -from:amorelectronics.com -from:partalert@netcomponents.com newer_than:2d'));
+    for (const m of (gl.messages || []).slice(0, 10)) {
+      if (rfqThreads.includes(m.threadId)) continue;
+      if (await env.DB.prepare("SELECT 1 FROM rules WHERE type='subj_checked' AND key=?").bind(m.id).first().catch(() => null)) continue;
+      const md = await gGet('/messages/' + m.id + '?format=metadata&metadataHeaders=Subject').catch(() => null);
+      const subj = ((md?.payload?.headers || []).find(h => h.name.toLowerCase() === 'subject') || {}).value || '';
+      await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('subj_checked', ?, ?)").bind(m.id, subj.slice(0, 100)).run().catch(() => {});
+      if (/(?:^|\s)(?=[A-Z0-9\-\/.#_:+]*\d)(?=[A-Z0-9\-\/.#_:+]*[A-Z])[A-Z0-9][A-Z0-9\-\/.#_:+]{3,}\s+[\d,]+\s*(?:pcs?|units?|ea)\b/i.test(subj)) {
+        await hubLog(env, 'email_automation', 'run', `cronScanInbox: glued-qty subject picked up as rfq — "${subj.trim().slice(0, 60)}" tid=${m.threadId}`);
+        rfqThreads = [m.threadId, ...rfqThreads];
+      }
+    }
+  } catch (_) {}
   let   tpThreads    = [...new Set((tpRes.messages    || []).map(m => m.threadId))];
   // Gmail search is per-message: once a thread is archived, the buyer's NEW reply has INBOX but not
   // oem-rfq-incoming-processed (labels don't carry to later messages), so tpQ never matches it
