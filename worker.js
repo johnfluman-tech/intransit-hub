@@ -877,7 +877,9 @@ async function extractMpnFromThread(subject, content, env) {
 // Accepts exact match, prefix match, and minor suffix differences (â‰¤3 chars).
 // Rejects significant variant differences (e.g. LP2951ACM vs LP2951ACMX-3.3/NOPB).
 // "target would be 1.50", "TP should be around $2" — modal phrasing the label-style TP patterns don't reach (Bug 118)
-const _TP_WOULD_BE = /\b(?:tp|target(?:\s*price)?)\s+(?:would|will|should|could|can|may|might)\s+be\s*(?:around|about|approx(?:imately)?\.?|~)?\s*\$?(\d*\.?\d+)/i;
+// "Target .40" / "Target 0.40" — bare number right after "target" (Hi-Tek EEE-FK1V681AQ, Bug 122). Not a qty ("target 50k pcs")
+const _TP_BARE = /\btarget(?:\s*price)?\s+\$?(\d*\.?\d+)(?![\d.]|\s*(?:k\b|pcs?\b|units?\b|pieces?\b|%))/i;
+const _TP_WOULD_BE =/\b(?:tp|target(?:\s*price)?)\s+(?:would|will|should|could|can|may|might)\s+be\s*(?:around|about|approx(?:imately)?\.?|~)?\s*\$?(\d*\.?\d+)/i;
 
 function isMpnMatch(requestMpn, resultMpn) {
   if (!requestMpn || !resultMpn) return false;
@@ -1574,6 +1576,7 @@ async function handleEmailAgent(request, env) {
       _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?(\d*\.?\d+)/i) ||
       _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s*\$\s*(\d*\.?\d+)/i) ||
       _tcTp.match(_TP_WOULD_BE) ||
+      _tcTp.match(_TP_BARE) ||
       _tcTp.match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
       _tcTp.match(/([\d]+(?:\.\d+)?)\s*usd\b/i) ||    // "4usd", "4 usd"
       _tcTp.match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
@@ -1733,7 +1736,8 @@ async function handleEmailAgent(request, env) {
       /\btp\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?\.?\d/i.test(_lc) ||   // "tp at 0.5" (Goldney), "Target price is .19" (B2 Micro, Bug 117)
       /\b(?:tp|target(?:\s*price)?)\s*\$\s*\.?\d/i.test(_lc) ||                 // "TP $10" (Fuzhou Yongbo)
-      _TP_WOULD_BE.test(_lc) ||                                                 // "my target would be 1.50 – 1.75" (Legacy, Bug 118)
+      _TP_WOULD_BE.test(_lc) ||
+      _TP_BARE.test(_lc) ||                                                     // "Target .40" (Hi-Tek, Bug 122)                                                 // "my target would be 1.50 – 1.75" (Legacy, Bug 118)
       /\bprice\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
       /[\d]+(?:\.\d+)?\s*usd\b/i.test(_lc) ||           // Bug 72: "4usd", "4 usd" — no trailing unit needed
