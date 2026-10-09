@@ -1365,6 +1365,12 @@ async function handleEmailAgent(request, env) {
       r => !/Warehouse#/i.test(r.notes || '') && (_normQ(r.mpn || '') === _normQ(requestMpn) || _stripStd(r.mpn || '') === _normReqBase)
     );
     if (_exactOwn.length > 0) {
+      // Already quoted our stock in this thread → the buyer's reply is a counter ("0.7u,can place po"). Price calls are
+      // John's (he countered 4Star, took a TP on Fuzhou Yongbo) — re-drafting the same quote is never right (Bug 121)
+      if (/We have the following available/i.test(thread_content || '')) {
+        await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: own_stock already quoted in thread — counter left for John`, { subject, mpn: requestMpn });
+        return json({ action: 'no_action', reasoning: 'skip_thread: own stock already quoted — buyer counter/negotiation is for John', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+      }
       const _mpnKey = requestMpn.replace(/\s+/g,'').toUpperCase();
       const _r = _exactOwn[0];
       const _rawP = _r.price_to_quote;
