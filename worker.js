@@ -3557,6 +3557,10 @@ function isStaffHandoffToJohn(from, snippet) {
 function extractMpnHint(subject) {
   if (!subject) return null;
   const cleaned = subject.replace(/--.*$/, '').trim();
+  // Mil-spec MPNs carry a slash ("JM38510/34107BFA", "M39003/01-2286") — splitting on "/" looked up just
+  // "JM38510" → no IN STOCK hit → no_bid on a W3 part (Bug 126)
+  const _mil = cleaned.match(/(?:^|[\s,;:#(])((?:J?M|JAN[A-Z]*)\d{4,6}\/[A-Z0-9][A-Z0-9\-]{2,})(?=$|[\s,;)])/i);
+  if (_mil) return _mil[1].toUpperCase();
   // "PN:ST3215SB32768H5HPWAA" / "P/N:XYZ" / "MPN#XYZ" — drop the label glued to the MPN (Vyrian, Bug 114)
   // "RFQ:TFBS4711-TR3" / "RFQ：TDA5235" (full-width colon) — the label glued on made the lookup miss → no_bid (Bug 125)
   const tokens = cleaned.split(/[\s,;|\/\[\]()]+/).map(t => t.replace(/^(?:RFQ|RFP|RE|FWD?|INQ|REQ)[:：]+/i, '').replace(/^(?:M?PN|N|PART|P\/N)[:#]+/i, '').replace(/[:#：]+$/, ''));
