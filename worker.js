@@ -959,6 +959,27 @@ function parseICSourceHTML(html) {
     headers.push(m[1].replace(/<[^>]+>/g, '').trim().toLowerCase());
   }
   const buyerEmail = extractBuyerEmailFromHtml(html);
+  // WEBSITE FORMAT ("Request for Quote from your Website", to WebsiteRFQ@): header row is <td> cells
+  // "Quantity | Part Number | Mfg | Date Code | List Price | Req Unit Price | Total Price" — no <th>, so MPN came
+  // back null → silent no_bid on Ezkey BZT585B5V6T-7 / ansay FZT651TA (Bug 125). Data row follows the header row.
+  if (!headers.length) {
+    const _rows = [];
+    let _rm; const _rr = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    while ((_rm = _rr.exec(html)) !== null) {
+      const _c = []; let _t; const _tr = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+      while ((_t = _tr.exec(_rm[1])) !== null) _c.push(_t[1].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim());
+      _rows.push(_c);
+    }
+    const _hi = _rows.findIndex(r => r.some(c => /^part\s*number$/i.test(c)) && r.some(c => /^quantity$/i.test(c)));
+    if (_hi >= 0 && _rows[_hi + 1]) {
+      const _h = _rows[_hi].map(c => c.toLowerCase()), _d = _rows[_hi + 1];
+      const _q = parseInt((_d[_h.indexOf('quantity')] || '').replace(/,/g, ''), 10);
+      const _p = _d[_h.findIndex(h => /^part\s*number$/.test(h))] || null;
+      const _ti = _h.findIndex(h => h.includes('req unit price') || h.includes('target price'));
+      const _tp = _ti >= 0 ? parseFloat((_d[_ti] || '').replace(/[$,]/g, '')) : NaN;
+      return { qtyReq: isNaN(_q) ? null : _q, mpn: _p, tgtPrice: isNaN(_tp) || _tp <= 0 ? null : _tp, buyerEmail };
+    }
+  }
   if (!headers.length) return buyerEmail ? { qtyReq: null, mpn: null, tgtPrice: null, buyerEmail } : null;
   const qtyIdx = headers.findIndex(h => h === 'quantity' || h === 'qty');
   const mpnIdx = headers.findIndex(h => h === 'part number' || h === 'part no.' || (h.includes('part') && !h.includes('price')));
@@ -1288,6 +1309,26 @@ async function handleEmailAgent(request, env) {
           }
         }
       } catch(e2) { /* ignore retry errors â€" proceed to no_bid/listing_removed */ }
+      // "LTS 6-NP": the buyer split the MPN and extraction kept "6-NP" — retry with the word before it joined on
+      // (OEM has LTS6-NP; Global Solution got a silent no_bid, Bug 125). Only used when it actually hits inventory.
+      try {
+        const _escM = requestMpn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const _prev = ((subject + '\n' + (thread_content || '')).match(new RegExp('\\b([A-Za-z]{2,5})[ \\t]+' + _escM + '\\b', 'i')) || [])[1];
+        if (_prev && !_MPN_GENERIC_WORDS.has(_prev.toUpperCase())) {
+          const _joined = (_prev + requestMpn).toUpperCase();
+          const inv3 = await lookupInventory(_joined);
+          const oemHit3 = (inv3?.oem_excess || []).filter(r => isMpnMatch(_joined, r.mpn));
+          if (oemHit3.length > 0 && !(inv3.in_stock || []).length) {
+            // Buyer already gave a TP → don't ask again; leave it for John (no_action → pending_issues after retries)
+            if (_tpDetect(thread_content) || _lastMsgTp(body.last_msg_body) !== null) {
+              return json({ action: 'no_action', reasoning: `Split MPN joined (${_joined}) found in OEM EXCESS but buyer gave a TP — needs John`, mpn: _joined, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+            }
+            await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: split MPN — "${_prev} ${requestMpn}" found as ${_joined}`, { subject });
+            const has2k3 = oemHit3.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+            return json({ action: has2k3 ? 'request_tp_2000' : 'request_tp_500', reasoning: `Split MPN joined (${_joined}) — OEM EXCESS exists, no TP given`, mpn: _joined, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+          }
+        }
+      } catch(e3) { /* fall through to no_bid */ }
     }
     // Retry found nothing â€" determine response based on email source.
     // If the RFQ came through a listing site (netCOMPONENTS, IC Source), the buyer found our
@@ -3514,7 +3555,8 @@ function extractMpnHint(subject) {
   if (!subject) return null;
   const cleaned = subject.replace(/--.*$/, '').trim();
   // "PN:ST3215SB32768H5HPWAA" / "P/N:XYZ" / "MPN#XYZ" — drop the label glued to the MPN (Vyrian, Bug 114)
-  const tokens = cleaned.split(/[\s,;|\/\[\]()]+/).map(t => t.replace(/^(?:M?PN|N|PART|P\/N)[:#]+/i, '').replace(/[:#]+$/, ''));
+  // "RFQ:TFBS4711-TR3" / "RFQ：TDA5235" (full-width colon) — the label glued on made the lookup miss → no_bid (Bug 125)
+  const tokens = cleaned.split(/[\s,;|\/\[\]()]+/).map(t => t.replace(/^(?:RFQ|RFP|RE|FWD?|INQ|REQ)[:：]+/i, '').replace(/^(?:M?PN|N|PART|P\/N)[:#]+/i, '').replace(/[:#：]+$/, ''));
   // "RFQ 100726B / NXP": a mostly-numeric code right after RFQ/PO/REF is the buyer's ref, not an MPN (Bug 115).
   // "RFQ # BMS13-60T27C02G020" keeps its MPN — only digits + up to 2 trailing letters are dropped.
   const _refAfter = new Set(tokens.filter((t, i) => i > 0 && /^\d{4,}[A-Z]{0,2}$/i.test(t) &&
