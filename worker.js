@@ -1707,6 +1707,8 @@ async function handleEmailAgent(request, env) {
     const t = String(lb || '').replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ');
     const m = t.match(/\$\s*(\d+(?:\.\d+)?)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
       t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
+      // "4.00 each John." — bare decimal + each/ea, no $ (Cross Components, Bug 124). Decimal required so "1300 each" stays a qty
+      t.match(/(?:^|[^\w.$])(\d*\.\d{1,4})\s*(?:each|ea\b|\/\s*(?:ea|pc|pcs|unit))/im) ||
       // "18u" = $18 (Chinese buyer shorthand; Fuzhou Yongbo "Dear，18u", Bug 108). \b after u rejects "10uF"/"18uH"
       t.match(/(?:^|[^\w.])(\d+(?:\.\d+)?)\s?u\b(?![.\d])/im) ||
       // European decimal comma "4,90 for 540 parts" (X Works, Bug 112). Max 2 decimals so "4,900 pcs" stays a qty
@@ -4088,6 +4090,13 @@ async function cronScanInbox(env) {
       // No external buyer anywhere (all senders internal/Forte, no IC Source/netCOMPONENTS buyer) → nothing to reply to.
       // Ack it so it isn't rebuilt every run (root cause of the own_stock → SAFETY ABORT loop).
       const _ext = payload.ics_buyer_email || payload.nc_buyer_email || payload.sender || '';
+      // "Quote from netCOMPONENTS Supplier" = a supplier quoting John on HIS RFQ — never a buyer. MGCOM got three
+      // "no longer available" drafts on BD429A (Bug 124)
+      if (/quote from netcomponents supplier/i.test(payload.subject || '')) {
+        await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, tid).run().catch(() => {});
+        await hubLog(env, 'email_automation', 'run', `cronScanInbox: ${source} skip — supplier quote to John, not an RFQ tid=${tid}`);
+        continue;
+      }
       if (!_ext || /intransittech\.com|amorelectronics\.com|messagesend@netcomponents|autosend@icsource|partalert@netcomponents/i.test(_ext)) {
         await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, tid).run().catch(() => {});
         await hubLog(env, 'email_automation', 'run', `cronScanInbox: ${source} skip — no external buyer on thread tid=${tid}`);
