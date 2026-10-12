@@ -128,6 +128,9 @@ export default {
 
       if (p === '/api/command-queue' && m === 'GET')  return handleGetCommandQueue(url, env);
       if (p === '/api/command-queue' && m === 'POST') return handlePostCommandQueue(request, env);
+      // Gmail access token for John's local scripts (payroll_auto.py). Behind the HUB_SECRET gate — the old open
+      // /api/gmail-token-test was removed as a token leak (Oct 1), which silently broke PayrollStubsAuto
+      if (p === '/api/gmail-token' && m === 'GET') return json({ access_token: await getGmailToken(env) });
       if (p === '/api/command-queue/process' && m === 'POST') { ctx.waitUntil(cronProcessCommandQueue(env).catch(() => {})); return json({ ok: true }); }
       const cmdId = p.match(/^\/api\/command-queue\/(\d+)$/);
       if (cmdId && m === 'GET')   return handleGetCommandById(env, parseInt(cmdId[1]));
