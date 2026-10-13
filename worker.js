@@ -1445,7 +1445,12 @@ async function handleEmailAgent(request, env) {
       ...(in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).map(r => r.mpn),
     ].filter(Boolean).map(String);
     // Split "ISO1640DWR  /ADUM2250ARWZ-RL" style two-part cells so either part counts as exact (Bug 103)
-    const _exact = _inv.flatMap(m => [m, ...m.split(/\s+\/\s*|\s*\/\s+/)]).some(m => _n(m) === _n(requestMpn) || _base(m) === _base(requestMpn));
+    // Buyer typed the suffix with a space ("DPS-500AB-40 A") → requestMpn lost the "A" and our DPS-500AB-40A
+    // read as a variant (Bug 127). Re-join the short token that follows the MPN in the subject/body.
+    const _esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const _sfx = ((subject || '') + '\n' + (thread_content || '')).match(new RegExp(_esc(requestMpn) + '[ \\t]+([A-Z0-9]{1,3})(?![A-Z0-9])', 'i'));
+    const _reqs = _sfx ? [requestMpn, requestMpn + _sfx[1]] : [requestMpn];
+    const _exact = _inv.flatMap(m => [m, ...m.split(/\s+\/\s*|\s*\/\s+/)]).some(m => _reqs.some(q => _n(m) === _n(q) || _base(m) === _base(q)));
     const _similar = [...new Set(_inv.filter(m => isMpnMatch(requestMpn, m)))];
     if (!_exact && _similar.length > 0) {
       const _ours = _similar[0].trim();
