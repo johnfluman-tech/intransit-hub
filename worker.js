@@ -3660,7 +3660,11 @@ async function buildScanPayload(threadId, token, env) {
     const _ctx = payload.last_msg_body + '\n' + (_ourLast ? stripQuoted(extractMimeText(_ourLast.payload) || '').substring(0, 1000) : '');
     const _hit = (_ctx.match(/\b[A-Z0-9][A-Z0-9\-\/.#]{4,}[A-Z0-9]\b/gi) || [])
       .filter(t => /[A-Za-z]/.test(t) && /\d/.test(t) && t.toUpperCase() !== payload.mpn.toUpperCase())
-      .find(t => new RegExp('(?:^|\\s)' + _esc(t) + '(?=\\s|$)', 'im').test(_firstTxt));
+      .find(t => {
+        const _ln = (_firstTxt.match(new RegExp('^.*(?:^|\\s)' + _esc(t) + '(?=\\s|$).*$', 'im')) || [])[0];
+        // Signature cert lines repeat in every buyer message — "ANSI/ESD S20.20" became the MPN → no_bid (Quest PNF18-6R, Bug 130)
+        return _ln && !/\b(?:iso|ansi|esd|erai|idea|as\s?9\d{3}|certified|certification|direct|fax|phone|tel|mobile)\b/i.test(_ln);
+      });
     if (_hit) {
       payload.mpn = _hit.toUpperCase();
       const _line = (_firstTxt.match(new RegExp('^.*' + _esc(_hit) + '(.*)$', 'im')) || [])[1] || '';
