@@ -1754,7 +1754,7 @@ async function handleEmailAgent(request, env) {
   // MAX17498BATE+). Scoped to last_msg_body so our "$500 minimum" and the listing's "$500 MIN TP REQUIRED" can't count.
   function _lastMsgTp(lb) {
     const t = String(lb || '').replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ');
-    const m = t.match(/\$\s*(\d+(?:\.\d+)?)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
+    const m = t.match(/\$\s*(\d+(?:\.\d+)?|\.\d+)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||   // \.\d+ = "$.35 each" (Quest, Bug 130)
       t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
       // "4.00 each John." — bare decimal + each/ea, no $ (Cross Components, Bug 124). Decimal required so "1300 each" stays a qty
       t.match(/(?:^|[^\w.$])(\d*\.\d{1,4})\s*(?:each|ea\b|\/\s*(?:ea|pc|pcs|unit))/im) ||
@@ -1793,7 +1793,7 @@ async function handleEmailAgent(request, env) {
       _TP_WOULD_BE.test(_lc) ||
       _TP_BARE.test(_lc) ||                                                     // "Target .40" (Hi-Tek, Bug 122)                                                 // "my target would be 1.50 – 1.75" (Legacy, Bug 118)
       /\bprice\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
-      /\$[\s]*[\d]+(?:\.\d+)?\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
+      /\$[\s]*(?:[\d]+(?:\.\d+)?|\.\d+)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i.test(_lc) ||
       /[\d]+(?:\.\d+)?\s*usd\b/i.test(_lc) ||           // Bug 72: "4usd", "4 usd" — no trailing unit needed
       /usd\s*[\d]+(?:\.\d+)?/i.test(_lc) ||
       /[\d]+(?:\.\d+)?[$]/i.test(_lc) ||                // Bug 73: "4$", "4.50$" trailing dollar sign
@@ -4429,7 +4429,13 @@ async function cronCheckDavidNoStock(env) {
 
       // Also match with spaces collapsed — David typos like "no s tk" (Bug 128)
       const checkCompact = checkText.replace(/\s+/g, '');
-      const isNoStk = NO_STK.some(kw => checkText.includes(kw) || checkCompact.includes(kw.replace(/\s+/g, '')));
+      // Body fallback (Bug 129): David's own NEW text only — quoted history cut off, signature cut off —
+      // and only when it's a short note like "No stk". Quoted history caused the A-0412 false removal (Bug 104).
+      const _ownText = bodyAll.split(/^\s*(?:>|from:|sent:|-{3,}\s*original|on .{0,120}wrote:)/m)[0]
+        .split(/\bthank you\b|\bthanks\b|david v\. poggi/)[0].replace(/\s+/g, ' ').trim();
+      const _ownCompact = _ownText.replace(/\s+/g, '');
+      const bodyNoStk = _ownText.length > 0 && _ownText.length <= 40 && NO_STK.some(kw => _ownCompact.includes(kw.replace(/\s+/g, '')));
+      const isNoStk = bodyNoStk || NO_STK.some(kw => checkText.includes(kw) || checkCompact.includes(kw.replace(/\s+/g, '')));
       if (!isNoStk) {
         await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
         continue;
