@@ -4427,7 +4427,9 @@ async function cronCheckDavidNoStock(env) {
         continue;
       }
 
-      const isNoStk = NO_STK.some(kw => checkText.includes(kw));
+      // Also match with spaces collapsed — David typos like "no s tk" (Bug 128)
+      const checkCompact = checkText.replace(/\s+/g, '');
+      const isNoStk = NO_STK.some(kw => checkText.includes(kw) || checkCompact.includes(kw.replace(/\s+/g, '')));
       if (!isNoStk) {
         await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
         continue;
