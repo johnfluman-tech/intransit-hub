@@ -3657,6 +3657,16 @@ async function buildScanPayload(threadId, token, env) {
   const _effectiveMpn = mpnHint || _bodyMpnHint;
   if (_effectiveMpn && /[0-9]/.test(_effectiveMpn) && _effectiveMpn.length >= 4) payload.mpn = _effectiveMpn;
 
+  // Buyer answered our TP request with just a number ("3") — that's the TP, not a new RFQ.
+  // Daelith O3854AQDCARQ1 got a 2nd TP request (Bug 133). Rewrite as "$3" so every TP check downstream sees it.
+  if (msgs.length > 1) {
+    const _bare = payload.last_msg_body.replace(/\n\s*\*?(?:Regards|Thanks?|Best|BR)\b[\s\S]*$/i, '').trim()
+      .match(/^(?:tp|target(?:\s*price)?)?\s*[:=]?\s*(?:usd)?\s*\$?\s*(\d*\.?\d+)\s*(?:usd|\$|u)?\s*\.?$/i);
+    const _ourPrev = [...msgs].reverse().find(m => /intransittech\.com/i.test(getHdr(m, 'From')) && !(m.labelIds || []).includes('DRAFT'));
+    const _askedTp = _ourPrev && /we need a target price/i.test(extractMimeText(_ourPrev.payload) || '');
+    if (_bare && _askedTp && parseFloat(_bare[1]) > 0 && parseFloat(_bare[1]) < 1000) payload.last_msg_body = '$' + _bare[1];
+  }
+
   // Multi-line RFQ follow-up about a line other than the subject's ("The PN CIC21P101NE ... enter 0.16 as a target"):
   // route on that line, not the subject MPN — Emporium got the AR8035 stock quote re-sent (Bug 111)
   if (msgs.length > 1 && payload.mpn) {
