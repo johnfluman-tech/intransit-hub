@@ -4089,7 +4089,9 @@ async function cronScanInbox(env) {
     const md = await gGet('/threads/' + t + '?format=metadata&metadataHeaders=From').catch(() => null);
     const lm = (md?.messages || []).filter(m => !(m.labelIds || []).includes('DRAFT')).pop();
     const lf = ((lm?.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
-    if (!/@intransittech\.com/i.test(lf)) tpPick.push(t);
+    // David/Forte last (pricing commentary, "please post") is cronCheckDavidNoStock's job — these sat in the inbox and took
+    // every tp slot each run, starving Mickey/Source1's MAX17498BATE TP reply (Bug 132)
+    if (!/@intransittech\.com|fortetechno\.com|fortecomp\.com/i.test(lf)) tpPick.push(t);
   }
   const toProcess = [
     ...rfqThreads.slice(0, limitEach).map(t => ({ tid: t, source: 'rfq' })),
@@ -4386,7 +4388,7 @@ async function cronCheckDavidNoStock(env) {
   const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
 
   // Only explicit phrases David uses to mean he has no stock â€" NOT market commentary
-  const NO_STK = ['no stk','no stock','cant share','part sold','stk sold','sold out','all sold'];
+  const NO_STK = ['no stk','no stock','cant share',"can't share",'cant find',"can't find",'part sold','stk sold','sold out','all sold'];  // 'cant find' missing → VIPER26LDTR #4760 missed (Bug 132)
   // Market-pricing emails list competitor distributors + prices â€" never treat as no-stock
   const MARKET_DISTRIBUTORS = ['newark','mouser','avnet','digikey','arrow','future','turandot','winsun','vrg','bettering','element14','rs components','farnell'];
   function isMarketPricingEmail(text) {
