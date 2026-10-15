@@ -1439,7 +1439,8 @@ async function handleEmailAgent(request, env) {
   if (requestMpn && !/would\s+you\s+be\s+able\s+to\s+use\s+this\s+part\s+number/i.test(thread_content || '')) {
     const _n = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     // OEM EXCESS often glues the package onto the MPN ("PCM1803ADBRSSOP-20") — same part, not a variant
-    const _base = s => _n(s).replace(/(?:TSSOP|SSOP|MSOP|SOIC|SOP|LQFP|TQFP|QFP|QFN|DFN|BGA|PDIP|DIP|PLCC|SOT|TO)\d*$/, '').replace(/(NOPB|T&R|TR)$/, '');
+    // Maxim "+" (lead-free) / "+T" (tape & reel) — same part, not a variant (MAX17498BATE vs +T, Bug 131)
+    const _base = s => _n(String(s || '').replace(/\+T?\s*$/i, '')).replace(/(?:TSSOP|SSOP|MSOP|SOIC|SOP|LQFP|TQFP|QFP|QFN|DFN|BGA|PDIP|DIP|PLCC|SOT|TO)\d*$/, '').replace(/(NOPB|T&R|TR)$/, '');
     const _inv = [
       ...(oem_results || []).map(r => r.mpn),
       ...(in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).map(r => r.mpn),
@@ -1624,6 +1625,7 @@ async function handleEmailAgent(request, env) {
       _tcTp.match(/\btp\s*[:=]\s*\$?(\d*\.?\d+)/i) ||
       _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?(\d*\.?\d+)/i) ||
       _tcTp.match(/\b(?:tp|target(?:\s*price)?)\s*\$\s*(\d*\.?\d+)/i) ||
+      _tcTp.match(/\$\s*(\d*\.?\d+)\s*(?:tp|target)\b/i) ||   // "$9 TP" (Bug 131)
       _tcTp.match(_TP_WOULD_BE) ||
       _tcTp.match(_TP_BARE) ||
       _tcTp.match(/\$\s*([\d]+(?:\.\d+)?)\s*(?:\/pcs?|each|ea\b|\/ea|usd|per\s*(?:pc|ea))/i) ||
@@ -1649,6 +1651,9 @@ async function handleEmailAgent(request, env) {
       (thread_content || '').match(/\b(\d{1,7})\s*pcs?\b/i) ||
       (thread_content || '').match(/qty\s*[:=]\s*(\d{1,7})/i);
     let _buyerQty = _qtyM ? parseInt(_qtyM[1]) : null;
+    // "need 10k pcs" — k-suffixed qty (Source1 MAX17498BATE, Bug 131)
+    const _kQty = !_qtyM && (thread_content || '').match(/\b(\d{1,4}(?:\.\d+)?)\s*k\s*(?:pcs?|pieces|units|ea)\b/i);
+    if (_kQty) _buyerQty = Math.round(parseFloat(_kQty[1]) * 1000);
     // We already sent below_min_line ("require a minimum of 50 pieces") → the buyer's reply answers it.
     // Accept ("That's fine") or a qty ≥ min → use that qty; anything else → leave it for John, never repeat the offer (6098-9412, Bug 106)
     const _minOffer = (thread_content || '').match(/we would require a minimum of\s+(\d+)\s+pieces/i);
@@ -1723,7 +1728,9 @@ async function handleEmailAgent(request, env) {
         // 60-day duplicate rule — old rows (SAK-XC167 2024, S-100 May) must not block a new entry (Bug 105)
         const _recentForte = (forte_results || []).filter(r => { const d = Date.parse(r.date); return isNaN(d) || (Date.now() - d) < 60 * 86400000; });
         if (_recentForte.length === 0 && _tpVal && _buyerQty && requestMpn) {
-          _forteEntry = { mpn: requestMpn, qty: _buyerQty, target_price: _tpVal, country: _senderCtry };
+          // Buyer accepted our variant ("We have MAX17498BATE+T available — would you be able to use…") → log OUR MPN (Bug 131)
+          const _askedVar = (thread_content || '').match(/We have\s+(\S+)\s+available\s*[—–-]+\s*would\s+you\s+be\s+able\s+to\s+use/i);
+          _forteEntry = { mpn: _askedVar ? _askedVar[1] : requestMpn, qty: _buyerQty, target_price: _tpVal, country: _senderCtry };
         }
       }
     } else if (_stanQ) {
@@ -1790,6 +1797,7 @@ async function handleEmailAgent(request, env) {
       /\btp\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?\.?\d/i.test(_lc) ||   // "tp at 0.5" (Goldney), "Target price is .19" (B2 Micro, Bug 117)
       /\b(?:tp|target(?:\s*price)?)\s*\$\s*\.?\d/i.test(_lc) ||                 // "TP $10" (Fuzhou Yongbo)
+      /\$\s*(?:\d+(?:\.\d+)?|\.\d+)\s*(?:tp|target)\b/i.test(_lc) ||           // "10k pcs at $9 TP" (Source1, Bug 131)
       _TP_WOULD_BE.test(_lc) ||
       _TP_BARE.test(_lc) ||                                                     // "Target .40" (Hi-Tek, Bug 122)                                                 // "my target would be 1.50 – 1.75" (Legacy, Bug 118)
       /\bprice\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
