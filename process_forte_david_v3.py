@@ -233,6 +233,10 @@ ws  = gc.open_by_key(OEM_SHEET_ID).worksheet(SHEET_TAB)
 print('Reading current sheet to find BILL EXT rows...')
 current = ws.get_all_values()  # list of lists, row 0 = header
 bill_rows = [r for r in current[1:] if 'BILL EXT' in str(r[4]).upper()]
+# get_all_values() returns display text ("1,000") — store QTY as a number or the column won't sort (Oct 15)
+for r in bill_rows:
+    q = str(r[3]).replace(',', '').strip()
+    if q.isdigit(): r[3] = int(q)
 print(f'  Current rows: {len(current)-1:,} | BILL EXT to keep: {len(bill_rows):,}')
 
 # Build full replacement: header + bill rows + new data
