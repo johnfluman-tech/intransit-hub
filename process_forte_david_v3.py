@@ -2,7 +2,7 @@
 process_forte_david_v3.py
 Standard Forte raw-file conversion for David's new-format file.
 
-Input : ForteCurrentAvailableExcess2 (Repaired) (5).xlsx  (no header, cols A-F)
+Input : ForteCurrentAvailableExcess2 (Repaired) (7).xlsx  (no header, cols A-F)
          Col A = PartNumber, B = Manufacturer, C = Quantity, D = Location/customer, E = Notes
 Output: forte_processed_output.csv  (header + data; 5 cols)
          FullPartNumber, Man, DC, QTY, Notes
@@ -18,7 +18,7 @@ import openpyxl
 import gspread
 from google.oauth2.service_account import Credentials
 
-INPUT_FILE  = r'G:\My Drive\Download Internet\ForteCurrentAvailableExcess2 (Repaired) (5).xlsx'
+INPUT_FILE  = r'G:\My Drive\Download Internet\ForteCurrentAvailableExcess2 (Repaired) (7).xlsx'
 OUTPUT_FILE = r'G:\My Drive\Download Internet\forte_processed_output.csv'
 
 # ── Cheap-part filter ────────────────────────────────────────────────────────
