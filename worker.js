@@ -5057,7 +5057,9 @@ async function cronProcessFixQueue(env) {
             }
           } catch(e) { /* non-fatal */ }
         }
-        await workerDeleteOemRow(env, data.mpn || '', data.row || 0);
+        // Already off OEM EXCESS (e.g. David's new list dropped it) → still stamp Forte; VIPER26LDTR stayed Open (Bug 132)
+        try { await workerDeleteOemRow(env, data.mpn || '', data.row || 0); }
+        catch (e) { if (!(data.mpn && /MPN not found/.test(e.message))) throw e; }
         // Stamp Forte col K "NO STK - today" + black/white formatting for every matching open row
         if (data.mpn) {
           const oemToday = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles' });
