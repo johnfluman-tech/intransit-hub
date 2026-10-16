@@ -1436,6 +1436,17 @@ async function handleEmailAgent(request, env) {
   // close variant (PMEG3020EJ vs PMEG3020EJ115, MAX232 vs MAX232A) → ask if they can use OUR part number first.
   // NOPB / TR / T&R suffixes are the same part. Once we've asked, the buyer's answer flows through normally.
   // \s+ — the sent reply's plain-text part wraps lines ("use this part\nnumber"), Bug 101
+  // Warehouse#N variant is NOT the buyer's part: LCMXO256C-4TN100C-3I (WH3) hijacked an exact OEM EXCESS
+  // LCMXO256C-4TN100C → "warehouse checking" + Stan row instead of msg_checking + Forte (Bug 135).
+  // Drop WH3 rows that don't match the buyer's MPN (or the variant we already offered); they only feed the similar-MPN ask.
+  let _wh3Var = [];
+  if (requestMpn && (in_stock_results || []).length) {
+    const _nW = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/(NOPB|T&R|TR)$/, '');
+    const _offered = ((thread_content || '').match(/We have\s+(\S+)\s+available\s*[—–-]+\s*would\s+you\s+be\s+able\s+to\s+use/i) || [])[1];
+    const _keepW = r => !/Warehouse#\d/i.test(r.notes || '') || [requestMpn, _offered].some(q => q && _nW(q) === _nW(r.mpn));
+    _wh3Var = in_stock_results.filter(r => !_keepW(r));
+    if (_wh3Var.length) in_stock_results = in_stock_results.filter(_keepW);
+  }
   if (requestMpn && !/would\s+you\s+be\s+able\s+to\s+use\s+this\s+part\s+number/i.test(thread_content || '')) {
     const _n = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     // OEM EXCESS often glues the package onto the MPN ("PCM1803ADBRSSOP-20") — same part, not a variant
@@ -1444,6 +1455,7 @@ async function handleEmailAgent(request, env) {
     const _inv = [
       ...(oem_results || []).map(r => r.mpn),
       ...(in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).map(r => r.mpn),
+      ..._wh3Var.map(r => r.mpn),  // WH3 variant with no exact match anywhere → ask the buyer (Bug 135)
     ].filter(Boolean).map(String);
     // Split "ISO1640DWR  /ADUM2250ARWZ-RL" style two-part cells so either part counts as exact (Bug 103)
     // Buyer typed the suffix with a space ("DPS-500AB-40 A") → requestMpn lost the "A" and our DPS-500AB-40A
