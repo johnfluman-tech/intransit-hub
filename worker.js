@@ -1454,7 +1454,9 @@ async function handleEmailAgent(request, env) {
     const _base = s => _n(String(s || '').replace(/\+T?\s*$/i, '')).replace(/(?:TSSOP|SSOP|MSOP|SOIC|SOP|LQFP|TQFP|QFP|QFN|DFN|BGA|PDIP|DIP|PLCC|SOT|TO)\d*$/, '').replace(/(NOPB|T&R|TR)$/, '');
     const _inv = [
       ...(oem_results || []).map(r => r.mpn),
-      ...(in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).map(r => r.mpn),
+      // Warehouse#N rows left here are exact matches (variants were split off into _wh3Var above) — an exact
+      // Warehouse#4 NTD3055L still got "can you use NTD3055L104T4G?" because WH rows were excluded (Bug 136)
+      ...(in_stock_results || []).map(r => r.mpn),
       ..._wh3Var.map(r => r.mpn),  // WH3 variant with no exact match anywhere → ask the buyer (Bug 135)
     ].filter(Boolean).map(String);
     // Split "ISO1640DWR  /ADUM2250ARWZ-RL" style two-part cells so either part counts as exact (Bug 103)
