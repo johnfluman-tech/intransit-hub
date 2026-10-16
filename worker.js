@@ -4412,7 +4412,7 @@ async function cronCheckDavidNoStock(env) {
   const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
 
   // Only explicit phrases David uses to mean he has no stock â€" NOT market commentary
-  const NO_STK = ['no stk','no stock','cant share',"can't share",'cant find',"can't find",'part sold','stk sold','sold out','all sold'];  // 'cant find' missing → VIPER26LDTR #4760 missed (Bug 132)
+  const NO_STK = ['no stk','no stock','cant share',"can't share",'cant find',"can't find",'part sold','stk sold','stock sold','sold out','all sold'];  // 'stock sold' — L6384ED013TR #4787 (Bug 137)  // 'cant find' missing → VIPER26LDTR #4760 missed (Bug 132)
   // Market-pricing emails list competitor distributors + prices â€" never treat as no-stock
   const MARKET_DISTRIBUTORS = ['newark','mouser','avnet','digikey','arrow','future','turandot','winsun','vrg','bettering','element14','rs components','farnell'];
   function isMarketPricingEmail(text) {
@@ -4516,7 +4516,7 @@ async function cronCheckDavidNoStock(env) {
       // row from subject (#XXXX) is the Forte row number â€" NOT the OEM EXCESS row.
       // Pass only mpn so workerDeleteOemRow searches OEM EXCESS by MPN instead of deleting the wrong row.
       await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
-        .bind('oem_remove', tid, subject, JSON.stringify({ mpn })).run();
+        .bind('oem_remove', tid, subject, JSON.stringify({ mpn, forte_row: row })).run();  // forte_row → stamp only David's row (Bug 137)
       await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels, removeLabelIds: ['INBOX'] });
       await hubLog(env, 'email_automation', 'run', 'cronCheckDavidNoStock: queued removal mpn=' + mpn + ' forte_row=' + row);
     } catch(e) {
@@ -5094,6 +5094,8 @@ async function cronProcessFixQueue(env) {
           const forteSheetId = forteMeta.sheets[0].properties.sheetId;
           const forteUpdates = [], forteRowNums = [];
           for (let i = 1; i < forteRows.length; i++) {
+            // David named a Forte row (#4787) → stamp only that row; old quoted rows (L6384ED013TR #4284, NCP1397ADR2G #1792) stay as they are (Bug 137)
+            if (data.forte_row && normalizeMPN(forteRows[data.forte_row - 1]?.[1]) === normalizeMPN(data.mpn) && i !== data.forte_row - 1) continue;
             if (normalizeMPN(forteRows[i][1]) === normalizeMPN(data.mpn)) {
               const status = (forteRows[i][10] || '').trim().toUpperCase();
               if (status !== 'CLOSED') {
