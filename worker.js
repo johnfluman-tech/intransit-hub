@@ -4459,7 +4459,9 @@ async function cronCheckDavidNoStock(env) {
         .split(/\bthank you\b|\bthanks\b|david v\. poggi/)[0].replace(/\s+/g, ' ').trim();
       const _ownCompact = _ownText.replace(/\s+/g, '');
       const bodyNoStk = _ownText.length > 0 && _ownText.length <= 40 && NO_STK.some(kw => _ownCompact.includes(kw.replace(/\s+/g, '')));
-      const isNoStk = bodyNoStk || NO_STK.some(kw => checkText.includes(kw) || checkCompact.includes(kw.replace(/\s+/g, '')));
+      // "MT41K128M16JT-107  4765 sold" — Forte row number + "sold" = gone (Bug 134)
+      const rowSold = /\b#?\d{3,5}\s+sold\b/.test(checkText);
+      const isNoStk = bodyNoStk || rowSold || NO_STK.some(kw => checkText.includes(kw) || checkCompact.includes(kw.replace(/\s+/g, '')));
       if (!isNoStk) {
         await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
         continue;
@@ -4483,7 +4485,7 @@ async function cronCheckDavidNoStock(env) {
       const _subjectFirstToken = _subjectCore.split(/\s+/)[0];
       const mpn = extractMpnHint(subject)
         || (_subjectFirstToken && _subjectFirstToken.length >= 4 && /[0-9]/.test(_subjectFirstToken) ? _subjectFirstToken.toUpperCase() : null);
-      const rowMatch = subject.match(/#(\d+)/);
+      const rowMatch = subject.match(/#(\d+)/) || subject.match(/\s(\d{3,5})\s+(?:sold|no\s*stk)\b/i);
       const row = rowMatch ? parseInt(rowMatch[1], 10) : null;
 
       const msgId = getHdr(lastMsg, 'Message-ID');
