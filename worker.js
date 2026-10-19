@@ -1185,6 +1185,17 @@ async function handleEmailAgent(request, env) {
 
   // Multi-MPN: if the netCOMPONENTS subject had additional MPNs beyond the first,
   // look them all up and merge into the combined results so the agent quotes every part.
+  // Direct RFQ listing several parts one per line ("226N3V14\n2232 pcs\n226N3V02\n1894 pcs") — only the first was
+  // looked up (no stock → no_bid) while 226N3V02 sat in OEM EXCESS (Board Electronics, Bug 141). Collect the rest.
+  if (body.mpn && !(Array.isArray(body.extra_mpns) && body.extra_mpns.length)) {
+    const _nB = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const _firstMsg = String(thread_content || '').split(/\n-{3} Msg 2 \|/)[0];
+    const _lineMpns = [...new Set(_firstMsg.split(/\r?\n/).map(l => l.trim())
+      .filter(l => /^[A-Z0-9][A-Z0-9\-\/.#+]{4,24}$/i.test(l) && /[A-Z]/i.test(l) && /\d/.test(l) && !_MPN_GENERIC_WORDS.has(l.toUpperCase()) &&
+                   !/^\d+(?:pcs?|k|units?)$/i.test(l) && !/^(?:RFQ|RFP|PO|REQ|INQ|QUO)[-#_:]?\d+$/i.test(l)))]
+      .filter(l => _nB(l) !== _nB(body.mpn)).slice(0, 5);
+    if (_lineMpns.length && _firstMsg.split(/\r?\n/).some(l => _nB(l.trim()) === _nB(body.mpn))) body.extra_mpns = _lineMpns;
+  }
   if (Array.isArray(body.extra_mpns) && body.extra_mpns.length > 0) {
     for (const extraMpn of body.extra_mpns) {
       try {
@@ -1681,7 +1692,7 @@ async function handleEmailAgent(request, env) {
     // Follow-up with a revised price ("my math was wrong, can we do $0.17 x 3000") — the thread-wide match hits the
     // buyer's earlier "$0.16 ea" first and re-sent below_min. The buyer's latest message wins (Express Tech, Bug 123)
     const _lmTp = /--- Msg 2 \|/.test(thread_content || '') ? _lastMsgTp(body.last_msg_body) : null;
-    const _tpVal = _lmTp !== null ? _lmTp : (_tpParsed > 0 && _tpParsed < 100000) ? _tpParsed : _lastMsgTp(body.last_msg_body);  // NaN/0 → no TP
+    let _tpVal = _lmTp !== null ? _lmTp : (_tpParsed > 0 && _tpParsed < 100000) ? _tpParsed : _lastMsgTp(body.last_msg_body);  // NaN/0 → no TP
 
     // Extract buyer qty from thread content
     const _qtyM = (thread_content || '').match(/QtyReq=(\d+)/i) ||
@@ -1710,7 +1721,17 @@ async function handleEmailAgent(request, env) {
       else if (!_neg && _oemQty >= _offerQty && /\b(complete|full|entire|total|whole|all)\s+(?:the\s+)?(qty|quantity|lot|stock|pcs|pieces)\b|\btake\s+(?:them\s+)?all\b/i.test(_lbm)) _buyerQty = _oemQty;
       else if (!_neg &&
                /\b(ok|okay|fine|yes|sure|agree[ds]?|accept(?:ed)?|works|go ahead|proceed|confirm(?:ed)?|deal|good)\b/i.test(_lbm)) _buyerQty = _offerQty;
-      else _minOfferOpen = true;
+      else {
+        // Counter with a new qty AND price that clears the min ("If you only have 325 units… I am willing to purchase that
+        // quantity at a price of $6.50 per unit" = $2,112.50 ≥ $2,000) → accept it; Ruidafeng sat as no_action (Bug 141)
+        const _aft = (thread_content || '').slice((thread_content || '').search(/we would require a minimum of/i));
+        const _minLine = parseFloat(((thread_content || '').match(/minimum line value for this item is\s*\$\s*([\d,]+)/i) || [])[1]?.replace(/,/g, '')) || 0;
+        const _cTp = parseFloat(((_aft.match(/(?<!target )price of\s*\$\s*(\d+(?:\.\d+)?)/i) || _aft.match(/\$\s*(\d+(?:\.\d+)?)\s*(?:per unit|each|ea\b|\/pc|\/unit)/i)) || [])[1]);
+        const _cQty = [..._aft.matchAll(/(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units)\b/gi)].map(m => parseInt(m[1].replace(/,/g, '')))
+          .filter(q => q > 0 && q <= _oemQty && _cTp * q >= _minLine).sort((a, b) => b - a)[0];
+        if (!_neg && _minLine && _cTp > 0 && _cQty) { _buyerQty = _cQty; _tpVal = _cTp; }
+        else _minOfferOpen = true;
+      }
     }
     // Extract country from sender domain
     const _sdrDomain = (sender || '').replace(/.*@/, '').toLowerCase();
@@ -3622,7 +3643,7 @@ function extractMpnHint(subject) {
   if (_mil) return _mil[1].toUpperCase();
   // "PN:ST3215SB32768H5HPWAA" / "P/N:XYZ" / "MPN#XYZ" — drop the label glued to the MPN (Vyrian, Bug 114)
   // "RFQ:TFBS4711-TR3" / "RFQ：TDA5235" (full-width colon) — the label glued on made the lookup miss → no_bid (Bug 125)
-  const tokens = cleaned.split(/[\s,;|\/\[\]()]+/).map(t => t.replace(/^(?:RFQ|RFP|RE|FWD?|INQ|REQ)[:：]+/i, '').replace(/^(?:M?PN|N|PART|P\/N)[:#]+/i, '').replace(/[:#：]+$/, ''));
+  const tokens = cleaned.split(/[\s,;|\/\[\]()]+/).map(t => t.replace(/^(?:RFQ|RFP|RE|FWD?|INQ|REQ)[:：]+/i, '').replace(/^(?:M?PN|N|PART|P\/N)[:#]+/i, '').replace(/^[A-Za-z]{3,12}[:：]+(?=[A-Za-z0-9]*\d)/, '').replace(/[:#：]+$/, ''));
   // "RFQ 100726B / NXP": a mostly-numeric code right after RFQ/PO/REF is the buyer's ref, not an MPN (Bug 115).
   // "RFQ # BMS13-60T27C02G020" keeps its MPN — only digits + up to 2 trailing letters are dropped.
   const _refAfter = new Set(tokens.filter((t, i) => i > 0 && /^\d{4,}[A-Z]{0,2}$/i.test(t) &&
