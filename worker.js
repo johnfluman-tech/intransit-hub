@@ -1149,10 +1149,17 @@ async function handleEmailAgent(request, env) {
   let inventoryLookupSucceeded = false;
   if (oem_results === null) {
     try {
-      const mpn0 = body.mpn || await extractMpnFromThread(subject, thread_content, env);
+      let mpn0 = body.mpn || await extractMpnFromThread(subject, thread_content, env);
       if (mpn0) {
         if (!body.mpn) body.mpn = mpn0;  // AI-extracted MPN must reach routing, else forte_entry is silently dropped
-        const inv = await lookupInventory(mpn0);
+        let inv = await lookupInventory(mpn0);
+        // Bug 139: buyer wrote "PCI 9080-3" — the lookup misses with the space; our sheets have PCI9080-3
+        const _invEmpty = v => !v || !['oem_excess','in_stock','stan_sheet'].some(k => Array.isArray(v[k]) && v[k].length);
+        if (/\s/.test(mpn0) && _invEmpty(inv)) {
+          const _c = mpn0.replace(/\s+/g, '');
+          const inv2 = await lookupInventory(_c);
+          if (!_invEmpty(inv2)) { inv = inv2; mpn0 = _c; body.mpn = _c; }
+        }
         // Require valid array fields â€" a truthy error payload like {"error":"..."} must not
         // set inventoryLookupSucceeded=true with empty arrays, which would wrongly trigger
         // the listing_removed early exit for parts that ARE in stock.
@@ -1352,6 +1359,12 @@ async function handleEmailAgent(request, env) {
     const isListingSite = senderLC.includes('netcomponents.com') || senderLC.includes('icsource.com') ||
                           subjectLC.includes('netcomponents') || subjectLC.includes('icsource') ||
                           contentLC.includes('messagesend@netcomponents') || contentLC.includes('autosend@icsource');
+    // Bug 139: never tell a buyer the part is gone in a thread where we already replied (quoted, TP request…) —
+    // "Order is gone. Paid $75" from Turning Point got a listing_removed apology on a part we had just quoted.
+    const _weReplied = /An ISO 9001 Certified Company|We have the following available|would you be able to use this part number|We need a target price/i.test(thread_content || '');
+    if (_weReplied) {
+      return json({ action: 'no_action', reasoning: 'No inventory match, but we already replied in this thread — not sending a removal notice', mpn: requestMpn || null, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+    }
     if (isListingSite) {
       return json({ action: 'listing_removed', reasoning: 'No inventory â€" RFQ from listing site, send polite removal notice', mpn: requestMpn || null, buyer_email: null, draft_body: 'We apologize for the inconvenience. This item is no longer available and we are in the process of removing it from our listing. Sorry about that.', forte_entry: null, oem_delete_row: null });
     }
@@ -1726,6 +1739,11 @@ async function handleEmailAgent(request, env) {
         const _stanMpnNorm = _normStanFn(_stanQ.mpn || '');
         const _reqMpnNorm  = _normStanFn(requestMpn || '');
         const _stanMpnExact = _stanMpnNorm && _reqMpnNorm && (_stanMpnNorm === _reqMpnNorm);
+        // Already quoted Stan's stock in this thread → buyer's reply ("Order is gone. Paid $75", a counter) is for John,
+        // never a second identical quote (Bug 139, same as own_stock Bug 121)
+        if (_stanMpnExact && /This is our stock|We have the following available/i.test(thread_content || '')) {
+          return json({ action: 'no_action', reasoning: 'skip_thread: Stan stock already quoted in thread — buyer reply is for John', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+        }
         if (_stanMpnExact) { _act = 'stan_quoted'; _body = buildStanQuotedBody(_stanQ, in_stock_results); _rsn = 'WH3+Stan QUOTED'; }
         else               { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3+Stan variant mismatch'; }
       } else        { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3 only'; }
