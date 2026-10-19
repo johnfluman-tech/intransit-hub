@@ -1244,6 +1244,16 @@ async function handleEmailAgent(request, env) {
       if (_hit) requestMpn = String(_hit.mpn).trim();
     }
   }
+  // Bug 138: slash inside a regular MPN ("562A022-25/225-0") — extractMpnHint splits on "/" so we looked up
+  // "562A022-25", and our own 562A022-25/225-0 read as a variant → "can you use 562A022-25/225-0?" on their own part.
+  // If an inventory MPN with a slash starts with requestMpn and appears verbatim in the subject/body, that's the buyer's part.
+  if (requestMpn && !requestMpn.includes('/')) {
+    const _nS = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const _hay = ((subject || '') + '\n' + (thread_content || '')).toUpperCase();
+    const _hitS = [...(oem_results || []), ...(in_stock_results || [])].map(r => String(r.mpn || '').trim())
+      .find(m => /\S\/\S/.test(m) && _nS(m.split('/')[0]) === _nS(requestMpn) && _hay.includes(m.toUpperCase()));
+    if (_hitS) { requestMpn = _hitS; body.mpn = _hitS; }
+  }
   // Bug 107: plain-text RFQ tables glue cells together ("PanasonicAQY221R2M1Y120" = MFR|MPN|QTY), so the
   // extracted MPN swallowed the qty and we asked R&A "can you use AQY221R2M1Y?" — their own part.
   // Glued to a letter on the left + inventory MPN + only digits after → the digits are QtyReq.
