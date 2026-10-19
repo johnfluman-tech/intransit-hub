@@ -1520,7 +1520,10 @@ async function handleEmailAgent(request, env) {
     if (_isAck) return json({ action: 'no_action', reasoning: 'buyer_ack after msg_checking — no reply needed', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
     return json({ action: 'still_checking', reasoning: 'Buyer follow-up after msg_checking; Forte row ' + (_openForte.row || '?') + ' open, no OEM price yet', mpn: requestMpn, buyer_email: null, draft_body: 'We are still checking on it. If we get a response from the OEM, I will respond to you right away. If we do not respond back to you, please consider this a no bid. Thank you very much for the opportunity.', forte_entry: null, oem_delete_row: null });
   }
-  if (oem_results.length > 0 && !_isListingReply && (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
+  // Exact Warehouse#N match beats OEM EXCESS (WH3 priority below) — Quest AD629BR (WH3 exact, OEM only AD629BRZ) got a
+  // TP request instead of "warehouse checking" + Stan row (Bug 140). WH rows left here are exact (variants split off, Bug 135).
+  const _whExact = (in_stock_results || []).some(r => /Warehouse#/i.test(r.notes || ''));
+  if (oem_results.length > 0 && !_isListingReply && !_whExact && (in_stock_results || []).filter(r => !/Warehouse#/i.test(r.notes || '')).length === 0) {
     const hasBuyerTp = _tpDetect(thread_content) || _lastMsgTp(body.last_msg_body) !== null;
     // Stan QUOTED takes priority — if Stan has a quoted price for this MPN, let the
     // deterministic engine handle it as stan_quoted instead of firing TP request here.
@@ -1686,7 +1689,8 @@ async function handleEmailAgent(request, env) {
       (thread_content || '').match(/\bqty\s*[:=]?\s*(?:any\s+)?up\s+to\s+(\d{1,7})\b/i) ||  // "Qty: up to 250" (Quiksol, Bug 115)
       (thread_content || '').match(/qty\s*req\w*\s*[:=]?\s*(\d{1,7})/i) ||
       (thread_content || '').match(/\b(\d{1,7})\s*pcs?\b/i) ||
-      (thread_content || '').match(/qty\s*[:=]\s*(\d{1,7})/i);
+      (thread_content || '').match(/qty\s*[:=]\s*(\d{1,7})/i) ||
+      (thread_content || '').match(/\bqty\s+(\d{1,7})\b/i);  // "Qty 25" — no colon (Quest AD629BR got the WH3 stock qty 70, Bug 140)
     let _buyerQty = _qtyM ? parseInt(_qtyM[1]) : null;
     // "need 10k pcs" — k-suffixed qty (Source1 MAX17498BATE, Bug 131)
     const _kQty = !_qtyM && (thread_content || '').match(/\b(\d{1,4}(?:\.\d+)?)\s*k\s*(?:pcs?|pieces|units|ea)\b/i);
