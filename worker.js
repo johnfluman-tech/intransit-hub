@@ -3135,6 +3135,15 @@ async function checkNetcomponentsListing(mpn, env) {
 // â"€â"€ Gmail API â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 const JOHN_FROM = 'John Fluman <john.fluman@intransittech.com>';
+// RFC 2047: a raw UTF-8 Subject ("enquiry：…", "回复:") shows up garbled as "enquiryï¼š" in Gmail (Bug 144)
+function encHdr(v) {
+  v = String(v ?? '');
+  if (!/[^ -]/.test(v)) return v;
+  const b = new TextEncoder().encode(v); let bin = '';
+  for (const x of b) bin += String.fromCharCode(x);
+  return '=?UTF-8?B?' + btoa(bin) + '?=';
+}
+
 const SIG_HTML = '<br><br><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">Regards,</span></b></div><div><b><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:10pt">John Fluman</span></b></div><div><b><span style="color:rgb(31,73,125);font-family:Arial,sans-serif;font-size:8pt">Intransit Technologies</span></b></div><div><a href="mailto:john.fluman@intransittech.com" style="font-family:Calibri;font-size:8pt">john.fluman@intransittech.com</a></div><div><i><span style="color:gray;font-family:Arial,sans-serif;font-size:7.5pt">An ISO 9001 Certified Company</span></i></div><div><span style="color:rgb(31,73,125);font-family:Tahoma,sans-serif;font-size:8pt">Toll (877) 677-5868 x101 - Local (949) 481-7935 x101</span></div><br><div><span style="color:rgb(166,166,166);font-family:Calibri,sans-serif;font-size:8pt">The information contained in this communication and its attachment(s) is intended only for the use of the individual to whom it is addressed and may contain information that is privileged, confidential, or exempt from disclosure. If the reader of this message is not the intended recipient, you are hereby notified that any dissemination, distribution, or copying of this communication is strictly prohibited. If you have received this communication in error, please notify john.fluman@intransittech.com and delete the communication without retaining any copies. Thank you.</span></div>';
 
 async function getGmailToken(env) {
@@ -3346,7 +3355,7 @@ function buildMime(to, subject, htmlBody, gmailMsgId) {
   const lines = [
     'From: ' + JOHN_FROM,
     'To: ' + to,
-    'Subject: ' + subject,
+    'Subject: ' + encHdr(subject),
     'MIME-Version: 1.0',
     'Content-Type: text/html; charset=utf-8'
   ];
@@ -3654,7 +3663,9 @@ function extractMpnHint(subject) {
   if (_mil) return _mil[1].toUpperCase();
   // "PN:ST3215SB32768H5HPWAA" / "P/N:XYZ" / "MPN#XYZ" — drop the label glued to the MPN (Vyrian, Bug 114)
   // "RFQ:TFBS4711-TR3" / "RFQ：TDA5235" (full-width colon) — the label glued on made the lookup miss → no_bid (Bug 125)
-  const tokens = cleaned.split(/[\s,;|\/\[\]()]+/).map(t => t.replace(/^(?:RFQ|RFP|RE|FWD?|INQ|REQ)[:：]+/i, '').replace(/^(?:M?PN|N|PART|P\/N)[:#]+/i, '').replace(/^[A-Za-z]{3,12}[:：]+(?=[A-Za-z0-9]*\d)/, '').replace(/[:#：]+$/, ''));
+  const tokens = cleaned.split(/[\s,;|\/\[\]()]+/).map(t => t.replace(/^(?:RFQ|RFP|RE|FWD?|INQ|REQ)[:：]+/i, '').replace(/^(?:M?PN|N|PART|P\/N)[:#]+/i, '').replace(/^[A-Za-z]{3,12}[:：]+(?=[A-Za-z0-9]*\d)/, '')
+    // Qty glued on with dashes: "PESD3V3L1BA115--34kpcs" → our own part read as a variant (e-z-key, Bug 144)
+    .replace(/-{1,2}\d+(?:\.\d+)?\s*k?\s*(?:pcs?|pieces|units|ea)$/i, '').replace(/[:#：]+$/, ''));
   // "RFQ 100726B / NXP": a mostly-numeric code right after RFQ/PO/REF is the buyer's ref, not an MPN (Bug 115).
   // "RFQ # BMS13-60T27C02G020" keeps its MPN — only digits + up to 2 trailing letters are dropped.
   const _refAfter = new Set(tokens.filter((t, i) => i > 0 && /^\d{4,}[A-Z]{0,2}$/i.test(t) &&
@@ -3970,7 +3981,7 @@ async function executeDecisionCron(decision, payload, token, env) {
     const htmlBody = '<div dir="ltr">' + String(decision.draft_body).replace(/\n/g, '<br>') + SIG_HTML + _history + '</div>';
     const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + [replyTo, ...replyAll].join(', ')];
     if (ccEmail) mimeLines.push('Cc: ' + ccEmail);
-    mimeLines.push('Subject: ' + subject, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8');
+    mimeLines.push('Subject: ' + encHdr(subject), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8');
     if (msgId) {
       mimeLines.push('In-Reply-To: ' + msgId);
       mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim());
@@ -4060,7 +4071,7 @@ async function cronScanInbox(env) {
           const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
           const toAddr = extractEmailAddr(fromHdr);
           if (!toAddr || !toAddr.includes('@')) throw new Error('no sender address — skipping blocked draft');
-          const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + toAddr, 'Subject: ' + replySubj, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8'];
+          const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + toAddr, 'Subject: ' + encHdr(replySubj), 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8'];
           if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
           mimeLines.push('', 'This is a blocked sender');
           await gPost('/drafts', { message: { threadId: tid, raw: base64url(mimeLines.join('\r\n')) } });
@@ -4395,12 +4406,12 @@ async function cronCheckPaymentAdvice(env) {
           parts.push(b64.match(/.{1,76}/g).join('\r\n'));
         }
         parts.push('--' + boundary + '--');
-        const mimeLines = ['From: ' + JOHN_FROM, 'To: deb@intransittech.com', 'Subject: ' + fwdSubject, 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary="' + boundary + '"'];
+        const mimeLines = ['From: ' + JOHN_FROM, 'To: deb@intransittech.com', 'Subject: ' + encHdr(fwdSubject), 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary="' + boundary + '"'];
         if (msgId) mimeLines.push('References: ' + msgId);
         mimeLines.push('', parts.join('\r\n'));
         raw = base64url(mimeLines.join('\r\n'));
       } else {
-        const mimeLines = ['From: ' + JOHN_FROM, 'To: deb@intransittech.com', 'Subject: ' + fwdSubject, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+        const mimeLines = ['From: ' + JOHN_FROM, 'To: deb@intransittech.com', 'Subject: ' + encHdr(fwdSubject), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
         if (msgId) mimeLines.push('References: ' + msgId);
         mimeLines.push('', htmlBody);
         raw = base64url(mimeLines.join('\r\n'));
@@ -4454,7 +4465,7 @@ async function cronCheckBillRemovals(env) {
       const refs  = getHdr(lastMsg, 'References');
       const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
       const htmlBody = '<div dir="ltr">Got it - removing ' + mpn + ' from OEM EXCESS now.' + SIG_HTML + '</div>';
-      const mimeLines = ['From: ' + JOHN_FROM, 'To: bill.pratt@intransittech.com', 'Subject: ' + replySubj, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+      const mimeLines = ['From: ' + JOHN_FROM, 'To: bill.pratt@intransittech.com', 'Subject: ' + encHdr(replySubj), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
       if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
       mimeLines.push('', htmlBody);
       const draft = await gPost('/drafts', { message: { threadId: t.id, raw: base64url(mimeLines.join('\r\n')) } });
@@ -4571,7 +4582,7 @@ async function cronCheckDavidNoStock(env) {
       const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
       const toAddr = extractEmailAddr(getHdr(lastMsg, 'From'));
       const htmlBody = '<div dir="ltr">Ok, removed from listing.' + SIG_HTML + '</div>';
-      const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + toAddr, 'Subject: ' + replySubj, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+      const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + toAddr, 'Subject: ' + encHdr(replySubj), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
       if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
       mimeLines.push('', htmlBody);
       const draft = await gPost('/drafts', { message: { threadId: tid, raw: base64url(mimeLines.join('\r\n')) } });
@@ -4632,7 +4643,7 @@ async function cronSendDailyCostReport(env) {
     const mimeLines = [
       'From: ' + JOHN_FROM,
       'To: john.fluman@intransittech.com',
-      'Subject: ' + subject,
+      'Subject: ' + encHdr(subject),
       'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=utf-8',
       '',
@@ -5060,7 +5071,7 @@ async function cronProcessCommandQueue(env) {
         const _rsRefs = _rsHdr(_rsLast, 'References');
         const _rsTo = data.to_email || _rsHdr(_rsMsgs[0], 'Reply-To') || _rsHdr(_rsMsgs[0], 'From');
         const _rsHtml = '<div dir="ltr">' + _rsDraftBody.replace(/\n/g, '<br>') + SIG_HTML + '</div>';
-        const _rsMime = ['From: ' + JOHN_FROM, 'To: ' + _rsTo, 'Subject: ' + _rsSubj, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+        const _rsMime = ['From: ' + JOHN_FROM, 'To: ' + _rsTo, 'Subject: ' + encHdr(_rsSubj), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
         if (_rsMsgId) { _rsMime.push('In-Reply-To: ' + _rsMsgId); _rsMime.push('References: ' + (((_rsRefs ? _rsRefs + ' ' : '') + _rsMsgId).trim())); }
         _rsMime.push('', _rsHtml);
         const _rsDraft = await gPost('/drafts', { message: { threadId, raw: base64url(_rsMime.join('\r\n')) } });
@@ -5208,7 +5219,7 @@ async function cronProcessFixQueue(env) {
         const mimeLines = [
           'From: ' + JOHN_FROM,
           'To: ' + toEmail,
-          'Subject: ' + subject,
+          'Subject: ' + encHdr(subject),
           'MIME-Version: 1.0',
           'Content-Type: text/html; charset=utf-8'
         ];
