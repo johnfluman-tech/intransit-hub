@@ -1715,7 +1715,8 @@ async function handleEmailAgent(request, env) {
     if (_minOffer) {
       const _lbm = String(body.last_msg_body || '');
       const _offerQty = parseInt(_minOffer[1]);
-      const _statedQty = (_lbm.match(/\b(\d{1,7})\s*(?:pcs?|pieces|units|ea)\b/i) || [])[1];
+      // "round it up to 10,000 pcs" — comma thousands read as "000" (Motherson 12162100, Bug 143)
+      const _statedQty = ((_lbm.match(/\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units|ea)\b/i) || [])[1] || '').replace(/,/g, '');
       const _oemQty = (oem_results || []).reduce((s, r) => s + (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0), 0);
       const _neg = /\b(no|not|can'?t|cannot|unable|too (?:much|many|high))\b/i.test(_lbm);
       if (_statedQty && parseInt(_statedQty) >= _offerQty) _buyerQty = parseInt(_statedQty);
@@ -1728,7 +1729,7 @@ async function handleEmailAgent(request, env) {
         // quantity at a price of $6.50 per unit" = $2,112.50 ≥ $2,000) → accept it; Ruidafeng sat as no_action (Bug 141)
         const _aft = (thread_content || '').slice((thread_content || '').search(/we would require a minimum of/i));
         const _minLine = parseFloat(((thread_content || '').match(/minimum line value for this item is\s*\$\s*([\d,]+)/i) || [])[1]?.replace(/,/g, '')) || 0;
-        const _cTp = parseFloat(((_aft.match(/(?<!target )price of\s*\$\s*(\d+(?:\.\d+)?)/i) || _aft.match(/\$\s*(\d+(?:\.\d+)?)\s*(?:per unit|each|ea\b|\/pc|\/unit)/i)) || [])[1]);
+        const _cTp = parseFloat(((_aft.match(/(?<!target )price of\s*\$\s*(\d+(?:\.\d+)?)/i) || _aft.match(/\$\s*(\d+(?:\.\d+)?)\s*(?:per unit|each|ea\b|\/\s*(?:pcs?|unit|ea)\b)/i)) || [])[1]);
         const _cQty = [..._aft.matchAll(/(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units)\b/gi)].map(m => parseInt(m[1].replace(/,/g, '')))
           .filter(q => q > 0 && q <= _oemQty && _cTp * q >= _minLine).sort((a, b) => b - a)[0];
         if (!_neg && _minLine && _cTp > 0 && _cQty) { _buyerQty = _cQty; _tpVal = _cTp; }
@@ -1843,6 +1844,8 @@ async function handleEmailAgent(request, env) {
       // "18u" = $18 (Chinese buyer shorthand; Fuzhou Yongbo "Dear，18u", Bug 108). \b after u rejects "10uF"/"18uH"
       t.match(/(?:^|[^\w.])(\d+(?:\.\d+)?)\s?u\b(?![.\d])/im) ||
       // European decimal comma "4,90 for 540 parts" (X Works, Bug 112). Max 2 decimals so "4,900 pcs" stays a qty
+      // "agree to the price of 0.2 US dollars" — no $ sign (Blaine TMP275AIDR, Bug 143)
+      t.match(/\b(\d*\.?\d+)\s*(?:us\s*)?(?:dollars?|usd)\b/i) ||
       t.match(/(?:^|[^\w.,])(\d{1,4},\d{1,2})(?![\d,])\s*(?:usd|eur|\$|€|for\b|per\b|each|ea\b|\/\s*(?:pc|ea|unit))/im);
     const v = m ? (_tpRangeHigh(t, m) || parseFloat(String(m[1]).replace(',', '.'))) : null;  // range → high end
     return v && v > 0 && v < 100000 ? v : null;
@@ -1880,7 +1883,7 @@ async function handleEmailAgent(request, env) {
       /[\d]+(?:\.\d+)?\s*usd\b/i.test(_lc) ||           // Bug 72: "4usd", "4 usd" — no trailing unit needed
       /usd\s*[\d]+(?:\.\d+)?/i.test(_lc) ||
       /[\d]+(?:\.\d+)?[$]/i.test(_lc) ||                // Bug 73: "4$", "4.50$" trailing dollar sign
-      /[\d]+(?:\.\d+)?\s*dollars?\b/i.test(_lc) ||      // Bug 74: "4 dollars", "4 dollar"
+      /[\d]+(?:\.\d+)?\s*(?:us\s*)?dollars?\b/i.test(_lc) ||   // Bug 74: "4 dollars"; "0.2 US dollars" (Blaine TMP275AIDR, Bug 143)
       /[\d]+(?:\.\d+)?\s*(?:\/pcs?|\/ea|per\s*(?:pc|ea|piece))\b/i.test(_lc) || // Bug 75: "4/pc" with no $
       /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(tc) ||
       /(?:order|price|priced?|@)\s*@\s*\$?[\d]+(?:\.\d+)?/i.test(_lc) ||
