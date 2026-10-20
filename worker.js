@@ -1265,11 +1265,12 @@ async function handleEmailAgent(request, env) {
   // Bug 138: slash inside a regular MPN ("562A022-25/225-0") — extractMpnHint splits on "/" so we looked up
   // "562A022-25", and our own 562A022-25/225-0 read as a variant → "can you use 562A022-25/225-0?" on their own part.
   // If an inventory MPN with a slash starts with requestMpn and appears verbatim in the subject/body, that's the buyer's part.
-  if (requestMpn && !requestMpn.includes('/')) {
+  // Same for a comma ("BAS16L,315" → looked up "BAS16L" → own BAS16L,315 asked as a variant, Eran, Bug 146)
+  if (requestMpn && !/[\/,]/.test(requestMpn)) {
     const _nS = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const _hay = ((subject || '') + '\n' + (thread_content || '')).toUpperCase();
     const _hitS = [...(oem_results || []), ...(in_stock_results || [])].map(r => String(r.mpn || '').trim())
-      .find(m => /\S\/\S/.test(m) && _nS(m.split('/')[0]) === _nS(requestMpn) && _hay.includes(m.toUpperCase()));
+      .find(m => /\S[\/,]\S/.test(m) && _nS(m.split(/[\/,]/)[0]) === _nS(requestMpn) && _hay.includes(m.toUpperCase()));
     if (_hitS) { requestMpn = _hitS; body.mpn = _hitS; }
   }
   // Bug 107: plain-text RFQ tables glue cells together ("PanasonicAQY221R2M1Y120" = MFR|MPN|QTY), so the
@@ -1687,6 +1688,7 @@ async function handleEmailAgent(request, env) {
       _tcTp.match(/usd\s*([\d]+(?:\.\d+)?)/i) ||
       _tcTp.match(/([\d]+(?:\.\d+)?)[$]/i) ||          // "4$", "4.50$"
       _tcTp.match(/([\d]+(?:\.\d+)?)\s*dollars?\b/i) || // "4 dollars"
+      _tcTp.match(/([\d]*\.?\d+)\s*(?:euros?|eur\b|€)/i) || _tcTp.match(/€\s*([\d]*\.?\d+)/) || // "paid last time 0.29 euro" (Fast Components, Bug 146)
       _tcTp.match(/([\d]+(?:\.\d+)?)\s*(?:\/pcs?|\/ea|per\s*(?:pc|ea|piece))\b/i) || // "4/pc"
       _tcTp.match(/^\$\s*([\d]+(?:\.\d+)?)\s*$/m) ||
       _tcTp.match(/(?:order|price|priced?|@)\s*@\s*\$?([\d]+(?:\.\d+)?)/i) ||
@@ -1848,6 +1850,7 @@ async function handleEmailAgent(request, env) {
       // European decimal comma "4,90 for 540 parts" (X Works, Bug 112). Max 2 decimals so "4,900 pcs" stays a qty
       // "agree to the price of 0.2 US dollars" — no $ sign (Blaine TMP275AIDR, Bug 143)
       t.match(/\b(\d*\.?\d+)\s*(?:us\s*)?(?:dollars?|usd)\b/i) ||
+      t.match(/(?:^|[^\w.,])(\d*\.?\d+)\s*(?:euros?\b|eur\b|€)/i) || t.match(/€\s*(\d*\.?\d+)/) ||   // "0.29 euro" (Bug 146)
       t.match(/(?:^|[^\w.,])(\d{1,4},\d{1,2})(?![\d,])\s*(?:usd|eur|\$|€|for\b|per\b|each|ea\b|\/\s*(?:pc|ea|unit))/im);
     const v = m ? (_tpRangeHigh(t, m) || parseFloat(String(m[1]).replace(',', '.'))) : null;  // range → high end
     return v && v > 0 && v < 100000 ? v : null;
@@ -1886,6 +1889,7 @@ async function handleEmailAgent(request, env) {
       /usd\s*[\d]+(?:\.\d+)?/i.test(_lc) ||
       /[\d]+(?:\.\d+)?[$]/i.test(_lc) ||                // Bug 73: "4$", "4.50$" trailing dollar sign
       /[\d]+(?:\.\d+)?\s*(?:us\s*)?dollars?\b/i.test(_lc) ||   // Bug 74: "4 dollars"; "0.2 US dollars" (Blaine TMP275AIDR, Bug 143)
+      /\d*\.?\d+\s*(?:euros?\b|eur\b|€)|€\s*\.?\d/i.test(_lc) ||   // "0.29 euro" (Fast Components ZXMS6004DN8-13, Bug 146)
       /[\d]+(?:\.\d+)?\s*(?:\/pcs?|\/ea|per\s*(?:pc|ea|piece))\b/i.test(_lc) || // Bug 75: "4/pc" with no $
       /^\$\s*[\d]+(?:\.\d+)?\s*$/m.test(tc) ||
       /(?:order|price|priced?|@)\s*@\s*\$?[\d]+(?:\.\d+)?/i.test(_lc) ||
@@ -4117,7 +4121,8 @@ async function cronScanInbox(env) {
       const md = await gGet('/messages/' + m.id + '?format=metadata&metadataHeaders=Subject').catch(() => null);
       const subj = ((md?.payload?.headers || []).find(h => h.name.toLowerCase() === 'subject') || {}).value || '';
       await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('subj_checked', ?, ?)").bind(m.id, subj.slice(0, 100)).run().catch(() => {});
-      if (/(?:^|\s)(?=[A-Z0-9\-\/.#_:+]*\d)(?=[A-Z0-9\-\/.#_:+]*[A-Z])[A-Z0-9][A-Z0-9\-\/.#_:+]{3,}\s+[\d,]+\s*(?:pcs?|units?|ea)\b/i.test(subj)) {
+      // Comma inside the MPN ("BAS16L,315\t500000PCS") never matched → Eran's RFQ sat with no draft (Bug 146)
+      if (/(?:^|\s)(?=[A-Z0-9\-\/.#_:+,]*\d)(?=[A-Z0-9\-\/.#_:+,]*[A-Z])[A-Z0-9][A-Z0-9\-\/.#_:+,]{3,}\s+[\d,]+\s*(?:pcs?|units?|ea)\b/i.test(subj)) {
         await hubLog(env, 'email_automation', 'run', `cronScanInbox: glued-qty subject picked up as rfq — "${subj.trim().slice(0, 60)}" tid=${m.threadId}`);
         rfqThreads = [m.threadId, ...rfqThreads];
       }
@@ -4220,7 +4225,8 @@ async function cronScanInbox(env) {
       // Fetch thread messages for all sources â€" needed for staff-reply guard
       const tCheck = await gGet('/threads/' + tid + '?format=metadata&metadataHeaders=From');
       const tMsgs  = (tCheck.messages || []);
-      const lastMsg0 = tMsgs[tMsgs.length - 1];
+      // Ignore unsent drafts — a leftover draft made Giulia's ZXMS6004DN8-13 price reply read as "staff replied last" (Bug 146)
+      const lastMsg0 = tMsgs.filter(m => !(m.labelIds || []).includes('DRAFT')).pop();
       const lastFrom0 = ((lastMsg0?.payload?.headers || []).find(h => h.name.toLowerCase() === 'from') || {}).value || '';
       const lastIsStaff = /@intransittech\.com/i.test(lastFrom0);
 
