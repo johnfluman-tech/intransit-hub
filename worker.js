@@ -1498,9 +1498,11 @@ async function handleEmailAgent(request, env) {
     // Buyer typed the suffix with a space ("DPS-500AB-40 A") → requestMpn lost the "A" and our DPS-500AB-40A
     // read as a variant (Bug 127). Re-join the short token that follows the MPN in the subject/body.
     const _esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const _sfx = ((subject || '') + '\n' + (thread_content || '')).match(new RegExp(_esc(requestMpn) + '[ \\t]+([A-Z0-9]{1,3})(?![A-Z0-9])', 'i'));
+    // "MT40A512M16LY-062E IT:E" — suffix with a colon/dash ("IT:E") was missed → own stock asked as variant (Bug 145)
+    const _sfx = ((subject || '') + '\n' + (thread_content || '')).match(new RegExp(_esc(requestMpn) + '[ \\t]+([A-Z0-9](?:[A-Z0-9]|[:\\-](?=[A-Z0-9])){0,5})(?![A-Z0-9:\\-])', 'i'));
     const _reqs = _sfx ? [requestMpn, requestMpn + _sfx[1]] : [requestMpn];
     const _exact = _inv.flatMap(m => [m, ...m.split(/\s+\/\s*|\s*\/\s+/)]).some(m => _reqs.some(q => _n(m) === _n(q) || _base(m) === _base(q)));
+    if (_sfx) { const _jm = _inv.find(m => _n(m) === _n(requestMpn + _sfx[1])); if (_jm) { requestMpn = _jm.trim(); body.mpn = requestMpn; } }
     const _similar = [...new Set(_inv.filter(m => isMpnMatch(requestMpn, m)))];
     if (!_exact && _similar.length > 0) {
       const _ours = _similar[0].trim();
