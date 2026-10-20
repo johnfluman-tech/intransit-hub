@@ -100,6 +100,8 @@ export default {
       if (p === '/api/chat'            && m === 'POST') return handleChat(request, env);
       if (p === '/api/learn'           && m === 'POST') return handleLearn(request, env);
       if (p === '/api/agent-decisions' && m === 'GET')  return handleGetAgentDecisions(url, env);
+      // Radar (intransit-radar) pulls every processed RFQ as demand history, oldest first, by id cursor
+      if (p === '/api/agent-decisions-export' && m === 'GET') { const after = parseInt(url.searchParams.get('after_id') || '0'); const { results } = await env.DB.prepare('SELECT id, thread_id, mpn, sender, subject, action, forte_entry, created_at FROM agent_decisions WHERE id > ? ORDER BY id LIMIT 1000').bind(after).all(); return json({ rows: results || [] }); }
 
       if (p === '/api/issues'    && m === 'GET')  return handleGetIssues(url, env);
       if (p === '/api/issues'    && m === 'POST') return handlePostIssue(request, env);
