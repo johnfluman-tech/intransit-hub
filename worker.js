@@ -3969,6 +3969,19 @@ async function executeDecisionCron(decision, payload, token, env) {
         }
         return;
       }
+      // Bill already has it (he wrote in the thread, or we already CC'd him on a sent "Bill will help") — no second
+      // "Bill will help" to the buyer. Edgar (Chip 1) thanked Bill → worker re-drafted bill_handle → sent again (Bug 147)
+      if (action === 'bill_handle') {
+        const _hdr = (m, n) => ((m.payload?.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';
+        const _billHasIt = (tMeta.messages || []).some(m => !(m.labelIds || []).includes('DRAFT') &&
+          (/bill\.pratt@intransittech\.com/i.test(_hdr(m, 'from')) ||
+           ((m.labelIds || []).includes('SENT') && /bill\.pratt@intransittech\.com/i.test(_hdr(m, 'to') + ' ' + _hdr(m, 'cc')))));
+        if (_billHasIt) {
+          await hubLog(env, 'email_automation', 'run', `executeDecision: skip bill_handle — Bill already on thread tid=${threadId}`);
+          if (decision.id) await env.DB.prepare("UPDATE agent_decisions SET status='completed' WHERE id=?").bind(decision.id).run().catch(() => {});
+          return;
+        }
+      }
     } catch(e) { /* continue — check failed, allow draft creation */ }
 
     const rawSubj = payload.subject || '';
@@ -4466,6 +4479,11 @@ async function cronCheckBillRemovals(env) {
         if (m) { mpn = m[1].trim(); break; }
       }
       if (!mpn) mpn = extractMpnHint(subject);
+      // All-digit MPNs ("Qupte request: 1935860") fail the subject parser — use the part we already decided on for this thread (Bug 147)
+      if (!mpn) {
+        const _d = await env.DB.prepare("SELECT mpn FROM agent_decisions WHERE thread_id = ? AND mpn IS NOT NULL AND mpn != '' ORDER BY id DESC LIMIT 1").bind(t.id).first().catch(() => null);
+        if (_d && _d.mpn) mpn = _d.mpn;
+      }
       if (!mpn) {
         await hubLog(env, 'email_automation', 'error', 'cronCheckBillRemovals: no MPN found tid=' + t.id);
         if (doneLabel) await gPost('/threads/' + t.id + '/modify', { addLabelIds: [doneLabel] });
