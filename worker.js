@@ -1763,6 +1763,12 @@ async function handleEmailAgent(request, env) {
     const _senderCtry = _knownCtry?.value || _domCtry[_tld] || _ncCtry || _sigCtry || _usAddr || 'CN';
 
     let _act, _body = null, _rsn, _forteEntry = null;
+    // Line value is capped by what we actually have: a buyer asking more than our stock can never clear the min with more pieces (Bug 148)
+    const _oemStockQty = (oem_results || []).reduce((s, r) => s + (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0), 0);
+    const _stockLineVal = tp => !_oemStockQty ? Infinity : tp * (_buyerQty && _oemStockQty ? Math.min(_buyerQty, _oemStockQty) : (_oemStockQty || _buyerQty || 0));
+    const _belowMinBody = (tp, min) => Math.ceil(min / tp) > _oemStockQty && _oemStockQty ? _belowMinStockBody(tp, min) :
+      `Thank you for your inquiry. Our minimum line value for this item is $${min}. At your target price of $${tp} per piece, we would require a minimum of ${Math.ceil(min / tp)} pieces. If you are able to adjust your quantity, please let us know and we will get right back to you. Thank you for the opportunity.`;
+    const _belowMinStockBody = (tp, min) => `We show ${_oemStockQty.toLocaleString('en-US')} pieces available. At your target price of $${tp} per piece, the total line value would be $${(tp * _oemStockQty).toFixed(2)}, which is below our $${min} minimum line requirement. Unfortunately we are unable to assist at this time.`;
     if (_own.length > 0) {
       _act = 'own_stock'; _rsn = 'Own IN STOCK';
     } else if (_wh3.length > 0) {  // Bug fix: WH3 always takes priority over OEM EXCESS (XCF08PVOG48C incident)
@@ -1781,6 +1787,10 @@ async function handleEmailAgent(request, env) {
         if (_stanMpnExact) { _act = 'stan_quoted'; _body = buildStanQuotedBody(_stanQ, in_stock_results); _rsn = 'WH3+Stan QUOTED'; }
         else               { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3+Stan variant mismatch'; }
       } else        { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3 only'; }
+    } else if (_billOnly && _hasTp && _tpVal && _stockLineVal(_tpVal) < (_has2k ? 2000 : 500)) {
+      // Bill's lot can't reach the min even if they take all of it: 500 pcs × $0.24 = $120 < $500 — the BILL EXT
+      // branch never checked the min → "Bill will help" went out (CAT25160VI-GT3, Silico, Bug 148). Tell the buyer instead.
+      _act = 'below_min_line'; _body = _belowMinBody(_tpVal, _has2k ? 2000 : 500); _rsn = `BILL EXT+TP but our qty × TP $${_stockLineVal(_tpVal).toFixed(2)} < min`;
     } else if (_billOnly) {
       if (_hasTp) { _act = 'bill_handle'; _body = DRAFT_TEMPLATES.bill_handle; _rsn = 'BILL EXT+TP'; }
       else        { _act = _has2k ? 'request_tp_2000' : 'request_tp_500'; _rsn = 'BILL EXT no TP'; }
@@ -1799,10 +1809,12 @@ async function handleEmailAgent(request, env) {
         // Mixed lots: the Forte lot's $2000 min isn't met, but Bill's lot covers the qty at its own min → Bill handles it
         // (Aonics MC-15632.7680KA-A0:ROHS 100 @ $5: BILL EXT 117 453 pcs $500 min — John's call, Bug 142)
         _act = 'bill_handle'; _body = DRAFT_TEMPLATES.bill_handle; _rsn = 'OEM below min, BILL EXT lot meets qty+min';
+      } else if (_stockLineVal(_tpVal) < _minVal && !(_buyerQty && _buyerQty <= _oemStockQty)) {
+        // Buyer wants more than we have and our whole qty × TP still misses the min — asking for more pieces is pointless
+        _act = 'below_min_line'; _body = _belowMinStockBody(_tpVal, _minVal); _rsn = `OEM EXCESS+TP but our qty × TP $${_stockLineVal(_tpVal).toFixed(2)} < $${_minVal} min`;
       } else if (_buyerQty && (_tpVal * _buyerQty) < _minVal) {
         _act = 'below_min_line';
-        const _minNeeded = Math.ceil(_minVal / _tpVal);
-        _body = `Thank you for your inquiry. Our minimum line value for this item is $${_minVal}. At your target price of $${_tpVal} per piece, we would require a minimum of ${_minNeeded} pieces. If you are able to adjust your quantity, please let us know and we will get right back to you. Thank you for the opportunity.`;
+        _body = _belowMinBody(_tpVal, _minVal);
         _rsn = `OEM EXCESS+TP but $${(_tpVal*_buyerQty).toFixed(2)} < $${_minVal} min`;
       } else {
         _act = 'msg_checking'; _body = DRAFT_TEMPLATES.msg_checking; _rsn = 'OEM EXCESS+TP';
@@ -3635,10 +3647,29 @@ function buildQuotedHistory(messages) {
   const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const hdr = (m, n) => ((m.payload?.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';
   const sigCut = /\n\s*\*?Regards,?\*?\s*\n[\s\S]*$|\n\s*The information contained in this communication[\s\S]*$/i;
+  // Forward the original HTML — the netCOMPONENTS RFQ table flattened to "CAT25160VI-GT3FREE/BILL EXT…9815000.24"
+  // as text, so Bill couldn't read qty/TP (Silico, Bug 148). Text is only the fallback for plain-text-only mail.
+  const htmlBody = m => {
+    let h = extractMimeText(m.payload, true) || '';
+    if (!h) return '';
+    h = h.replace(/<head[\s\S]*?<\/head>|<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>|<!--[\s\S]*?-->/gi, '');
+    const bm = h.match(/<body[^>]*>([\s\S]*?)(?:<\/body>|$)/i); if (bm) h = bm[1];
+    const cut = h.search(/<div[^>]*class=["']?(?:gmail_quote|gmail_signature)|<blockquote|-{5,}\s*Original Message|-{5,}\s*Previous conversation|The information contained in this communication/i);
+    if (cut > 0) h = h.substring(0, cut);
+    if (/intransittech\.com/i.test(hdr(m, 'from'))) { const r = h.search(/(?:<[^>]+>|\s)*Regards,/i); if (r > 0) h = h.substring(0, r); }
+    if (h.length > 30000) return '';
+    // Cutting off the quote/signature leaves tags open, which nests the next message inside this one
+    for (const t of ['span', 'font', 'p', 'td', 'tr', 'tbody', 'table', 'div']) {
+      const open = (h.match(new RegExp('<' + t + '\\b', 'gi')) || []).length, close = (h.match(new RegExp('</' + t + '>', 'gi')) || []).length;
+      if (open > close) h += ('</' + t + '>').repeat(open - close);
+    }
+    return h.trim();
+  };
   const blocks = (messages || []).filter(m => !(m.labelIds || []).includes('DRAFT')).reverse().map(m => {
-    const body = stripQuoted(extractMimeText(m.payload) || '').replace(sigCut, '').trim().substring(0, 4000);
+    const body = htmlBody(m) ||
+      esc(stripQuoted(extractMimeText(m.payload) || '').replace(sigCut, '').trim().substring(0, 4000)).replace(/\n/g, '<br>');
     return '<b>From:</b> ' + esc(hdr(m, 'from')) + '<br><b>Date:</b> ' + esc(hdr(m, 'date')) +
-      '<br><b>Subject:</b> ' + esc(hdr(m, 'subject')) + '<br><br>' + esc(body).replace(/\n/g, '<br>');
+      '<br><b>Subject:</b> ' + esc(hdr(m, 'subject')) + '<br><br>' + body;
   });
   if (!blocks.length) return '';
   return '<br><div>---------- Previous conversation ----------</div>' +
