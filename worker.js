@@ -1706,11 +1706,11 @@ async function handleEmailAgent(request, env) {
       (thread_content || '').match(/NQTY=(\d+)/i) ||
       (thread_content || '').match(/\bqty\s*[:=]?\s*(?:any\s+)?up\s+to\s+(\d{1,7})\b/i) ||  // "Qty: up to 250" (Quiksol, Bug 115)
       (thread_content || '').match(/qty\s*req\w*\s*[:=]?\s*(\d{1,7})/i) ||
-      (thread_content || '').match(/\b(\d{1,7})\s*pcs?\b/i) ||
+      (thread_content || '').match(/\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*pcs?\b/i) ||  // "19,800 pcs" was read as 800 (1-Source, Bug 149)
       (thread_content || '').match(/^\s*(\d{1,7})\s*p\s*$/im) ||  // "100p" on its own line (Aonics, Bug 142)
       (thread_content || '').match(/qty\s*[:=]\s*(\d{1,7})/i) ||
       (thread_content || '').match(/\bqty\s+(\d{1,7})\b/i);  // "Qty 25" — no colon (Quest AD629BR got the WH3 stock qty 70, Bug 140)
-    let _buyerQty = _qtyM ? parseInt(_qtyM[1]) : null;
+    let _buyerQty = _qtyM ? parseInt(_qtyM[1].replace(/,/g, '')) : null;
     // "need 10k pcs" — k-suffixed qty (Source1 MAX17498BATE, Bug 131)
     const _kQty = !_qtyM && (thread_content || '').match(/\b(\d{1,4}(?:\.\d+)?)\s*k\s*(?:pcs?|pieces|units|ea)\b/i);
     if (_kQty) _buyerQty = Math.round(parseFloat(_kQty[1]) * 1000);
@@ -3711,7 +3711,8 @@ function extractMpnHint(subject) {
     /^(?:RFQ|RFP|PO|REF|QUOTE|QTE|INQ|REQ|#)[#:]*$/i.test(tokens[i - 1] === '#' && i > 1 ? tokens[i - 2] : tokens[i - 1])));
   const cands = tokens.filter(t => !_refAfter.has(t)).filter(t => /[A-Za-z]/.test(t) && /[0-9]/.test(t) && t.length >= 4 && !/^\d+(pcs?|k|m|units?)?$/i.test(t) && !_MPN_GENERIC_WORDS.has(t.toUpperCase())
     // Buyer reference numbers (VRFQ184567, RFQ-12345, PO#5521, REQ00912) are not MPNs
-    && !/^[A-Z]{0,3}(RFQ|RFP|PO|REQ|INQ|QUO|QTE|CASE|TKT)[-#_:]?\d{3,}$/i.test(t)
+    // "Quote#784439" (1-Source) was taken as the MPN → body "Part Number:" never read → no_bid (Bug 149)
+    && !/^[A-Z]{0,3}(RFQ|RFP|PO|REQ|INQ|QUO(?:TE|TATION)?|QTE|CASE|TKT)[-#_:]?\d{3,}$/i.test(t)
     // Rebound refs "SPANSION_101-775921" / "ALTERA_101-775469" = MFR_ref#, not an MPN (Bug 110)
     && !/^[A-Z]+_\d{2,}-\d{4,}$/i.test(t));
   // "CM1831 - 1F1T-14A624-AA-004": a short customer ref comes first; prefer a long hyphenated MPN (Bug 114)
@@ -3763,7 +3764,7 @@ async function buildScanPayload(threadId, token, env) {
     // Rebound layout puts the table headers and values on separate lines: Quantity / MPN / Manufacturer / 4,000 / S29AL032D90BFI040 (Bug 110)
     const _hdrWord = '(?!(?:manufacturer|mfr|mfg|quantity|qty|description|brand)\\b)';
     const _bm = _bt.match(/\bQuantity\s*\n\s*MPN\s*\n\s*Manufacturer\s*\n\s*[\d,]+\s*\n\s*([A-Z0-9][A-Z0-9\-\.\/#]{3,})/i)
-      || _bt.match(new RegExp('\\bpart\\s*(?:number|no\\.?|#)\\s*' + _hdrWord + '([A-Z0-9][A-Z0-9\\-]{3,})', 'i'))
+      || _bt.match(new RegExp('\\bpart\\s*(?:number|no\\.?|#)\\s*[:#]?\\s*' + _hdrWord + '([A-Z0-9][A-Z0-9\\-]{3,})', 'i'))
       || _bt.match(new RegExp('\\b(?:MPN|P\\/N|PN)\\s*:?\\s*' + _hdrWord + '([A-Z0-9][A-Z0-9\\-]{3,})', 'i'))
       || _bt.match(/\b\d+\s*pcs?\s+([A-Za-z][A-Za-z0-9\-\.\/]{4,})/i);  // "40pcs SDSDQAF3-016G-I"
     if (_bm) _bodyMpnHint = _bm[1].replace(/[-.,;:]+$/, '').toUpperCase();
@@ -3777,8 +3778,9 @@ async function buildScanPayload(threadId, token, env) {
     subject,
     sender,
     last_from:       lastFrom,
-    last_msg_body:   stripQuoted(extractMimeText(lastMsg.payload) || '').substring(0, 1000),
-    thread_content:  content,
+    // "16💲" (Ruidafeng) — emoji / full-width dollar signs read as "$" so the TP is seen (Bug 149)
+    last_msg_body:   stripQuoted(extractMimeText(lastMsg.payload) || '').replace(/💲|＄/g, '$').substring(0, 1000),
+    thread_content:  content.replace(/💲|＄/g, '$'),
     current_labels:  thread.labelIds || [],
     prior_quotes:    'None found',
   };
@@ -3788,7 +3790,8 @@ async function buildScanPayload(threadId, token, env) {
   // Buyer answered our TP request with just a number ("3") — that's the TP, not a new RFQ.
   // Daelith O3854AQDCARQ1 got a 2nd TP request (Bug 133). Rewrite as "$3" so every TP check downstream sees it.
   if (msgs.length > 1) {
-    const _bare = payload.last_msg_body.replace(/\n\s*\*?(?:Regards|Thanks?|Best|BR)\b[\s\S]*$/i, '').trim()
+    const _bare = payload.last_msg_body.replace(/\n\s*\*?(?:Regards|Thanks?|Best|BR)\b[\s\S]*$/i, '')
+      .replace(/\n\s*(?:阿里邮箱|Sent from|发自|-{5,})[\s\S]*$/i, '').trim()  // mail-client footer under "16💲" (Bug 149)
       .match(/^(?:tp|target(?:\s*price)?)?\s*[:=]?\s*(?:usd)?\s*\$?\s*(\d*\.?\d+)\s*(?:usd|\$|u)?\s*\.?$/i);
     const _ourPrev = [...msgs].reverse().find(m => /intransittech\.com/i.test(getHdr(m, 'From')) && !(m.labelIds || []).includes('DRAFT'));
     const _askedTp = _ourPrev && /we need a target price/i.test(extractMimeText(_ourPrev.payload) || '');
@@ -3799,7 +3802,10 @@ async function buildScanPayload(threadId, token, env) {
   // route on that line, not the subject MPN — Emporium got the AR8035 stock quote re-sent (Bug 111)
   if (msgs.length > 1 && payload.mpn) {
     const _firstTxt = stripQuoted(extractMimeText(msgs[0].payload) || '');
-    const _esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Only the RFQ part of the first message counts — "1-Source Electronic Components" in Rafael's signature
+    // repeats in every reply and hijacked M15T1G1664AS1AG (Bug 149)
+    const _firstRfq = _firstTxt.replace(/\n\s*\*?(?:Best\s+(?:Wishes|Regards)|Kind\s+Regards|Regards|Sincerely|Cheers|BR)\b[\s\S]*$/i, '');
+    const _esc =s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // Buyer's reply may not name the part ("please quote at a minimum of 3125 pcs") — then the active line is
     // the one our own last reply was about (the below_min offer naming CIC21P101NE)
     const _ourLast = [...msgs].reverse().find(m => /intransittech\.com/i.test(getHdr(m, 'From')) && !(m.labelIds || []).includes('DRAFT'));
@@ -3807,7 +3813,7 @@ async function buildScanPayload(threadId, token, env) {
     const _hit = (_ctx.match(/\b[A-Z0-9][A-Z0-9\-\/.#]{4,}[A-Z0-9]\b/gi) || [])
       .filter(t => /[A-Za-z]/.test(t) && /\d/.test(t) && t.toUpperCase() !== payload.mpn.toUpperCase())
       .find(t => {
-        const _ln = (_firstTxt.match(new RegExp('^.*(?:^|\\s)' + _esc(t) + '(?=\\s|$).*$', 'im')) || [])[0];
+        const _ln = (_firstRfq.match(new RegExp('^.*(?:^|\\s)' + _esc(t) + '(?=\\s|$).*$', 'im')) || [])[0];
         // Signature cert lines repeat in every buyer message — "ANSI/ESD S20.20" became the MPN → no_bid (Quest PNF18-6R, Bug 130)
         return _ln && !/\b(?:iso|ansi|esd|erai|idea|as\s?9\d{3}|certified|certification|direct|fax|phone|tel|mobile)\b/i.test(_ln);
       });
