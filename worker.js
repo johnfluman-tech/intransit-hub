@@ -195,6 +195,7 @@ export default {
         cronCheckPaymentAdvice(env),
         cronCheckBillRemovals(env),
         cronCheckDavidNoStock(env),
+        cronCheckRemovalApprovals(env),
       ]));
     }
   }
@@ -2442,42 +2443,25 @@ function noStkColKRequest(sheetId, rowIndex) {
 
 async function handleProcessNoStkColL(env) {
   const rows = await sheetsGetAllValues(env, FORTE_SHEET_ID, null);
-  const meta = await sheetsGetMeta(env, FORTE_SHEET_ID);
-  const sheetId = meta.sheets[0].properties.sheetId;
-  const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles' });
   const noStkPhrases = ['no stock', 'no stk', 'cant share', 'cant find', 'can\'t share', 'can\'t find'];
-  const valUpdates = [], fmtRequests = [], queued = [];
+  const queued = [];
   // Skip rows where status is already NO STK, CLOSED, or QUOTED
   const skipStatus = ['no stk', 'closed', 'quoted'];
   for (let i = 1; i < rows.length; i++) {
     const status = ((rows[i] && rows[i][10]) || '').toString().toLowerCase();
     if (skipStatus.some(s => status.includes(s))) continue;
     // Check col L (index 11) and beyond for no-stk phrases
-    const extra = [rows[i][11], rows[i][12], rows[i][13]].map(v => (v||'').toLowerCase()).join(' ');
+    const extraRaw = [rows[i][11], rows[i][12], rows[i][13]].filter(Boolean).join(' | ');
+    const extra = extraRaw.toLowerCase();
     if (!noStkPhrases.some(p => extra.includes(p))) continue;
     const mpn = (rows[i][1] || '').trim();
     if (!mpn) continue;
-    valUpdates.push({ range: `K${i+1}`, values: [['NO STK - ' + today]] });
-    fmtRequests.push(noStkColKRequest(sheetId, i));
+    // John approves first (Oct 22) — YES stamps this row + removes the part from OEM EXCESS
+    await requestRemovalApproval(env, { mpn, kind: 'oem_remove', payload: { mpn, forte_row: i + 1 },
+      source: 'Forte col L note', evidence_text: `Forte row ${i + 1} (${mpn}), David's note in cols L–N: "${extraRaw}"` });
     queued.push(mpn);
   }
-  if (valUpdates.length) {
-    const ft = await getGmailToken(env);
-    const vr = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values:batchUpdate`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + ft, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ valueInputOption: 'RAW', data: valUpdates }),
-    });
-    const vj = await vr.json();
-    if (vj.error) await hubLog(env, 'email_automation', 'error', 'process-nostk-colL values: ' + JSON.stringify(vj.error));
-    const fr = await sheetsBatchUpdate(env, FORTE_SHEET_ID, fmtRequests);
-    if (fr.error) await hubLog(env, 'email_automation', 'error', 'process-nostk-colL format: ' + JSON.stringify(fr.error));
-    // Queue OEM removals
-    for (const mpn of queued) {
-      await env.DB.prepare(`INSERT INTO command_queue (type, data) VALUES (?, ?)`).bind('remove_oem_mpn', JSON.stringify({ mpn })).run();
-    }
-  }
-  return json({ ok: true, processed: queued.length, mpns: queued });
+  return json({ ok: true, approvals_requested: queued.length, mpns: queued });
 }
 
 async function handleFixNoStkFormat(env) {
@@ -3976,7 +3960,7 @@ async function executeDecisionCron(decision, payload, token, env) {
     decision.draft_body = _EXEC_TEMPLATES[action];
   }
 
-  if (decision.draft_body) {
+  if (decision.draft_body && action !== 'remove_oem' && action !== 'david_nostock') {  // removals: draft after John's YES
     const replyTo = payload.ics_buyer_email || payload.nc_buyer_email || decision.buyer_email || payload.sender || '';
     const isRelay = a => !a || a.toLowerCase().includes('intransittech.com') ||
       a.includes('messagesend@netcomponents') || a.includes('autosend@icsource') || a.includes('partalert@netcomponents');
@@ -4099,8 +4083,11 @@ async function executeDecisionCron(decision, payload, token, env) {
       .bind('stan_add', threadId, payload.subject || null, JSON.stringify(stanData)).run();
   }
   if (action === 'remove_oem' || action === 'david_nostock') {
-    await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
-      .bind('oem_remove', threadId, payload.subject || null, JSON.stringify({ mpn: decision.mpn, row: decision.oem_delete_row || null })).run();
+    const _to = decision.buyer_email || payload.sender || '';
+    const _okTo = _to && !/intransittech\.com|messagesend@netcomponents|autosend@icsource/i.test(_to);
+    await requestRemovalApproval(env, { mpn: decision.mpn, kind: 'oem_remove', payload: { mpn: decision.mpn, row: decision.oem_delete_row || null },
+      reply: _okTo ? { thread_id: threadId, to: extractEmailAddr(_to) || _to, html: decision.draft_body || 'Ok, removed from listing.' } : null,
+      source: 'agent ' + action, source_thread_id: threadId });
   }
 }
 
@@ -4507,6 +4494,150 @@ async function cronCheckPaymentAdvice(env) {
   }
 }
 
+// ── Removal approvals (John, Oct 22 2026) ────────────────────────────────────
+// Every no-stk move (OEM EXCESS delete + Forte "NO STK" stamp) waits for John. He gets an email
+// "Please confirm removal: MPN" with the evidence and replies YES (remove) or NO (keep).
+// TLF35584QVVS2XUMA2 came off OEM EXCESS on David's "#4666 NO STOCK" and BOTH Forte rows were stamped
+// while the #4192 deal was still alive — nothing asked first.
+const APPROVAL_TABLE = `CREATE TABLE IF NOT EXISTS removal_approvals (id INTEGER PRIMARY KEY AUTOINCREMENT, mpn TEXT, kind TEXT,
+  payload TEXT, reply TEXT, source TEXT, source_thread_id TEXT, evidence TEXT, status TEXT DEFAULT 'pending',
+  approval_thread_id TEXT, approval_msg_id TEXT, decided_text TEXT, created_at TEXT DEFAULT (datetime('now')), decided_at TEXT)`;
+const APPROVAL_LABEL = 'oem-removal-approval';
+const _escH = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+async function gmailLabelId(env, gGet, gPost, name) {
+  const labels = (await gGet('/labels')).labels || [];
+  const hit = labels.find(l => l.name === name);
+  if (hit) return hit.id;
+  const made = await gPost('/labels', { name, labelListVisibility: 'labelShow', messageListVisibility: 'show' });
+  return made.id || null;
+}
+
+// kind: 'oem_remove' (fix_queue: delete OEM rows + stamp Forte, forte_row → only that row)
+//       'remove_oem_mpn' | 'forte_nostk_batch' (command_queue)
+// reply: { thread_id, to, html } — draft created only after YES (e.g. "Ok, removed from listing." to David)
+// evidence_text: used when there is no source email (Forte col L note, manual command)
+async function requestRemovalApproval(env, { mpn, kind, payload, reply = null, source = '', source_thread_id = null, evidence_text = '' }) {
+  await env.DB.prepare(APPROVAL_TABLE).run();
+  mpn = String(mpn || '').trim();
+  if (!mpn) throw new Error('requestRemovalApproval: mpn required');
+  const dup = await env.DB.prepare("SELECT id FROM removal_approvals WHERE status='pending' AND lower(replace(replace(mpn,'-',''),' ','')) = ?")
+    .bind(normalizeMPN(mpn)).first();
+  if (dup) { await hubLog(env, 'email_automation', 'run', `removal approval already pending #${dup.id} for ${mpn} (${source})`); return dup.id; }
+
+  const token = await getGmailToken(env);
+  const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+
+  // Evidence: the latest message in the source thread that isn't ours (David / Bill / buyer), own text only
+  let ev = null;
+  if (source_thread_id) {
+    const th = await gGet('/threads/' + source_thread_id + '?format=full').catch(() => null);
+    const msgs = (th && th.messages || []).filter(m => !(m.labelIds || []).includes('DRAFT'));
+    const hdr = (m, n) => ((m.payload?.headers || []).find(h => h.name.toLowerCase() === n.toLowerCase()) || {}).value || '';
+    const theirs = msgs.filter(m => !/john\.fluman@intransittech\.com/i.test(hdr(m, 'From')));
+    const m = theirs[theirs.length - 1] || msgs[msgs.length - 1];
+    if (m) {
+      const own = extractMimeText(m.payload).split(/\n\s*(?:>|On .{0,120}wrote:|From:|-{3,}\s*Original|发件人)/)[0].replace(/\n{3,}/g, '\n\n').trim();
+      ev = { from: hdr(m, 'From'), date: hdr(m, 'Date'), subject: hdr(m, 'Subject'), text: own.slice(0, 800) };
+    }
+  }
+
+  // What YES will do — read the live sheets through the web app
+  const inv = await lookupInventory(mpn) || {};
+  const oem = (inv.oem_excess || []).filter(r => normalizeMPN(r.mpn) === normalizeMPN(mpn));
+  const fRow = payload && (payload.forte_row || null);
+  const forte = (inv.forte_sheet || []).filter(r => normalizeMPN(r.mpn) === normalizeMPN(mpn) && !/^closed/i.test(r.status || '') && (!fRow || +r.row === +fRow));
+  const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles' });
+  const fdate = d => { const x = new Date(d); return isNaN(x) ? String(d || '') : (x.getUTCMonth() + 1) + '/' + x.getUTCDate() + '/' + x.getUTCFullYear(); };
+  const will = [];
+  if (kind === 'forte_nostk_batch') {
+    for (const it of (payload.items || [])) will.push(`Stamp Forte row ${it.row} (${_escH(it.mpn)}) "NO STK - ${today}" and <b>delete that Forte row</b>`);
+  } else {
+    if (oem.length) for (const r of oem) will.push(`Delete from OEM EXCESS: <b>${_escH(r.mpn)}</b> · ${_escH(r.man || '-')} · ${_escH(r.qty)} pcs · ${_escH(r.notes || '')} (row ${r.row})`);
+    else will.push(`OEM EXCESS: not listed now — nothing to delete`);
+    if (forte.length) for (const r of forte) will.push(`Stamp Forte row ${r.row} "NO STK - ${today}" (${fdate(r.date)} · qty ${_escH(r.qty)} · TP $${_escH(r.buyerTP)} · now "${_escH(r.status || '')}")`);
+    else will.push('Forte: no open row to stamp');
+  }
+  if (reply) will.push(`Draft "${_escH(String(reply.html).replace(/<[^>]+>/g, ''))}" to ${_escH(reply.to)}`);
+
+  const evHtml = ev
+    ? `<div style="border-left:3px solid #c9c9c9;padding:4px 10px;margin:8px 0;color:#333"><div><b>From:</b> ${_escH(ev.from)}</div><div><b>Date:</b> ${_escH(ev.date)}</div><div><b>Subject:</b> ${_escH(ev.subject)}</div><div style="margin-top:6px;white-space:pre-wrap">${_escH(ev.text) || '<i>(no text — subject only)</i>'}</div></div>`
+      + `<div><a href="https://mail.google.com/mail/u/0/#all/${source_thread_id}">Open the email</a></div>`
+    : `<div style="border-left:3px solid #c9c9c9;padding:4px 10px;margin:8px 0;color:#333;white-space:pre-wrap">${_escH(evidence_text || source)}</div>`;
+  const subj = `Please confirm removal: ${mpn}${fRow ? ' #' + fRow : ''}`;
+  const html = `<div dir="ltr"><div>Please confirm if <b>${_escH(mpn)}</b> can be removed based on this ${ev ? 'email' : 'note'}:</div>${evHtml}`
+    + `<div style="margin-top:10px"><b>If you reply YES I will:</b><ul>${will.map(w => '<li>' + w + '</li>').join('')}</ul></div>`
+    + `<div><b>Reply YES to remove it, or NO to keep it.</b> Nothing changes until you reply.</div>`
+    + `<div style="color:#999;font-size:8pt;margin-top:10px">source: ${_escH(source)}</div></div>`;
+  const raw = base64url(['From: ' + JOHN_FROM, 'To: john.fluman@intransittech.com', 'Subject: ' + encHdr(subj), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8', '', html].join('\r\n'));
+  const sent = await gPost('/messages/send', { raw });
+  if (sent.error) throw new Error('approval email: ' + JSON.stringify(sent.error));
+  const lbl = await gmailLabelId(env, gGet, gPost, APPROVAL_LABEL).catch(() => null);
+  if (lbl) await gPost('/threads/' + sent.threadId + '/modify', { addLabelIds: [lbl] });
+  const ins = await env.DB.prepare('INSERT INTO removal_approvals (mpn, kind, payload, reply, source, source_thread_id, evidence, approval_thread_id, approval_msg_id) VALUES (?,?,?,?,?,?,?,?,?)')
+    .bind(mpn, kind, JSON.stringify(payload || {}), reply ? JSON.stringify(reply) : null, source, source_thread_id, JSON.stringify(ev || { text: evidence_text }), sent.threadId, sent.id).run();
+  await hubLog(env, 'email_automation', 'run', `removal approval #${ins.meta.last_row_id} requested: ${mpn} (${source})`, { approval_thread_id: sent.threadId });
+  return ins.meta.last_row_id;
+}
+
+// Reply draft in an existing thread (used after YES): replies to the thread's last message
+async function draftReplyInThread(env, threadId, to, html) {
+  const token = await getGmailToken(env);
+  const th = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}?format=metadata&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=References`, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const msgs = (th.messages || []).filter(m => !(m.labelIds || []).includes('DRAFT'));
+  const last = msgs[msgs.length - 1];
+  if (!last) throw new Error('draftReplyInThread: empty thread ' + threadId);
+  const hdr = (m, n) => ((m.payload?.headers || []).find(h => h.name.toLowerCase() === n.toLowerCase()) || {}).value || '';
+  const subject = hdr(msgs[0], 'Subject');
+  const msgId = hdr(last, 'Message-ID'), refs = hdr(last, 'References');
+  const lines = ['From: ' + JOHN_FROM, 'To: ' + to, 'Subject: ' + encHdr(/^re:/i.test(subject) ? subject : 'Re: ' + subject), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+  if (msgId) { lines.push('In-Reply-To: ' + msgId); lines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
+  lines.push('', '<div dir="ltr">' + html + SIG_HTML + '</div>');
+  const d = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: { threadId, raw: base64url(lines.join('\r\n')) } }) }).then(r => r.json());
+  if (d.error) throw new Error('draftReplyInThread: ' + JSON.stringify(d.error));
+  return d.id;
+}
+
+// Cron: read John's YES / NO replies on pending approvals
+async function cronCheckRemovalApprovals(env) {
+  await env.DB.prepare(APPROVAL_TABLE).run();
+  const { results: pend } = await env.DB.prepare("SELECT * FROM removal_approvals WHERE status='pending' ORDER BY id LIMIT 25").all();
+  if (!pend.length) return;
+  const token = await getGmailToken(env);
+  const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const gPost = (p, b) => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+  for (const a of pend) {
+    try {
+      const th = await gGet('/threads/' + a.approval_thread_id + '?format=full');
+      const msgs = (th.messages || []).filter(m => m.id !== a.approval_msg_id && !(m.labelIds || []).includes('DRAFT'));
+      let verdict = null, said = '';
+      for (const m of msgs) {
+        const own = extractMimeText(m.payload).split(/\n\s*(?:>|On .{0,160}wrote:|From:|-{3,}\s*Original)/)[0].replace(/\s+/g, ' ').trim();
+        if (/^(?:yes|y|yep|yeah|ok|okay|approved?|confirm(?:ed)?|remove(?: it)?|go ahead)\b/i.test(own)) { verdict = 'approved'; said = own; }
+        else if (/^(?:no|n|nope|keep(?: it)?|don'?t|do not|hold)\b/i.test(own)) { verdict = 'rejected'; said = own; }
+      }
+      if (!verdict) continue;
+      const payload = JSON.parse(a.payload || '{}');
+      if (verdict === 'approved') {
+        const data = JSON.stringify({ ...payload, mpn: payload.mpn || a.mpn, approved: true, approval_id: a.id });
+        if (a.kind === 'oem_remove') {
+          await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)").bind('oem_remove', a.source_thread_id, 'approved removal ' + a.mpn, data).run();
+        } else {
+          await env.DB.prepare("INSERT INTO command_queue (type, data, status) VALUES (?, ?, 'pending')").bind(a.kind, data).run();
+        }
+        if (a.reply) { const r = JSON.parse(a.reply); await draftReplyInThread(env, r.thread_id, r.to, r.html); }
+      }
+      await env.DB.prepare("UPDATE removal_approvals SET status=?, decided_text=?, decided_at=datetime('now') WHERE id=?").bind(verdict, said.slice(0, 300), a.id).run();
+      await gPost('/threads/' + a.approval_thread_id + '/modify', { removeLabelIds: ['INBOX', 'UNREAD'] });
+      await hubLog(env, 'email_automation', 'run', `removal approval #${a.id} ${verdict}: ${a.mpn} — "${said.slice(0, 60)}"`);
+    } catch (e) {
+      await hubLog(env, 'email_automation', 'error', `cronCheckRemovalApprovals #${a.id}: ${e.message}`);
+    }
+  }
+}
+
 async function cronCheckBillRemovals(env) {
   const token = await getGmailToken(env);
   const gGet  = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
@@ -4549,14 +4680,10 @@ async function cronCheckBillRemovals(env) {
       const msgId = getHdr(lastMsg, 'Message-ID');
       const refs  = getHdr(lastMsg, 'References');
       const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
-      const htmlBody = '<div dir="ltr">Got it - removing ' + mpn + ' from OEM EXCESS now.' + SIG_HTML + '</div>';
-      const mimeLines = ['From: ' + JOHN_FROM, 'To: bill.pratt@intransittech.com', 'Subject: ' + encHdr(replySubj), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
-      if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
-      mimeLines.push('', htmlBody);
-      const draft = await gPost('/drafts', { message: { threadId: t.id, raw: base64url(mimeLines.join('\r\n')) } });
-      if (draft.error) throw new Error('Draft error: ' + JSON.stringify(draft.error));
-      await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
-        .bind('oem_remove', t.id, subject, JSON.stringify({ mpn })).run();
+      // John approves first; "Got it - removing …" to Bill is drafted after YES
+      await requestRemovalApproval(env, { mpn, kind: 'oem_remove', payload: { mpn },
+        reply: { thread_id: t.id, to: 'bill.pratt@intransittech.com', html: 'Got it - removing ' + mpn + ' from OEM EXCESS now.' },
+        source: 'Bill remove-from-NetComponents email', source_thread_id: t.id });
       const addLabels = doneLabel ? [doneLabel] : [];
       await gPost('/threads/' + t.id + '/modify', { addLabelIds: addLabels, removeLabelIds: ['INBOX'] });
       await hubLog(env, 'email_automation', 'run', 'cronCheckBillRemovals: queued removal mpn=' + mpn);
@@ -4666,17 +4793,12 @@ async function cronCheckDavidNoStock(env) {
       const refs  = getHdr(lastMsg, 'References');
       const replySubj = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
       const toAddr = extractEmailAddr(getHdr(lastMsg, 'From'));
-      const htmlBody = '<div dir="ltr">Ok, removed from listing.' + SIG_HTML + '</div>';
-      const mimeLines = ['From: ' + JOHN_FROM, 'To: ' + toAddr, 'Subject: ' + encHdr(replySubj), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
-      if (msgId) { mimeLines.push('In-Reply-To: ' + msgId); mimeLines.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
-      mimeLines.push('', htmlBody);
-      const draft = await gPost('/drafts', { message: { threadId: tid, raw: base64url(mimeLines.join('\r\n')) } });
-      if (draft.error) throw new Error('Draft error: ' + JSON.stringify(draft.error));
-
+      if (!mpn) throw new Error('no MPN in subject: ' + subject);
       // row from subject (#XXXX) is the Forte row number â€" NOT the OEM EXCESS row.
-      // Pass only mpn so workerDeleteOemRow searches OEM EXCESS by MPN instead of deleting the wrong row.
-      await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
-        .bind('oem_remove', tid, subject, JSON.stringify({ mpn, forte_row: row })).run();  // forte_row → stamp only David's row (Bug 137)
+      // forte_row → stamp only David's row (Bug 137). John approves every removal first (Oct 22, TLF35584QVVS2XUMA2):
+      // the "Ok, removed from listing." draft to David is made only after he replies YES.
+      await requestRemovalApproval(env, { mpn, kind: 'oem_remove', payload: { mpn, forte_row: row },
+        reply: { thread_id: tid, to: toAddr, html: 'Ok, removed from listing.' }, source: 'David no-stk email', source_thread_id: tid });
       await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels, removeLabelIds: ['INBOX'] });
       await hubLog(env, 'email_automation', 'run', 'cronCheckDavidNoStock: queued removal mpn=' + mpn + ' forte_row=' + row);
     } catch(e) {
@@ -4806,6 +4928,16 @@ async function cronProcessCommandQueue(env) {
           await sheetsBatchUpdate(env, IN_STOCK_ID, [{ deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: rn-1, endIndex: rn } } }]);
         }
         await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: remove_instock_mpn ${mpn} (${toDelete.length} rows)`);
+
+      } else if ((cmd.type === 'remove_oem_mpn' || cmd.type === 'forte_nostk_batch') && !data.approved) {
+        // Not approved yet → one "Please confirm removal" email per part; runs only after John replies YES
+        const _items = cmd.type === 'forte_nostk_batch' ? (Array.isArray(data.items) ? data.items : []) : [data];
+        if (!_items.length) throw new Error(cmd.type + ': nothing to remove');
+        for (const it of _items) {
+          await requestRemovalApproval(env, { mpn: it.mpn, kind: cmd.type, payload: cmd.type === 'forte_nostk_batch' ? { items: [it] } : data,
+            source: 'command ' + cmd.type, source_thread_id: data.thread_id || null,
+            evidence_text: data.reason || `Queued command ${cmd.type} for ${it.mpn}${it.row ? ' (Forte row ' + it.row + ')' : ''} — no source email attached` });
+        }
 
       } else if (cmd.type === 'remove_oem_mpn') {
         const mpn = (data.mpn || '').trim();
@@ -5229,6 +5361,12 @@ async function cronProcessFixQueue(env) {
         if (!data.mpn) throw new Error('stan_add: missing mpn');
         await workerAddToStanSheet(env, data.mpn, data.country || 'USA', data.qty || '', data.target_price || '');
         await hubLog(env, 'email_automation', 'run', `processFixQueue: stan_add ${data.mpn}`);
+
+      } else if (fix.type === 'oem_remove' && !JSON.parse(fix.draft_body || '{}').approved) {
+        // Not approved yet → email John "Please confirm removal" first; nothing is touched until he replies YES
+        const data = JSON.parse(fix.draft_body || '{}');
+        await requestRemovalApproval(env, { mpn: data.mpn, kind: 'oem_remove', payload: data, reply: data.reply || null,
+          source: 'fix_queue oem_remove', source_thread_id: /^[0-9a-f]{12,}$/i.test(fix.thread_id || '') ? fix.thread_id : null });
 
       } else if (fix.type === 'oem_remove') {
         const data = JSON.parse(fix.draft_body || '{}');
