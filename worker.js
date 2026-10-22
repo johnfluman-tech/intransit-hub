@@ -1087,6 +1087,23 @@ function parseNetCompPlainText(text) {
   };
 }
 
+// Line minimum from the OEM rows' "$N MIN" notes: $500 default, $2000 Curtiss, $200 for David's Oct 22 Curtiss list (Bug 150).
+// Non-BILL rows set it when present (Bill's lots carry their own $500 note); highest wins.
+function rowLineMin(r) { const m = /\$?\s?(\d[\d,]*)\s*MIN\b/i.exec((r && r.notes) || ''); return m ? (parseInt(m[1].replace(/,/g, '')) || 500) : 500; }
+// With mpn: the buyer's exact-MPN rows decide when there are any — a near-match row (BN628M25 $2000 next to BN628M2 $200) must not.
+function oemExactRows(rows, mpn) {
+  const n = x => String(x || '').replace(/[\s\-\/.]/g, '').toUpperCase();
+  const ex = mpn ? (rows || []).filter(r => n(r.mpn) === n(mpn)) : [];
+  return ex.length ? ex : (rows || []);
+}
+function oemLineMin(rows, mpn) {
+  rows = oemExactRows(rows, mpn);
+  const nb = (rows || []).filter(r => !/BILL EXT/i.test(r.notes || ''));
+  const use = nb.length ? nb : (rows || []);
+  return use.length ? Math.max(...use.map(rowLineMin)) : 500;
+}
+function tpRequestBody(min) { return `We need a target price to proceed. Please note there is a $${Number(min).toLocaleString('en-US')} minimum line requirement. Once we have your target we will get back to you right away.`; }
+
 async function handleEmailAgent(request, env) {
   const body = await request.json();
   const { thread_id, last_message_id, subject, sender, current_labels, prior_quotes } = body;
@@ -1339,7 +1356,7 @@ async function handleEmailAgent(request, env) {
               return json({ action: 'own_stock', reasoning: 'Inventory found on retry â€" own IN STOCK rows exist', mpn: requestMpn, buyer_email: null, draft_body: _db2, forte_entry: null, oem_delete_row: null });
             }
             const has2k2 = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
-            return json({ action: has2k2 ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Inventory found on retry â€" OEM EXCESS exists, no TP given', mpn: requestMpn, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+            return json({ action: has2k2 ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Inventory found on retry â€" OEM EXCESS exists, no TP given', mpn: requestMpn, buyer_email: null, draft_body: tpRequestBody(oemLineMin(oem_results, requestMpn)), forte_entry: null, oem_delete_row: null });
           }
         }
       } catch(e2) { /* ignore retry errors â€" proceed to no_bid/listing_removed */ }
@@ -1359,7 +1376,7 @@ async function handleEmailAgent(request, env) {
             }
             await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: split MPN — "${_prev} ${requestMpn}" found as ${_joined}`, { subject });
             const has2k3 = oemHit3.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
-            return json({ action: has2k3 ? 'request_tp_2000' : 'request_tp_500', reasoning: `Split MPN joined (${_joined}) — OEM EXCESS exists, no TP given`, mpn: _joined, buyer_email: null, draft_body: null, forte_entry: null, oem_delete_row: null });
+            return json({ action: has2k3 ? 'request_tp_2000' : 'request_tp_500', reasoning: `Split MPN joined (${_joined}) — OEM EXCESS exists, no TP given`, mpn: _joined, buyer_email: null, draft_body: tpRequestBody(oemLineMin(oemHit3, _joined)), forte_entry: null, oem_delete_row: null });
           }
         }
       } catch(e3) { /* fall through to no_bid */ }
@@ -1546,10 +1563,8 @@ async function handleEmailAgent(request, env) {
     // deterministic engine handle it as stan_quoted instead of firing TP request here.
     const _hasStanQuoted = (stan_results || []).some(r => r.status === 'QUOTED' && r.colB);
     if (!hasBuyerTp && !_hasStanQuoted) {
-      const has2k = oem_results.some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
-      const _tpTpl = has2k
-        ? 'We need a target price to proceed. Please note there is a $2,000 minimum line requirement. Once we have your target we will get back to you right away.'
-        : 'We need a target price to proceed. Please note there is a $500 minimum line requirement. Once we have your target we will get back to you right away.';
+      const _min0 = oemLineMin(oem_results, requestMpn), has2k = _min0 >= 2000;
+      const _tpTpl = tpRequestBody(_min0);
       await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: OEM pre-check — no buyer TP, returning ${has2k ? 'request_tp_2000' : 'request_tp_500'}`, { subject, mpn: requestMpn });
       return json({ action: has2k ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Deterministic: OEM EXCESS exists, buyer gave no TP', mpn: requestMpn, buyer_email: null, draft_body: _tpTpl, forte_entry: null, oem_delete_row: null });
     }
@@ -1672,6 +1687,7 @@ async function handleEmailAgent(request, env) {
     const _billOnly = (oem_results || []).length > 0 && (oem_results || []).every(r => /BILL EXT/i.test(r.notes || ''));
     const _hasOem   = (oem_results || []).some(r => !/BILL EXT/i.test(r.notes || ''));
     const _has2k    = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
+    const _lineMin  = oemLineMin(oem_results, requestMpn);
     const _hasTp    = _tpDetect(thread_content) || _lastMsgTp(body.last_msg_body) !== null;
     const _tcTp = _stripNotes(thread_content);  // never parse our own FORTE_QUOTED_PRICE note as the buyer's TP
     const _tpMatch = _tcTp.match(/tgtprice=(\d*\.?\d+)/i) ||
@@ -1764,7 +1780,7 @@ async function handleEmailAgent(request, env) {
 
     let _act, _body = null, _rsn, _forteEntry = null;
     // Line value is capped by what we actually have: a buyer asking more than our stock can never clear the min with more pieces (Bug 148)
-    const _oemStockQty = (oem_results || []).reduce((s, r) => s + (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0), 0);
+    const _oemStockQty = oemExactRows(oem_results, requestMpn).reduce((s, r) => s + (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0), 0);
     const _stockLineVal = tp => !_oemStockQty ? Infinity : tp * (_buyerQty && _oemStockQty ? Math.min(_buyerQty, _oemStockQty) : (_oemStockQty || _buyerQty || 0));
     const _belowMinBody = (tp, min) => Math.ceil(min / tp) > _oemStockQty && _oemStockQty ? _belowMinStockBody(tp, min) :
       `Thank you for your inquiry. Our minimum line value for this item is $${min}. At your target price of $${tp} per piece, we would require a minimum of ${Math.ceil(min / tp)} pieces. If you are able to adjust your quantity, please let us know and we will get right back to you. Thank you for the opportunity.`;
@@ -1787,15 +1803,15 @@ async function handleEmailAgent(request, env) {
         if (_stanMpnExact) { _act = 'stan_quoted'; _body = buildStanQuotedBody(_stanQ, in_stock_results); _rsn = 'WH3+Stan QUOTED'; }
         else               { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3+Stan variant mismatch'; }
       } else        { _act = 'add_to_stan'; _body = DRAFT_TEMPLATES.add_to_stan; _rsn = 'WH3 only'; }
-    } else if (_billOnly && _hasTp && _tpVal && _stockLineVal(_tpVal) < (_has2k ? 2000 : 500)) {
+    } else if (_billOnly && _hasTp && _tpVal && _stockLineVal(_tpVal) < _lineMin) {
       // Bill's lot can't reach the min even if they take all of it: 500 pcs × $0.24 = $120 < $500 — the BILL EXT
       // branch never checked the min → "Bill will help" went out (CAT25160VI-GT3, Silico, Bug 148). Tell the buyer instead.
-      _act = 'below_min_line'; _body = _belowMinBody(_tpVal, _has2k ? 2000 : 500); _rsn = `BILL EXT+TP but our qty × TP $${_stockLineVal(_tpVal).toFixed(2)} < min`;
+      _act = 'below_min_line'; _body = _belowMinBody(_tpVal, _lineMin); _rsn = `BILL EXT+TP but our qty × TP $${_stockLineVal(_tpVal).toFixed(2)} < min`;
     } else if (_billOnly) {
       if (_hasTp) { _act = 'bill_handle'; _body = DRAFT_TEMPLATES.bill_handle; _rsn = 'BILL EXT+TP'; }
       else        { _act = _has2k ? 'request_tp_2000' : 'request_tp_500'; _rsn = 'BILL EXT no TP'; }
     } else if (_hasOem) {
-      const _minVal = _has2k ? 2000 : 500;
+      const _minVal = _lineMin;
       if (!_tpVal) {
         // No usable TP (pre-check bypassed, or "no target price") → always ask; never msg_checking at a $0.01 sentinel.
         // If we already told the buyer we're checking, a follow-up gets "still checking", not a second TP request.
@@ -1805,7 +1821,7 @@ async function handleEmailAgent(request, env) {
         _act = 'no_action'; _rsn = 'below_min_line already sent; buyer reply is not a clear accept — John to handle';
       } else if (_buyerQty && (_tpVal * _buyerQty) < _minVal && (oem_results || []).some(r => /BILL EXT/i.test(r.notes || '') &&
                  (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0) >= _buyerQty &&
-                 _tpVal * _buyerQty >= (/\$2,000 MIN|2000 MIN/i.test(r.notes || '') ? 2000 : 500))) {
+                 _tpVal * _buyerQty >= rowLineMin(r))) {
         // Mixed lots: the Forte lot's $2000 min isn't met, but Bill's lot covers the qty at its own min → Bill handles it
         // (Aonics MC-15632.7680KA-A0:ROHS 100 @ $5: BILL EXT 117 453 pcs $500 min — John's call, Bug 142)
         _act = 'bill_handle'; _body = DRAFT_TEMPLATES.bill_handle; _rsn = 'OEM below min, BILL EXT lot meets qty+min';
@@ -2166,8 +2182,7 @@ async function handleEmailAgent(request, env) {
   // Code-level guard: msg_checking must become below_min_line if qty Ã— TP < minimum.
   // Haiku occasionally skips this check even when the prompt instructs it explicitly.
   if (decision.action === 'msg_checking') {
-    const has2kMin = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
-    const lineMin = has2kMin ? 2000 : 500;
+    const lineMin = oemLineMin(oem_results, decision.mpn || requestMpn);
     const qty = decision.qty && decision.qty > 0 ? Number(decision.qty) : null;
     const tp  = decision.target_price && decision.target_price > 0 ? Number(decision.target_price) : null;
     if (qty && tp && (qty * tp) < lineMin) {
@@ -2187,6 +2202,11 @@ async function handleEmailAgent(request, env) {
 
   // â"€â"€ Stock price substitution for own_stock â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   // Priority: (1) price_to_quote col from IN STOCK sheet, (2) D1 stock_prices table.
+  // TP request always states the listing's real minimum ($200 / $500 / $2,000) — the templates only know $500 and $2,000 (Bug 150)
+  if ((decision.action === 'request_tp_500' || decision.action === 'request_tp_2000') && (oem_results || []).length) {
+    decision.draft_body = tpRequestBody(oemLineMin(oem_results, decision.mpn || requestMpn));
+  }
+
   if (decision.action === 'own_stock') {
     const mpnKey = (decision.mpn || requestMpn || '').replace(/\s+/g, '').toUpperCase();
     if (mpnKey) {
