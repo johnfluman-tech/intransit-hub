@@ -20,7 +20,9 @@ function onEdit(e) {
 
   var top = Math.max(rng.getRow(), 4), left = rng.getColumn();
   var nRows = rng.getLastRow() - top + 1, nCols = rng.getLastColumn() - left + 1;
-  var typed = sh.getRange(top, left, nRows, nCols).getValues();
+  var single = rng.getNumRows() === 1 && rng.getNumColumns() === 1;
+  var typed = single ? [[e.value === undefined ? '' : rng.getValue()]]   // single cell: trust the edit event
+                     : sh.getRange(top, left, nRows, nCols).getValues();
 
   // Put the row-number formula back first (in case col A was typed over / deleted), then read the ids
   sh.getRange('A4').setFormula(FIND_FORMULA_A);
