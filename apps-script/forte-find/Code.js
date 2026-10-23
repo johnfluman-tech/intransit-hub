@@ -3,7 +3,7 @@
  * Paste into the FORTE sheet: Extensions > Apps Script (bound project). Simple trigger, no install/auth needed.
  *
  * Find layout: B1 = search box, row 3 = headers, A4 = row-number formula (Sheet1 row ids),
- * B4 = data formula (Sheet1 A:AE, newest first; V:AE = Market pricing 1-10). Find column c  <->  Sheet1 column c-1.
+ * B4 = data formula (Sheet1 A:AG, newest first; V:AE = Market pricing 1-10, AF = Quote RFQs checkbox, AG = quote status). Find column c  <->  Sheet1 column c-1.
  * Typing into a result cell breaks the B4 spill, so we copy the typed value(s) to Sheet1,
  * clear what was typed, and put both formulas back — the results refresh with the new value.
  * Delete works too: cells David selects and clears are cleared on Sheet1 — one result row at a time
@@ -11,11 +11,15 @@
  */
 var FIND_TAB = 'Find';
 var MAIN_TAB = 'Sheet1';
-var FIND_FORMULA_A = "=IF(TRIM($B$1)=\"\",\"\",IFERROR(LET(r,SORT(FILTER(ROW(Sheet1!A3:A),ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),1,FALSE),ARRAYFORMULA(HYPERLINK(\"#gid=0&range=A\"&r&\":AE\"&r,r))),\"No match\"))";
-var FIND_FORMULA_B = "=IF(TRIM($B$1)=\"\",\"\",IFERROR(SORT(FILTER(Sheet1!A3:AE,ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),FILTER(ROW(Sheet1!A3:A),ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),FALSE),\"\"))";
+var FIND_FORMULA_A = "=IF(TRIM($B$1)=\"\",\"\",IFERROR(LET(r,SORT(FILTER(ROW(Sheet1!A3:A),ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),1,FALSE),ARRAYFORMULA(HYPERLINK(\"#gid=0&range=A\"&r&\":AG\"&r,r))),\"No match\"))";
+var FIND_FORMULA_B = "=IF(TRIM($B$1)=\"\",\"\",IFERROR(SORT(FILTER(Sheet1!A3:AG,ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),FILTER(ROW(Sheet1!A3:A),ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),FALSE),\"\"))";
+
+var QUOTE_COL = 32;   // Sheet1 AF: tick -> hub worker drafts quotes on its next 5-min run, writes the result to AG
 
 function onEdit(e) {
   var rng = e.range, sh = rng.getSheet();
+  if (sh.getName() === MAIN_TAB && rng.getColumn() === QUOTE_COL && e.value === 'TRUE')
+    e.source.toast('Quote drafts for this part will be in Gmail Drafts within 5 minutes. Result shows in Quote status.', 'Quote RFQs', 8);
   if (sh.getName() !== FIND_TAB || rng.getLastRow() < 4) return;   // search box / headers: normal edit
 
   var top = Math.max(rng.getRow(), 4), left = rng.getColumn();
@@ -36,7 +40,7 @@ function onEdit(e) {
     if (!row || row < 3) continue;                                    // blank / "No match" line
     for (var j = 0; j < nCols; j++) {
       var c = left + j;
-      if (c < 2 || c > 32) continue;                                  // col A = row #, beyond AE = not shown
+      if (c < 2 || c > 34) continue;                                  // col A = row #, beyond AG = not shown
       var cell = main.getRange(row, c - 1);
       if (typed[i][j] === '') {
         if (!allowClear) continue;                                    // multi-row Delete: never wipe a block of Sheet1
@@ -54,6 +58,8 @@ function onEdit(e) {
   sh.getRange('A4').setFormula(FIND_FORMULA_A);
   sh.getRange('B4').setFormula(FIND_FORMULA_B);
 
+  if (left <= QUOTE_COL + 1 && rng.getLastColumn() >= QUOTE_COL + 1 && e.value === 'TRUE')
+    e.source.toast('Quote drafts for this part will be in Gmail Drafts within 5 minutes. Result shows in Quote status.', 'Quote RFQs', 8);
   if (cleared.length) e.source.toast('Cleared on Sheet1: ' + cleared.join(', '), 'Find', 8);
   else if (!allowClear && typed.some(function (r) { return r.some(function (v) { return v === ''; }); }))
     e.source.toast('Delete one row at a time on Find (or delete on Sheet1).', 'Find', 6);

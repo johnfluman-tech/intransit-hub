@@ -103,6 +103,8 @@ export default {
         const r = await handleEmailAgent(new Request('https://x/api/email-agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }), env);
         return json({ payload: { subject: payload.subject, sender: payload.sender, mpn: payload.mpn, last_msg_body: String(payload.last_msg_body || '').slice(0, 400) }, decision: await r.json() });
       }
+      // Forte quote button, manual/test: ?row=4806&dry=1 lists who would get a quote, nothing drafted
+      if (p === '/api/forte-quote'     && m === 'GET')  return json(await quoteForteRow(env, parseInt(url.searchParams.get('row') || '0'), { dry: url.searchParams.get('dry') === '1' }));
       if (p === '/api/fix-draft'       && m === 'POST') return handleFixDraft(request, env);
       if (p === '/api/chat'            && m === 'POST') return handleChat(request, env);
       if (p === '/api/learn'           && m === 'POST') return handleLearn(request, env);
@@ -203,6 +205,7 @@ export default {
         cronCheckBillRemovals(env),
         cronCheckDavidNoStock(env),
         cronCheckRemovalApprovals(env),
+        cronForteQuoteButtons(env),
       ]));
     }
   }
@@ -6052,3 +6055,102 @@ async function handleDraftForteQuotes(env) {
   return json({ ok: true, message: parts.join('\n\n') });
 }
 
+
+// ── Forte "Quote RFQs" button ─────────────────────────────────────────────────────────────────
+// John ticks the Sheet1 col AF checkbox on a Forte row (or on the Find tab) → next cron drafts a quote at the col H
+// price to every buyer who RFQ'd that MPN and hasn't had a price from us yet. Result goes to col AG, box unticks.
+// Never drafts into David threads, never twice (skips threads with a draft or a sent price), $500 line minimum.
+const _FQ_RELAY = /intransittech\.com|fortetechno\.com|fortecomp\.com|amorelectronics\.com|messagesend@netcomponents|autosend@icsource|partalert@netcomponents|noreply|no-reply|mailer-daemon/i;
+
+async function cronForteQuoteButtons(env) {
+  const token = await getGmailToken(env);
+  const base = `https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values/`;
+  const col = await fetch(base + 'Sheet1!AF3:AF', { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+  const ticked = (col.values || []).map((v, i) => [i + 3, v[0]]).filter(([, v]) => String(v).toUpperCase() === 'TRUE').slice(0, 3);
+  for (const [row] of ticked) {
+    let msg;
+    try { msg = (await quoteForteRow(env, row, {})).summary; } catch (e) { msg = 'Error: ' + (e.message || e); }
+    const stamp = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    await fetch(base + `Sheet1!AF${row}:AG${row}?valueInputOption=USER_ENTERED`, { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [['FALSE', stamp + ' — ' + msg]] }) });
+    await hubLog(env, 'email_automation', 'run', `forte quote button row ${row}: ${msg}`, {});
+  }
+}
+
+async function quoteForteRow(env, row, { dry = false } = {}) {
+  const token = await getGmailToken(env);
+  const auth = { headers: { Authorization: 'Bearer ' + token } };
+  const r = ((await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values/Sheet1!A${row}:AE${row}`, auth).then(x => x.json())).values || [[]])[0];
+  const cell = i => String(r[i] ?? '').trim();
+  const mpn = cell(1), price = parseFloat(cell(7).replace(/[$,\s]/g, ''));
+  if (!mpn) return { summary: 'No MPN on this row', drafted: [], skipped: [] };
+  if (!(price > 0)) return { summary: 'Put your sell price in col H (John Quoted) first', drafted: [], skipped: [] };
+  const ourQty = parseInt((cell(13) || cell(2)).replace(/[^\d]/g, '')) || 0;
+  const loc = cell(15), dc = cell(16), lt = cell(18);
+  const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const key = norm(mpn);
+  const inv = await lookupInventory(mpn);
+  const mfr = ((inv?.oem_excess || []).find(o => norm(o.mpn) === key && o.man) || {}).man || '';
+  const pStr = '$' + (price < 1 ? price.toFixed(4).replace(/(\.\d\d\d*?)0+$/, '$1') : price.toFixed(2));
+
+  // Candidate threads: processed RFQs on this MPN (D1) + a Gmail search for it
+  const cands = new Map();
+  const { results: dec } = await env.DB.prepare("SELECT thread_id, sender, mpn FROM agent_decisions WHERE upper(mpn) LIKE ? AND created_at > datetime('now','-180 days') ORDER BY id DESC LIMIT 200")
+    .bind(mpn.toUpperCase().slice(0, 6) + '%').all();
+  for (const d of dec || []) if (norm(d.mpn) === key && d.thread_id && !cands.has(d.thread_id)) cands.set(d.thread_id, d.sender || '');
+  const sr = await gmailGet(env, '/threads?q=' + encodeURIComponent(`"${mpn}" newer_than:180d`) + '&maxResults=40');
+  for (const t of sr.threads || []) if (!cands.has(t.id)) cands.set(t.id, '');
+
+  const drafted = [], skipped = [];
+  const hdr = (m, n) => ((m.payload?.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';
+  const text = m => stripQuoted(extractMimeText(m.payload) || '');
+  for (const [tid, decSender] of [...cands].slice(0, 30)) {
+    const th = await gmailGet(env, '/threads/' + tid + '?format=full');
+    const all = th.messages || [];
+    const msgs = all.filter(m => !(m.labelIds || []).includes('DRAFT'));
+    if (!msgs.length) continue;
+    if (!msgs.some(m => norm(hdr(m, 'subject') + ' ' + text(m)).includes(key))) continue;            // search hit, not this part
+    if (all.some(m => /fortetechno\.com|fortecomp\.com/i.test(hdr(m, 'from') + hdr(m, 'to') + hdr(m, 'cc')))) continue;  // David thread
+    const ours = msgs.filter(m => /intransittech\.com/i.test(hdr(m, 'from')));
+    const buyerMsg = msgs.find(m => !_FQ_RELAY.test(hdr(m, 'from')));
+    const relayMsg = msgs.find(m => /messagesend@netcomponents|autosend@icsource/i.test(hdr(m, 'from')));
+    if (!buyerMsg && !relayMsg) continue;                                                              // internal only
+    // Buyer: whoever we already wrote to, else the buyer's Reply-To/From, else the RFQ relay's buyer
+    const lastTo = ours.length ? (hdr(ours[ours.length - 1], 'to').match(/[\w.%+\-]+@[\w.\-]+\.[a-z]{2,}/gi) || []).find(a => !_FQ_RELAY.test(a)) : '';
+    const to = lastTo || (buyerMsg ? extractEmailAddr(hdr(buyerMsg, 'reply-to') || hdr(buyerMsg, 'from')) : '')
+      || (!_FQ_RELAY.test(decSender) ? decSender : '')
+      || (relayMsg ? (extractMimeText(relayMsg.payload).match(/[\w.%+\-]+@[\w.\-]+\.[a-z]{2,}/gi) || []).find(a => !_FQ_RELAY.test(a)) : '') || '';
+    const label = (to || tid) + ' (' + hdr(msgs[0], 'subject').slice(0, 40) + ')';
+    if (!to) { skipped.push(label + ': no buyer address'); continue; }
+    if (all.some(m => (m.labelIds || []).includes('DRAFT'))) { skipped.push(label + ': draft already in thread'); continue; }
+    // Our TP request mentions "$500 minimum" — that's not a price
+    let quoted = null;
+    for (const m of ours) {
+      const q = text(m).replace(/\$\s*[\d,]+\s*(?:usd\s*)?(?:min|minimum)\b/gi, '').replace(/minimum[^.\n]*\$\s*[\d,]+/gi, '').match(/\$\s*\d[\d,.]*|price\s*:\s*\d[\d,.]*/i);
+      if (q) quoted = q[0].replace(/\s+/g, '') + ' on ' + new Date(hdr(m, 'date')).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+    }
+    if (quoted) { skipped.push(label + ': already quoted ' + quoted); continue; }
+    // Buyer qty from their RFQ text, capped at what we have
+    const bt = (buyerMsg ? hdr(buyerMsg, 'subject') + '\n' + text(buyerMsg) : '') + '\n' + (relayMsg ? text(relayMsg) : '');
+    const qm = bt.match(/(?<![$\d.,])(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(k)?\s*(?:pcs?|pieces|units?|ea)\b/i) || bt.match(/\bqty\.?\s*(?:[:=]|of)?\s*(\d{1,3}(?:,\d{3})+|\d{1,7})(k)?\b/i);
+    const buyerQty = qm ? parseInt(qm[1].replace(/,/g, '')) * (qm[2] ? 1000 : 1) : 0;
+    const qty = buyerQty && ourQty ? Math.min(buyerQty, ourQty) : (buyerQty || ourQty);
+    if (qty && qty * price < 500) { skipped.push(label + `: ${qty} x ${pStr} is under the $500 min`); continue; }
+    const lines = [`MPN: ${mpn}`, mfr && `Mfr: ${mfr}`, qty && `Qty: ${qty.toLocaleString('en-US')} pcs`, dc && `Date code: ${dc}`,
+      loc && `Stock location: ${loc}`, lt && `Lead time: ${lt}`, `Price: ${pStr}`].filter(Boolean);
+    const html = `<div>Hello,<br><br>Following up on your inquiry for ${mpn}. We can offer:<br><br>${lines.join('<br>')}<br><br>Please let us know if you would like to proceed.</div>`;
+    if (dry) { drafted.push(label + ` → ${qty || '?'} @ ${pStr}`); continue; }
+    const last = msgs[msgs.length - 1], subj = hdr(msgs[0], 'subject');
+    const msgId = hdr(last, 'message-id'), refs = hdr(last, 'references');
+    const mime = ['From: ' + JOHN_FROM, 'To: ' + to, 'Subject: ' + encHdr(/^re:/i.test(subj) ? subj : 'Re: ' + subj), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+    if (msgId) { mime.push('In-Reply-To: ' + msgId); mime.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
+    mime.push('', '<div dir="ltr">' + html + SIG_HTML + buildQuotedHistory(msgs) + '</div>');
+    const d = await gmailPost(env, '/drafts', { message: { threadId: tid, raw: base64url(mime.join('\r\n')) } });
+    if (d.error) skipped.push(label + ': draft error ' + JSON.stringify(d.error).slice(0, 80));
+    else drafted.push(label + ` → ${qty || '?'} @ ${pStr}`);
+  }
+  const summary = (dry ? 'DRY RUN — would draft ' : 'Drafted ') + drafted.length + ' quote' + (drafted.length === 1 ? '' : 's') + ` @ ${pStr}`
+    + (drafted.length ? ': ' + drafted.map(s => s.split(' (')[0]).join(', ') : '')
+    + (skipped.length ? ` | skipped ${skipped.length}: ` + skipped.join('; ') : '');
+  return { summary, drafted, skipped };
+}
