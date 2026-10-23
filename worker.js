@@ -1723,7 +1723,7 @@ async function handleEmailAgent(request, env) {
       (thread_content || '').match(/NQTY=(\d+)/i) ||
       (thread_content || '').match(/\bqty\s*[:=]?\s*(?:any\s+)?up\s+to\s+(\d{1,7})\b/i) ||  // "Qty: up to 250" (Quiksol, Bug 115)
       (thread_content || '').match(/qty\s*req\w*\s*[:=]?\s*(\d{1,7})/i) ||
-      (thread_content || '').match(/\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*pcs?\b/i) ||  // "19,800 pcs" was read as 800 (1-Source, Bug 149)
+      (thread_content || '').match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*pcs?\b/i) ||  // "19,800 pcs" was read as 800 (1-Source, Bug 149); "$12pc" is a price, not qty 12 (Pride, Bug 151)
       (thread_content || '').match(/^\s*(\d{1,7})\s*p\s*$/im) ||  // "100p" on its own line (Aonics, Bug 142)
       (thread_content || '').match(/qty\s*[:=]\s*(\d{1,7})/i) ||
       (thread_content || '').match(/\bqty\s+(\d{1,7})\b/i);  // "Qty 25" — no colon (Quest AD629BR got the WH3 stock qty 70, Bug 140)
@@ -1739,7 +1739,7 @@ async function handleEmailAgent(request, env) {
       const _lbm = String(body.last_msg_body || '');
       const _offerQty = parseInt(_minOffer[1]);
       // "round it up to 10,000 pcs" — comma thousands read as "000" (Motherson 12162100, Bug 143)
-      const _statedQty = ((_lbm.match(/\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units|ea)\b/i) || [])[1] || '').replace(/,/g, '');
+      const _statedQty = ((_lbm.match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units|ea)\b/i) || [])[1] || '').replace(/,/g, '');
       const _oemQty = (oem_results || []).reduce((s, r) => s + (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0), 0);
       const _neg = /\b(no|not|can'?t|cannot|unable|too (?:much|many|high))\b/i.test(_lbm);
       if (_statedQty && parseInt(_statedQty) >= _offerQty) _buyerQty = parseInt(_statedQty);
@@ -1872,8 +1872,9 @@ async function handleEmailAgent(request, env) {
   // MAX17498BATE+). Scoped to last_msg_body so our "$500 minimum" and the listing's "$500 MIN TP REQUIRED" can't count.
   function _lastMsgTp(lb) {
     const t = String(lb || '').replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ');
-    const m = t.match(/\$\s*(\d+(?:\.\d+)?|\.\d+)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||   // \.\d+ = "$.35 each" (Quest, Bug 130)
-      t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
+    // (?![\d.]) stops backtracking: "Target is $12pc" was read as $1 (Pride MC68711E20CFNE2, Bug 151). "$12pc" glued = per piece
+    const m = t.match(/\$\s*(\d+(?:\.\d+)?|\.\d+)(?![\d.])(?!\s*(?:k\b|units?\b|pieces?\b)|\s+pcs?\b)/i) ||   // \.\d+ = "$.35 each" (Quest, Bug 130)
+      t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?![\d.])(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
       // "4.00 each John." — bare decimal + each/ea, no $ (Cross Components, Bug 124). Decimal required so "1300 each" stays a qty
       t.match(/(?:^|[^\w.$])(\d*\.\d{1,4})\s*(?:each|ea\b|\/\s*(?:ea|pc|pcs|unit))/im) ||
       // "18u" = $18 (Chinese buyer shorthand; Fuzhou Yongbo "Dear，18u", Bug 108). \b after u rejects "10uF"/"18uH"
