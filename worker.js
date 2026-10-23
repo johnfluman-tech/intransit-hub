@@ -96,6 +96,13 @@ export default {
 
       if (p === '/api/apps'             && m === 'GET')  return handleGetApps(env);
       if (p === '/api/email-agent'     && m === 'POST') return handleEmailAgent(request, env);
+      // Dry run: same payload cronScanInbox builds for a real thread → decision only, nothing drafted/labeled (audits after manual fixes)
+      if (p === '/api/dry-run'         && m === 'GET') {
+        const payload = await buildScanPayload(url.searchParams.get('tid') || '', await getGmailToken(env), env, { ignoreDrafts: true, uptoMsgId: url.searchParams.get('upto') || '' });
+        if (!payload) return json({ error: 'no payload for thread' }, 404);
+        const r = await handleEmailAgent(new Request('https://x/api/email-agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }), env);
+        return json({ payload: { subject: payload.subject, sender: payload.sender, mpn: payload.mpn, last_msg_body: String(payload.last_msg_body || '').slice(0, 400) }, decision: await r.json() });
+      }
       if (p === '/api/fix-draft'       && m === 'POST') return handleFixDraft(request, env);
       if (p === '/api/chat'            && m === 'POST') return handleChat(request, env);
       if (p === '/api/learn'           && m === 'POST') return handleLearn(request, env);
@@ -1731,6 +1738,11 @@ async function handleEmailAgent(request, env) {
     // "need 10k pcs" — k-suffixed qty (Source1 MAX17498BATE, Bug 131)
     const _kQty = !_qtyM && (thread_content || '').match(/\b(\d{1,4}(?:\.\d+)?)\s*k\s*(?:pcs?|pieces|units|ea)\b/i);
     if (_kQty) _buyerQty = Math.round(parseFloat(_kQty[1]) * 1000);
+    // Buyer's latest message restates qty → it wins over the original RFQ line, same as TP (Bug 123).
+    // WWD 8655MH2511LF: RFQ for 28, reply "$10.00 each / 100 units" → Forte/min math used 28 (Bug 153)
+    const _lmQty = /--- Msg 2 \|/.test(thread_content || '') &&
+      String(body.last_msg_body || '').match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units?)\b/i);
+    if (_lmQty) _buyerQty = parseInt(_lmQty[1].replace(/,/g, ''));
     // We already sent below_min_line ("require a minimum of 50 pieces") → the buyer's reply answers it.
     // Accept ("That's fine") or a qty ≥ min → use that qty; anything else → leave it for John, never repeat the offer (6098-9412, Bug 106)
     const _minOffer = (thread_content || '').match(/we would require a minimum of\s+(\d+)\s+pieces/i);
@@ -1872,9 +1884,10 @@ async function handleEmailAgent(request, env) {
   // MAX17498BATE+). Scoped to last_msg_body so our "$500 minimum" and the listing's "$500 MIN TP REQUIRED" can't count.
   function _lastMsgTp(lb) {
     const t = String(lb || '').replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ');
-    // (?![\d.]) stops backtracking: "Target is $12pc" was read as $1 (Pride MC68711E20CFNE2, Bug 151). "$12pc" glued = per piece
-    const m = t.match(/\$\s*(\d+(?:\.\d+)?|\.\d+)(?![\d.])(?!\s*(?:k\b|units?\b|pieces?\b)|\s+pcs?\b)/i) ||   // \.\d+ = "$.35 each" (Quest, Bug 130)
-      t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?![\d.])(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
+    // (?!\d|\.\d) stops backtracking: "Target is $12pc" was read as $1 (Pride MC68711E20CFNE2, Bug 151). "$12pc" glued = per piece.
+    // Not (?![\d.]) — that rejected a sentence-ending period: "My best price is $1.5." → no TP → 2nd TP request (WinWin EPM240F100C5N, Bug 152)
+    const m = t.match(/\$\s*(\d+(?:\.\d+)?|\.\d+)(?!\d|\.\d)(?!\s*(?:k\b|units?\b|pieces?\b)|\s+pcs?\b)/i) ||   // \.\d+ = "$.35 each" (Quest, Bug 130)
+      t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\d|\.\d)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
       // "4.00 each John." — bare decimal + each/ea, no $ (Cross Components, Bug 124). Decimal required so "1300 each" stays a qty
       t.match(/(?:^|[^\w.$])(\d*\.\d{1,4})\s*(?:each|ea\b|\/\s*(?:ea|pc|pcs|unit))/im) ||
       // "18u" = $18 (Chinese buyer shorthand; Fuzhou Yongbo "Dear，18u", Bug 108). \b after u rejects "10uF"/"18uH"
@@ -3725,11 +3738,14 @@ function extractMpnHint(subject) {
   return (cands[0] && cands[0].length < 8 && strong) ? strong : (cands[0] || null);
 }
 
-async function buildScanPayload(threadId, token, env) {
+async function buildScanPayload(threadId, token, env, opts = {}) {
   const gGet = p => fetch('https://gmail.googleapis.com/gmail/v1/users/me' + p, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
   const thread = await gGet('/threads/' + threadId + '?format=full');
   if (!thread.messages?.length) return null;
-  const msgs = thread.messages;
+  // ignoreDrafts: /api/dry-run replays a thread John has already drafted on, as the cron saw it before the draft
+  let msgs = opts.ignoreDrafts ? thread.messages.filter(m => !(m.labelIds || []).includes('DRAFT')) : thread.messages;
+  if (opts.uptoMsgId) { const i = msgs.findIndex(m => m.id === opts.uptoMsgId); if (i >= 0) msgs = msgs.slice(0, i + 1); }  // replay as of that message
+  if (!msgs.length) return null;
   const lastMsg = msgs[msgs.length - 1];
   const getHdr = (msg, name) => (msg.payload?.headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
   const lastFrom = getHdr(lastMsg, 'From');
@@ -3791,6 +3807,21 @@ async function buildScanPayload(threadId, token, env) {
   };
   const _effectiveMpn = mpnHint || _bodyMpnHint;
   if (_effectiveMpn && /[0-9]/.test(_effectiveMpn) && _effectiveMpn.length >= 4) payload.mpn = _effectiveMpn;
+  // Tab-separated RFQ table under a "Part Number" header row — first cell of each row is an MPN
+  // (Azego #274596: "Part Number\t Manufacturer\t ... / 131250-000\t TE / 562A022-25/225-0\t TE" → no MPN → no draft, Bug 154).
+  // Extra rows go to extra_mpns so handleEmailAgent promotes whichever line we stock.
+  if (!payload.mpn && _hintMsg) {
+    const _tl = stripQuoted(extractMimeText(_hintMsg.payload) || '').split(/\r?\n/);
+    const _h = _tl.findIndex(l => /^\s*(?:part\s*(?:number|no\.?|#)|mpn|p\/n)\s*\t/i.test(l));
+    const _cells = [];
+    if (_h >= 0) for (const l of _tl.slice(_h + 1)) {
+      if (!l.trim()) continue;
+      if (!l.includes('\t')) break;
+      const c = l.split('\t')[0].trim();
+      if (/\d/.test(c) && /^[A-Z0-9][A-Z0-9\-.\/#,]{3,}$/i.test(c)) _cells.push(c.toUpperCase());
+    }
+    if (_cells.length) { payload.mpn = _cells[0]; if (_cells.length > 1) payload.extra_mpns = _cells.slice(1); }
+  }
 
   // Buyer answered our TP request with just a number ("3") — that's the TP, not a new RFQ.
   // Daelith O3854AQDCARQ1 got a 2nd TP request (Bug 133). Rewrite as "$3" so every TP check downstream sees it.
