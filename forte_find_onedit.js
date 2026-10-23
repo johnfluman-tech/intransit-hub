@@ -9,7 +9,7 @@
  */
 var FIND_TAB = 'Find';
 var MAIN_TAB = 'Sheet1';
-var FIND_FORMULA_A = "=IF(TRIM($B$1)=\"\",\"\",IFERROR(LET(r,SORT(FILTER(ROW(Sheet1!A3:A),ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),1,FALSE),ARRAYFORMULA(HYPERLINK(\"#gid=0&range=A\"&r&\":W\"&r,r))),\"No match\"))";
+var FIND_FORMULA_A = "=IF(TRIM($B$1)=\"\",\"\",IFERROR(LET(r,SORT(FILTER(ROW(Sheet1!A3:A),ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),1,FALSE),ARRAYFORMULA(HYPERLINK(\"#gid=0&range=A\"&r&\":AE\"&r,r))),\"No match\"))";
 var FIND_FORMULA_B = "=IF(TRIM($B$1)=\"\",\"\",IFERROR(SORT(FILTER(Sheet1!A3:AE,ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),FILTER(ROW(Sheet1!A3:A),ISNUMBER(SEARCH(TRIM($B$1),Sheet1!B3:B))),FALSE),\"\"))";
 
 function onEdit(e) {
