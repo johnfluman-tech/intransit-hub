@@ -1787,6 +1787,10 @@ async function handleEmailAgentCore(request, env) {
     const _lmQty = /--- Msg 2 \|/.test(thread_content || '') &&
       String(body.last_msg_body || '').match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units?)\b/i);
     if (_lmQty) _buyerQty = parseInt(_lmQty[1].replace(/,/g, ''));
+    // "0.30 $ for 84K PCS" — k-suffixed qty in the latest message wins too (Rebound, Bug 158)
+    const _lmK = /--- Msg 2 \|/.test(thread_content || '') && String(body.last_msg_body || '').split(/\n\s*(?:From:|-----Original|On .{5,90}wrote:)/)[0]
+      .match(/\b(\d{1,4}(?:\.\d+)?)\s*k\s*(?:pcs?|pieces|units?|ea)\b/i);
+    if (_lmK) _buyerQty = Math.round(parseFloat(_lmK[1]) * 1000);
     // We already sent below_min_line ("require a minimum of 50 pieces") → the buyer's reply answers it.
     // Accept ("That's fine") or a qty ≥ min → use that qty; anything else → leave it for John, never repeat the offer (6098-9412, Bug 106)
     const _minOffer = (thread_content || '').match(/we would require a minimum of\s+(\d+)\s+pieces/i);
@@ -1939,6 +1943,8 @@ async function handleEmailAgentCore(request, env) {
       // European decimal comma "4,90 for 540 parts" (X Works, Bug 112). Max 2 decimals so "4,900 pcs" stays a qty
       // "agree to the price of 0.2 US dollars" — no $ sign (Blaine TMP275AIDR, Bug 143)
       t.match(/\b(\d*\.?\d+)\s*(?:us\s*)?(?:dollars?|usd)\b/i) ||
+      // "0.30 $ for 84K PCS" — dollar sign AFTER the number (Rebound AP2205-33W5-7 → TP re-asked, Bug 158)
+      t.match(/(?:^|[^\w.$,])(\d*\.\d+|\d+)\s*\$(?![\d.])(?!\s*(?:usd\s*)?(?:min(?:imum)?|line|order|total)\b)/m) ||
       // "USD9.45ea" — currency before the number (Bentec 74703-0007-P kept the old $5 → below_min, Bug 155)
       t.match(/\b(?:usd|us\$)\s*(\d*\.?\d+)(?!\d|\.\d)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b|min|line|order|total))/i) ||
       t.match(/(?:^|[^\w.,])(\d*\.?\d+)\s*(?:euros?\b|eur\b|€)/i) || t.match(/€\s*(\d*\.?\d+)/) ||   // "0.29 euro" (Bug 146)
