@@ -1475,7 +1475,17 @@ async function handleEmailAgent(request, env) {
     const _exactOwn = (in_stock_results || []).filter(
       r => !/Warehouse#/i.test(r.notes || '') && (_normQ(r.mpn || '') === _normQ(requestMpn) || _stripStd(r.mpn || '') === _normReqBase)
     );
-    if (_exactOwn.length > 0) {
+    // Own stock is a couple of pcs but an exact Warehouse#N row holds the real qty (XC2S300E-6FT256I: own 2, WH3 150;
+    // three buyers asked for 150 / "full stock" and got a 2-pc [FILL IN] quote, Bug 156) → let the warehouse path handle it
+    const _isExactQ = r => _normQ(r.mpn || '') === _normQ(requestMpn) || _stripStd(r.mpn || '') === _normReqBase;
+    const _ownTot = _exactOwn.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
+    const _whTot = (in_stock_results || []).filter(r => /Warehouse#/i.test(r.notes || '') && _isExactQ(r)).reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
+    const _askQ = String(thread_content || '').match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units?)\b/i) || String(thread_content || '').match(/\bqty\.?\s*[:=]?\s*(\d{1,7})\b/i);
+    const _askN = _askQ ? parseInt(_askQ[1].replace(/,/g, '')) : 0;
+    if (_exactOwn.length > 0 && _whTot > _ownTot && !(_askN && _askN <= _ownTot)) {
+      await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: own stock ${_ownTot} < warehouse ${_whTot} — routing to warehouse path`, { subject, mpn: requestMpn });
+      in_stock_results = (in_stock_results || []).filter(r => /Warehouse#/i.test(r.notes || ''));
+    } else if (_exactOwn.length > 0) {
       // Already quoted our stock in this thread → the buyer's reply is a counter ("0.7u,can place po"). Price calls are
       // John's (he countered 4Star, took a TP on Fuzhou Yongbo) — re-drafting the same quote is never right (Bug 121)
       if (/We have the following available/i.test(thread_content || '')) {
@@ -1898,6 +1908,8 @@ async function handleEmailAgent(request, env) {
       // European decimal comma "4,90 for 540 parts" (X Works, Bug 112). Max 2 decimals so "4,900 pcs" stays a qty
       // "agree to the price of 0.2 US dollars" — no $ sign (Blaine TMP275AIDR, Bug 143)
       t.match(/\b(\d*\.?\d+)\s*(?:us\s*)?(?:dollars?|usd)\b/i) ||
+      // "USD9.45ea" — currency before the number (Bentec 74703-0007-P kept the old $5 → below_min, Bug 155)
+      t.match(/\b(?:usd|us\$)\s*(\d*\.?\d+)(?!\d|\.\d)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b|min|line|order|total))/i) ||
       t.match(/(?:^|[^\w.,])(\d*\.?\d+)\s*(?:euros?\b|eur\b|€)/i) || t.match(/€\s*(\d*\.?\d+)/) ||   // "0.29 euro" (Bug 146)
       t.match(/(?:^|[^\w.,])(\d{1,4},\d{1,2})(?![\d,])\s*(?:usd|eur|\$|€|for\b|per\b|each|ea\b|\/\s*(?:pc|ea|unit))/im);
     const v = m ? (_tpRangeHigh(t, m) || parseFloat(String(m[1]).replace(',', '.'))) : null;  // range → high end
@@ -3735,7 +3747,9 @@ function extractMpnHint(subject) {
     // "Quote#784439" (1-Source) was taken as the MPN → body "Part Number:" never read → no_bid (Bug 149)
     && !/^[A-Z]{0,3}(RFQ|RFP|PO|REQ|INQ|QUO(?:TE|TATION)?|QTE|CASE|TKT)[-#_:]?\d{3,}$/i.test(t)
     // Rebound refs "SPANSION_101-775921" / "ALTERA_101-775469" = MFR_ref#, not an MPN (Bug 110)
-    && !/^[A-Z]+_\d{2,}-\d{4,}$/i.test(t));
+    && !/^[A-Z]+_\d{2,}-\d{4,}$/i.test(t)
+    // "1.75usd\tFT232RL\t22718pcs" — a price token led the subject and was looked up as the MPN → no_bid (Lishite, Bug 155)
+    && !/^\$?\d*\.?\d+(?:usd|us\$|u|eur|rmb)$/i.test(t));
   // "CM1831 - 1F1T-14A624-AA-004": a short customer ref comes first; prefer a long hyphenated MPN (Bug 114)
   const strong = cands.find(t => t.length >= 10 && /[A-Z0-9]-[A-Z0-9]/i.test(t));
   return (cands[0] && cands[0].length < 8 && strong) ? strong : (cands[0] || null);
