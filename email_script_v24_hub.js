@@ -1176,8 +1176,7 @@ function sendPleasePostNow() {
     'datamaster@netcomponents.com',
     'post@icsource.com',
     'bill@intransittech.com',
-    'david@fortetechno.com',
-    'Stan@amorelectronics.com'
+    'david@fortetechno.com'   // Stan removed per John 10/27
   ].join(',');
 
   var oemBlob = buildFilteredOemBlob_();

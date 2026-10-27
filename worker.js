@@ -5264,7 +5264,7 @@ async function cronProcessCommandQueue(env) {
         await hubLog(env, 'email_automation', 'run', `cronProcessCommandQueue: forte_nostk_batch done ${done}/${items.length}`);
 
       } else if (cmd.type === 'send_datamaster_email') {
-        const BCC = '5BDFA5@stkdst.com,datamaster@netcomponents.com,post@icsource.com,bill@intransittech.com,david@fortetechno.com,Stan@amorelectronics.com';
+        const BCC = '5BDFA5@stkdst.com,datamaster@netcomponents.com,post@icsource.com,bill@intransittech.com,david@fortetechno.com';  // Stan removed per John 10/27
         // Get sheet gids
         const [oemMeta, inMeta] = await Promise.all([sheetsGetMeta(env, OEM_SHEET_ID), sheetsGetMeta(env, IN_STOCK_ID)]);
         const oemGid = (oemMeta.sheets?.[0]?.properties?.sheetId ?? 0);
