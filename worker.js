@@ -1115,7 +1115,38 @@ function oemLineMin(rows, mpn) {
 }
 function tpRequestBody(min) { return `We need a target price to proceed. Please note there is a $${Number(min).toLocaleString('en-US')} minimum line requirement. Once we have your target we will get back to you right away.`; }
 
+// Multi-MPN RFQ with mixed routing: the engine answers ONE part, so a second line sitting in Warehouse#N got no reply
+// (STJK "XC2VP506FF1152I1,XC2VP50-6FFG1152C": OEM TP request only, WH3 line dropped, Bug 157). Append the W3 checking
+// line for each extra part that is warehouse-only, and queue its Stan sheet add.
 async function handleEmailAgent(request, env) {
+  const body = await request.clone().json().catch(() => ({}));
+  const resp = await handleEmailAgentCore(request, env);
+  try {
+    const d = await resp.clone().json();
+    const all = [...new Set([body.mpn, ...(Array.isArray(body.extra_mpns) ? body.extra_mpns : [])].filter(Boolean))];
+    const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (all.length < 2 || !d.draft_body || !d.mpn || ['add_to_stan', 'stan_quoted', 'remove_oem', 'david_nostock', 'listing_removed'].includes(d.action)) return resp;
+    const ctryM = String(body.thread_content || '').match(/\b(China|Hong Kong|Taiwan|United States|Germany|Singapore|Canada|Israel|India|Korea|United Kingdom|Mexico)(?![a-z])/);   // "ChinaTelephone:" — netCOMPONENTS glues fields
+    const CC = { 'China': 'CN', 'Hong Kong': 'HK', 'Taiwan': 'TW', 'United States': 'US', 'Germany': 'DE', 'Singapore': 'SG', 'Canada': 'CA', 'Israel': 'IL', 'India': 'IN', 'Korea': 'KR', 'United Kingdom': 'GB', 'Mexico': 'MX' };
+    const country = d.forte_entry?.country || (ctryM ? CC[ctryM[1]] : '');
+    const add = [];
+    for (const m of all.filter(m => norm(m) !== norm(d.mpn))) {
+      const inv = await lookupInventory(m).catch(() => null);
+      const exact = (inv?.in_stock || []).filter(r => norm(r.mpn) === norm(m));
+      const wh = exact.filter(r => /Warehouse#/i.test(r.notes || ''));
+      if (!wh.length || exact.length > wh.length) continue;   // own stock / no warehouse row → not this path
+      add.push({ mpn: String(wh[0].mpn).trim(), qty: wh.reduce((s, r) => s + (parseInt(r.qty) || 0), 0) || null, country });
+    }
+    if (!add.length) return resp;
+    d.draft_body = `${d.mpn}: ${d.draft_body}` + add.map(a => `\n\n${a.mpn}: Our warehouse is checking on the details and I will update you as soon as possible. Thank you for your patience.`).join('');
+    d.extra_stan = add;
+    d.reasoning = (d.reasoning || '') + ` + WH3 line(s): ${add.map(a => a.mpn).join(', ')}`;
+    await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: multi-MPN — added WH3 line(s) ${add.map(a => a.mpn).join(', ')} to ${d.action} for ${d.mpn}`, { subject: body.subject });
+    return json(d);
+  } catch (e) { return resp; }
+}
+
+async function handleEmailAgentCore(request, env) {
   const body = await request.json();
   const { thread_id, last_message_id, subject, sender, current_labels, prior_quotes } = body;
   // IC Source: Apps Script sends raw HTML body â€" parse the RFQ table here in the worker
@@ -4130,6 +4161,10 @@ async function executeDecisionCron(decision, payload, token, env) {
     const stanData = { mpn: fe.mpn || decision.mpn, country: fe.country || '', qty: fe.qty || decision.qty, target_price: fe.target_price || decision.target_price };
     await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
       .bind('stan_add', threadId, payload.subject || null, JSON.stringify(stanData)).run();
+  }
+  for (const s of (decision.extra_stan || [])) {   // warehouse-only extra lines on a multi-MPN RFQ (Bug 157)
+    await env.DB.prepare("INSERT INTO fix_queue (type, thread_id, subject, draft_body) VALUES (?, ?, ?, ?)")
+      .bind('stan_add', threadId, payload.subject || null, JSON.stringify({ mpn: s.mpn, country: s.country || '', qty: s.qty, target_price: null })).run();
   }
   if (action === 'remove_oem' || action === 'david_nostock') {
     const _to = decision.buyer_email || payload.sender || '';
