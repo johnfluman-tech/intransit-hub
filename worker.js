@@ -1931,7 +1931,10 @@ async function handleEmailAgentCore(request, env) {
   // Buyer's own latest message (quotes stripped): bare "$1.75" / "around 1.75" with no unit (Precision Logic,
   // MAX17498BATE+). Scoped to last_msg_body so our "$500 minimum" and the listing's "$500 MIN TP REQUIRED" can't count.
   function _lastMsgTp(lb) {
-    const t = String(lb || '').replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ');
+    const t = String(lb || '').replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ')
+      // "My accepted price is four dollars" — spelled-out TP → digits (Fusheng PDT003A0X3-SRZ, Bug 159)
+      .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty)(?=\s+(?:us\s*)?dollars?\b)/gi,
+        w => ({ one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, fifty: 50 })[w.toLowerCase()]);
     // (?!\d|\.\d) stops backtracking: "Target is $12pc" was read as $1 (Pride MC68711E20CFNE2, Bug 151). "$12pc" glued = per piece.
     // Not (?![\d.]) — that rejected a sentence-ending period: "My best price is $1.5." → no TP → 2nd TP request (WinWin EPM240F100C5N, Bug 152)
     const m = t.match(/\$\s*(\d+(?:\.\d+)?|\.\d+)(?!\d|\.\d)(?!\s*(?:k\b|units?\b|pieces?\b)|\s+pcs?\b)/i) ||   // \.\d+ = "$.35 each" (Quest, Bug 130)
