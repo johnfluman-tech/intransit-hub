@@ -1120,7 +1120,10 @@ function tpRequestBody(min) { return `We need a target price to proceed. Please 
 // line for each extra part that is warehouse-only, and queue its Stan sheet add.
 async function handleEmailAgent(request, env) {
   const body = await request.clone().json().catch(() => ({}));
-  const resp = await handleEmailAgentCore(request, env);
+  // "2000&nbsp; pcs  T/P:&nbsp; 4.0&nbsp; USD" — literal HTML entities hid both qty and TP → TP request, no Forte row (PDT006A0X3-SRZ, Bug 160)
+  const _ent = s => typeof s === 'string' ? s.replace(/&nbsp;?/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>') : s;
+  for (const k of ['subject', 'last_msg_body', 'thread_content']) if (typeof body[k] === 'string') body[k] = _ent(body[k]);
+  const resp = await handleEmailAgentCore(new Request(request.url, { method: 'POST', headers: request.headers, body: JSON.stringify(body) }), env);
   try {
     const d = await resp.clone().json();
     const all = [...new Set([body.mpn, ...(Array.isArray(body.extra_mpns) ? body.extra_mpns : [])].filter(Boolean))];
@@ -1898,10 +1901,12 @@ async function handleEmailAgentCore(request, env) {
         // Build forte_entry if no 60-day duplicate and we have qty + TP
         // 60-day duplicate rule — old rows (SAK-XC167 2024, S-100 May) must not block a new entry (Bug 105)
         const _recentForte = (forte_results || []).filter(r => { const d = Date.parse(r.date); return isNaN(d) || (Date.now() - d) < 60 * 86400000; });
-        if (_recentForte.length === 0 && _tpVal && _buyerQty && requestMpn) {
+        // "Checking sent = Forte entry required": no buyer qty → our stock qty (QTY fallback rule; PDT006A0X3-SRZ, Bug 160)
+        const _fQty = _buyerQty || _oemStockQty || null;
+        if (_recentForte.length === 0 && _tpVal && _fQty && requestMpn) {
           // Buyer accepted our variant ("We have MAX17498BATE+T available — would you be able to use…") → log OUR MPN (Bug 131)
           const _askedVar = (thread_content || '').match(/We have\s+(\S+)\s+available\s*[—–-]+\s*would\s+you\s+be\s+able\s+to\s+use/i);
-          _forteEntry = { mpn: _askedVar ? _askedVar[1] : requestMpn, qty: _buyerQty, target_price: _tpVal, country: _senderCtry };
+          _forteEntry = { mpn: _askedVar ? _askedVar[1] : requestMpn, qty: _fQty, target_price: _tpVal, country: _senderCtry };
         }
       }
     } else if (_stanQ) {
