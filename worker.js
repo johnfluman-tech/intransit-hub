@@ -3902,7 +3902,8 @@ async function buildScanPayload(threadId, token, env, opts = {}) {
     const _firstTxt = stripQuoted(extractMimeText(msgs[0].payload) || '');
     // Only the RFQ part of the first message counts — "1-Source Electronic Components" in Rafael's signature
     // repeats in every reply and hijacked M15T1G1664AS1AG (Bug 149)
-    const _firstRfq = _firstTxt.replace(/\n\s*\*?(?:Best\s+(?:Wishes|Regards)|Kind\s+Regards|Regards|Sincerely|Cheers|BR)\b[\s\S]*$/i, '');
+    // "Thank you,\nJeff Holford ... cell-732-320-5202 / Skype-jeff.holford1" — sign-off with thanks, no "Regards" (Bug 161)
+    const _firstRfq = _firstTxt.replace(/\n\s*\*?(?:Best\s+(?:Wishes|Regards)|Kind\s+Regards|Regards|Sincerely|Cheers|BR|Thank\s+you|Thanks)\b[\s,.!]*(?:\n[\s\S]*)?$/i, '');
     const _esc =s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // Buyer's reply may not name the part ("please quote at a minimum of 3125 pcs") — then the active line is
     // the one our own last reply was about (the below_min offer naming CIC21P101NE)
@@ -3910,10 +3911,12 @@ async function buildScanPayload(threadId, token, env, opts = {}) {
     const _ctx = payload.last_msg_body + '\n' + (_ourLast ? stripQuoted(extractMimeText(_ourLast.payload) || '').substring(0, 1000) : '');
     const _hit = (_ctx.match(/\b[A-Z0-9][A-Z0-9\-\/.#]{4,}[A-Z0-9]\b/gi) || [])
       .filter(t => /[A-Za-z]/.test(t) && /\d/.test(t) && t.toUpperCase() !== payload.mpn.toUpperCase())
+      // "cell-732-320-5202" in Jeff's signature became the MPN → no_action on a $35 TP reply (PC Components RS9116W, Bug 161)
+      .filter(t => !/^[A-Z]{1,6}[-.:]?\+?\d{0,3}[-.]?\d{3}[-.]\d{3,4}[-.]\d{4}$|^[A-Z]{1,6}[-.:]?\d{3}[-.]\d{3}[-.]\d{4}$/i.test(t))
       .find(t => {
         const _ln = (_firstRfq.match(new RegExp('^.*(?:^|\\s)' + _esc(t) + '(?=\\s|$).*$', 'im')) || [])[0];
         // Signature cert lines repeat in every buyer message — "ANSI/ESD S20.20" became the MPN → no_bid (Quest PNF18-6R, Bug 130)
-        return _ln && !/\b(?:iso|ansi|esd|erai|idea|as\s?9\d{3}|certified|certification|direct|fax|phone|tel|mobile)\b/i.test(_ln);
+        return _ln && !/\b(?:iso|ansi|esd|erai|idea|as\s?9\d{3}|certified|certification|direct|fax|phone|tel|mobile|cell|skype|wechat|whatsapp)\b/i.test(_ln);
       });
     if (_hit) {
       payload.mpn = _hit.toUpperCase();
