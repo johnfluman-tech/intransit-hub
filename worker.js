@@ -4883,7 +4883,8 @@ async function cronCheckDavidNoStock(env) {
       if (nostockLabelId) addLabels.push(nostockLabelId);
       // extractMpnHint requires letters+digits; David subjects often start with all-numeric part numbers
       // Strip the #NNNN forte-row suffix, then grab the first token as MPN fallback
-      const _subjectCore = subject.replace(/#\d+\b/g, '').trim();
+      // "Part# 7157-5470   #4985" — the label was taken as the first token → "no MPN in subject" (Bug 162)
+      const _subjectCore = subject.replace(/#\d+\b/g, '').replace(/^\s*(?:re:\s*|fwd?:\s*)*(?:part\s*(?:#|no\.?|number)|p\/n|m?pn)\s*[:#]?\s*/i, '').trim();
       const _subjectFirstToken = _subjectCore.split(/\s+/)[0];
       const mpn = extractMpnHint(subject)
         || (_subjectFirstToken && _subjectFirstToken.length >= 4 && /[0-9]/.test(_subjectFirstToken) ? _subjectFirstToken.toUpperCase() : null);
