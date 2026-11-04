@@ -1968,7 +1968,8 @@ async function handleEmailAgentCore(request, env) {
   function _tpRangeHigh(text, m) {
     if (!m || m.index === undefined) return null;
     const after = text.substring(m.index + m[0].length, m.index + m[0].length + 20);
-    const r = after.match(/^\s*(?:-|–|—|to)\s*\$?(\d*\.?\d+)/i);
+    // "$.75 TO $ 1.00 EA" — space after the second $ → read as $0.75 → wrong below_min reply (M-Tron XAL4030, Bug 164)
+    const r = after.match(/^\s*(?:-|–|—|to)\s*\$?\s*(\d*\.?\d+)/i);
     const hi = r ? parseFloat(r[1]) : NaN;
     return hi > parseFloat(m[1]) ? hi : null;
   }
@@ -4450,6 +4451,12 @@ async function cronScanInbox(env) {
       if (!decision || decision.error || decision.action === 'no_action') {
         const why = !decision ? 'null_decision' : decision.error ? 'error:'+decision.error : 'no_action';
         await hubLog(env, 'email_automation', 'debug', `cronScanInbox: ${source} skip action=${why} tid=${tid} mpn=${payload.mpn||'?'}`, { reasoning: decision?.reasoning });
+        // Glued-qty subjects are picked up once (subj_checked) — a web-app timeout then meant "retry" never came
+        // (Peggy TUSB8040A1RKMR own stock sat with no draft, Bug 163). Un-check the thread so the next run retries it.
+        if (/will retry next cron run/.test(decision?.reasoning || '')) {
+          const _ids = (await gGet('/threads/' + tid + '?format=minimal').catch(() => null))?.messages?.map(x => x.id) || [];
+          for (const _id of _ids) await env.DB.prepare("DELETE FROM rules WHERE type='subj_checked' AND key=?").bind(_id).run().catch(() => {});
+        }
         // Improvement #8: log no_action to pending_issues so missed emails are visible in the dashboard
         const _ack = () => env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('acked_msg', ?, ?)").bind(payload.last_message_id, tid).run().catch(() => {});
         if (decision?.reasoning?.startsWith('buyer_ack') || decision?.reasoning?.startsWith('skip_thread')) {
