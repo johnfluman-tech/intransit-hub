@@ -3871,6 +3871,22 @@ async function buildScanPayload(threadId, token, env, opts = {}) {
   };
   const _effectiveMpn = mpnHint || _bodyMpnHint;
   if (_effectiveMpn && /[0-9]/.test(_effectiveMpn) && _effectiveMpn.length >= 4) payload.mpn = _effectiveMpn;
+  // "LC 018BC 03M": the MPN written in 3 space-split pieces — extraction kept "018BC", joined only 2 pieces
+  // (LC018BC) and stopped "needs John" on Serendipity's LC018BC03M (Bug 166). Rebuild it from the subject
+  // and keep it only when the joined MPN is an exact inventory row.
+  if (payload.mpn) {
+    const _escP = payload.mpn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const _sp = subject.match(new RegExp('(?:^|\\s)((?:[A-Za-z0-9]{1,6}[ \\t]+){0,2})' + _escP + '((?:[ \\t]+[A-Za-z0-9]{1,6}){0,2})(?=\\s|$)', 'i'));
+    if (_sp && (_sp[1].trim() || _sp[2].trim())) {
+      const _nP = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const _cand = _nP(_sp[1] + payload.mpn + _sp[2]);
+      if (_cand.length >= 6 && _cand !== _nP(payload.mpn) && !_MPN_GENERIC_WORDS.has(_cand)) {
+        const _inv = await lookupInventory(_cand).catch(() => null);
+        const _exact = [...(_inv?.oem_excess || []), ...(_inv?.in_stock || [])].find(r => _nP(r.mpn) === _cand);
+        if (_exact) payload.mpn = String(_exact.mpn).trim();
+      }
+    }
+  }
   // Tab-separated RFQ table under a "Part Number" header row — first cell of each row is an MPN
   // (Azego #274596: "Part Number\t Manufacturer\t ... / 131250-000\t TE / 562A022-25/225-0\t TE" → no MPN → no draft, Bug 154).
   // Extra rows go to extra_mpns so handleEmailAgent promotes whichever line we stock.
