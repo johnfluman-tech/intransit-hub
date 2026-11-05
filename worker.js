@@ -1952,7 +1952,8 @@ async function handleEmailAgentCore(request, env) {
       // "agree to the price of 0.2 US dollars" — no $ sign (Blaine TMP275AIDR, Bug 143)
       t.match(/\b(\d*\.?\d+)\s*(?:us\s*)?(?:dollars?|usd)\b/i) ||
       // "0.30 $ for 84K PCS" — dollar sign AFTER the number (Rebound AP2205-33W5-7 → TP re-asked, Bug 158)
-      t.match(/(?:^|[^\w.$,])(\d*\.\d+|\d+)\s*\$(?![\d.])(?!\s*(?:usd\s*)?(?:min(?:imum)?|line|order|total)\b)/m) ||
+      // "I need to buy at 0.19 $." — (?![\d.]) rejected the sentence-ending period → TP re-asked (Fast Components T55P475M010C0500, Bug 165)
+      t.match(/(?:^|[^\w.$,])(\d*\.\d+|\d+)\s*\$(?!\d|\.\d)(?!\s*(?:usd\s*)?(?:min(?:imum)?|line|order|total)\b)/m) ||
       // "USD9.45ea" — currency before the number (Bentec 74703-0007-P kept the old $5 → below_min, Bug 155)
       t.match(/\b(?:usd|us\$)\s*(\d*\.?\d+)(?!\d|\.\d)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b|min|line|order|total))/i) ||
       t.match(/(?:^|[^\w.,])(\d*\.?\d+)\s*(?:euros?\b|eur\b|€)/i) || t.match(/€\s*(\d*\.?\d+)/) ||   // "0.29 euro" (Bug 146)
