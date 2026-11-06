@@ -1744,7 +1744,7 @@ async function handleEmailAgentCore(request, env) {
     const _has2k    = (oem_results || []).some(r => /\$2,000 MIN|2000 MIN/i.test(r.notes || ''));
     const _lineMin  = oemLineMin(oem_results, requestMpn);
     const _hasTp    = _tpDetect(thread_content) || _lastMsgTp(body.last_msg_body) !== null;
-    const _tcTp = _stripNotes(thread_content);  // never parse our own FORTE_QUOTED_PRICE note as the buyer's TP
+    const _tcTp = _euroDec(_stripNotes(thread_content));  // never parse our own FORTE_QUOTED_PRICE note as the buyer's TP
     const _tpMatch = _tcTp.match(/tgtprice=(\d*\.?\d+)/i) ||
       _tcTp.match(/(?:target\s*price|our\s*tp|my\s*tp|tp\s*is|target\s*is)\s*[\$:\s]*(\d*\.?\d+)/i) ||
       _tcTp.match(/\bprice\s*[:=]\s*\$?(\d*\.?\d+)/i) ||
@@ -1796,11 +1796,13 @@ async function handleEmailAgentCore(request, env) {
     if (_lmK) _buyerQty = Math.round(parseFloat(_lmK[1]) * 1000);
     // We already sent below_min_line ("require a minimum of 50 pieces") → the buyer's reply answers it.
     // Accept ("That's fine") or a qty ≥ min → use that qty; anything else → leave it for John, never repeat the offer (6098-9412, Bug 106)
-    const _minOffer = (thread_content || '').match(/we would require a minimum of\s+(\d+)\s+pieces/i);
-    let _minOfferOpen = false;
+    // \s+ between words: a sent copy wraps lines ("we would require a\nminimum of 400") — Sara's LC018BC03M accept went unseen (Nov 6)
+    const _minOffer = (thread_content || '').match(/we\s+would\s+require\s+a\s+minimum\s+of\s+(\d+)\s+pieces/i);
+    let _minOfferOpen = false, _minOfferQty = null;
     if (_minOffer) {
       const _lbm = String(body.last_msg_body || '');
       const _offerQty = parseInt(_minOffer[1]);
+      _minOfferQty = _offerQty;
       // "round it up to 10,000 pcs" — comma thousands read as "000" (Motherson 12162100, Bug 143)
       const _statedQty = ((_lbm.match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units|ea)\b/i) || [])[1] || '').replace(/,/g, '');
       const _oemQty = (oem_results || []).reduce((s, r) => s + (parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0), 0);
@@ -1809,12 +1811,13 @@ async function handleEmailAgentCore(request, env) {
       // "Pl quote for complete qty" → our whole OEM EXCESS qty (MBR0580S17, Source Technologi)
       else if (!_neg && _oemQty >= _offerQty && /\b(complete|full|entire|total|whole|all)\s+(?:the\s+)?(qty|quantity|lot|stock|pcs|pieces)\b|\btake\s+(?:them\s+)?all\b/i.test(_lbm)) _buyerQty = _oemQty;
       else if (!_neg &&
-               /\b(ok|okay|fine|yes|sure|agree[ds]?|accept(?:ed)?|works|go ahead|proceed|confirm(?:ed)?|deal|good)\b/i.test(_lbm)) _buyerQty = _offerQty;
+               // "Adjust the QNTY of the cost- just need a quote please" = take the minimum (Serendipity LC018BC03M, Nov 5)
+               /\b(ok|okay|fine|yes|sure|agree[ds]?|accept(?:ed)?|works|go ahead|proceed|confirm(?:ed)?|deal|good)\b|\badjust\s+(?:the\s+)?(?:qn?ty|quantity)\b|\bjust\s+(?:need|want)\s+(?:a\s+)?quote\b/i.test(_lbm)) _buyerQty = _offerQty;
       else {
         // Counter with a new qty AND price that clears the min ("If you only have 325 units… I am willing to purchase that
         // quantity at a price of $6.50 per unit" = $2,112.50 ≥ $2,000) → accept it; Ruidafeng sat as no_action (Bug 141)
-        const _aft = (thread_content || '').slice((thread_content || '').search(/we would require a minimum of/i));
-        const _minLine = parseFloat(((thread_content || '').match(/minimum line value for this item is\s*\$\s*([\d,]+)/i) || [])[1]?.replace(/,/g, '')) || 0;
+        const _aft = (thread_content || '').slice((thread_content || '').search(/we\s+would\s+require\s+a\s+minimum\s+of/i));
+        const _minLine = parseFloat(((thread_content || '').match(/minimum\s+line\s+value\s+for\s+this\s+item\s+is\s*\$\s*([\d,]+)/i) || [])[1]?.replace(/,/g, '')) || 0;
         const _cTp = parseFloat(((_aft.match(/(?<!target )price of\s*\$\s*(\d+(?:\.\d+)?)/i) || _aft.match(/\$\s*(\d+(?:\.\d+)?)\s*(?:per unit|each|ea\b|\/\s*(?:pcs?|unit|ea)\b)/i)) || [])[1]);
         const _cQty = [..._aft.matchAll(/(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units)\b/gi)].map(m => parseInt(m[1].replace(/,/g, '')))
           .filter(q => q > 0 && q <= _oemQty && _cTp * q >= _minLine).sort((a, b) => b - a)[0];
@@ -1902,7 +1905,8 @@ async function handleEmailAgentCore(request, env) {
         // 60-day duplicate rule — old rows (SAK-XC167 2024, S-100 May) must not block a new entry (Bug 105)
         const _recentForte = (forte_results || []).filter(r => { const d = Date.parse(r.date); return isNaN(d) || (Date.now() - d) < 60 * 86400000; });
         // "Checking sent = Forte entry required": no buyer qty → our stock qty (QTY fallback rule; PDT006A0X3-SRZ, Bug 160)
-        const _fQty = _buyerQty || _oemStockQty || null;
+        // After our below-min reply the qty on the table is the minimum we offered, not our whole stock (LC018BC03M logged 8,530, Nov 5)
+        const _fQty = _buyerQty || _minOfferQty || _oemStockQty || null;
         if (_recentForte.length === 0 && _tpVal && _fQty && requestMpn) {
           // Buyer accepted our variant ("We have MAX17498BATE+T available — would you be able to use…") → log OUR MPN (Bug 131)
           const _askedVar = (thread_content || '').match(/We have\s+(\S+)\s+available\s*[—–-]+\s*would\s+you\s+be\s+able\s+to\s+use/i);
@@ -1936,7 +1940,7 @@ async function handleEmailAgentCore(request, env) {
   // Buyer's own latest message (quotes stripped): bare "$1.75" / "around 1.75" with no unit (Precision Logic,
   // MAX17498BATE+). Scoped to last_msg_body so our "$500 minimum" and the listing's "$500 MIN TP REQUIRED" can't count.
   function _lastMsgTp(lb) {
-    const t = String(lb || '').replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ')
+    const t = _euroDec(lb).replace(/\$\s*[\d,]+(?:\.\d+)?\s*(?:usd\s*)?(?:min(?:imum)?|line|order)\b/gi, ' ')
       // "My accepted price is four dollars" — spelled-out TP → digits (Fusheng PDT003A0X3-SRZ, Bug 159)
       .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty)(?=\s+(?:us\s*)?dollars?\b)/gi,
         w => ({ one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, fifty: 50 })[w.toLowerCase()]);
@@ -1963,6 +1967,12 @@ async function handleEmailAgentCore(request, env) {
   }
 
   // Our own injected notes ([FORTE_QUOTED_PRICE: John previously quoted $0.40/each...]) must never be read as the buyer's TP
+  // European decimal comma → dot before any TP pattern runs: "0,625$" was read as $625 by the "4.50$" pattern (Velosi 160074-4001, Nov 4).
+  // A leading "0," is always a decimal; "4,90" only when 1-2 digits follow and a price word/currency comes next — "4,900 pcs" stays a qty.
+  function _euroDec(s) {
+    return String(s || '').replace(/(^|[^\d,.])0,(\d{1,4})(?![\d,])/g, '$10.$2')
+      .replace(/(^|[^\d,.])(\d{1,4}),(\d{1,2})(?![\d,])(?=\s*(?:\$|€|usd|eur|euros?|dollars?|each|ea\b|for\b|\/\s*(?:pc|ea|unit)|per\b))/gi, '$1$2.$3');
+  }
   function _stripNotes(tc) { return String(tc || '').replace(/^\[(?:FORTE_QUOTED_PRICE|SIMILAR_MPN|EXTRA_MPN_INVENTORY)[^\n]*\n*/gm, ''); }
 
   // Buyer gave a range ("$1.67-$1.90/ea", "1.50 – 1.75") — John takes the high end (Vision, Legacy; Bug 118)
@@ -3943,8 +3953,8 @@ async function buildScanPayload(threadId, token, env, opts = {}) {
       // Long threads get cut at 8000 chars, so our below_min offer and the line's TP can fall off the end —
       // then "$10.00" from the other line's stock quote was read as the TP (Emporium, qty 2624 @ $10). Pin both up top.
       const _ourTxt = _ourLast ? stripQuoted(extractMimeText(_ourLast.payload) || '') : '';
-      const _offer = _ourTxt.match(/we would require a minimum of\s+\d+\s+pieces/i);
-      const _tp = (_ourTxt.match(/at your target price of \$\s*(\d*\.?\d+)/i) || [])[1] ||
+      const _offer = _ourTxt.match(/we\s+would\s+require\s+a\s+minimum\s+of\s+\d+\s+pieces/i);
+      const _tp = (_ourTxt.match(/at\s+your\s+target\s+price\s+of\s+\$\s*(\d*\.?\d+)/i) || [])[1] ||
         (payload.last_msg_body.match(/\$\s*(\d*\.?\d+)/) || [])[1] ||
         (payload.last_msg_body.match(/(\d*\.\d+)\s+as\s+(?:a\s+|the\s+)?target/i) || [])[1];
       const _fields = [`MPN=${payload.mpn}`];
@@ -6173,9 +6183,19 @@ async function quoteForteRow(env, row, { dry = false } = {}) {
   const auth = { headers: { Authorization: 'Bearer ' + token } };
   const r = ((await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values/Sheet1!A${row}:AE${row}`, auth).then(x => x.json())).values || [[]])[0];
   const cell = i => String(r[i] ?? '').trim();
-  const mpn = cell(1), price = parseFloat(cell(7).replace(/[$,\s]/g, ''));
+  const mpn = cell(1);
   if (!mpn) return { summary: 'No MPN on this row', drafted: [], skipped: [] };
+  // Col H must be one plain price ("$1.10", "1.10 ea") — "2 batches: ..." was quoted as $2 (row 5013, Nov 5)
+  const hTxt = cell(7), hPlain = hTxt.replace(/[$,\s]/g, '').replace(/(?:usd)?(?:\/?(?:ea|each|pc|pcs))?$/i, '');
+  const price = /^\d*\.?\d+$/.test(hPlain) ? parseFloat(hPlain) : NaN;
+  if (hTxt && !(price > 0)) return { summary: `Col H isn't a single price ("${hTxt.slice(0, 40)}") — quote this row by hand or put one price in col H`, drafted: [], skipped: [] };
   if (!(price > 0)) return { summary: 'Put your sell price in col H (John Quoted) first', drafted: [], skipped: [] };
+  // Col I notes: MOQ ("104 MOQ", "MOQ 400") and a line minimum ("$2000 MIN")
+  const notesI = cell(8);
+  const moqM = notesI.match(/(\d[\d,]*)\s*(?:pcs?\s*)?MOQ\b|\bMOQ\s*(?:of|is|[:=])?\s*(\d[\d,]*)/i);
+  const moq = moqM ? parseInt((moqM[1] || moqM[2]).replace(/,/g, '')) : 0;
+  const minM = notesI.match(/\$\s*([\d,]+)\s*(?:usd\s*)?MIN/i);
+  const lineMin = minM ? parseInt(minM[1].replace(/,/g, '')) : 500;
   const ourQty = parseInt((cell(13) || cell(2)).replace(/[^\d]/g, '')) || 0;
   const loc = cell(15), dc = cell(16), lt = cell(18);
   const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -6189,10 +6209,18 @@ async function quoteForteRow(env, row, { dry = false } = {}) {
   const { results: dec } = await env.DB.prepare("SELECT thread_id, sender, mpn FROM agent_decisions WHERE upper(mpn) LIKE ? AND created_at > datetime('now','-180 days') ORDER BY id DESC LIMIT 200")
     .bind(mpn.toUpperCase().slice(0, 6) + '%').all();
   for (const d of dec || []) if (norm(d.mpn) === key && d.thread_id && !cands.has(d.thread_id)) cands.set(d.thread_id, d.sender || '');
-  const sr = await gmailGet(env, '/threads?q=' + encodeURIComponent(`"${mpn}" newer_than:180d`) + '&maxResults=40');
-  for (const t of sr.threads || []) if (!cands.has(t.id)) cands.set(t.id, '');
+  // Spam too (Zoe's TPS73601DRBR RFQ sat in Spam, Nov 4); and the bare form, since buyers drop the punctuation
+  // Spam: platform RFQs only — Gmail also spams cold 163.com blasts, which the button must not quote
+  const qs = [`"${mpn}" newer_than:180d`, `"${mpn}" in:spam from:(messagesend@netcomponents.com OR autosend@icsource.com) newer_than:180d`];
+  if (key !== mpn.toUpperCase()) qs.push(`"${key}" newer_than:180d`);
+  for (const q of qs) {
+    const sr = await gmailGet(env, '/threads?q=' + encodeURIComponent(q) + '&maxResults=40').catch(() => ({}));
+    for (const t of sr.threads || []) if (!cands.has(t.id)) cands.set(t.id, '');
+  }
 
   const drafted = [], skipped = [];
+  // One quote per buyer: Alcira had two RFQ threads (#5906294/#5906296) on 25215123011 — quoted in one, the other would get a 2nd quote (Nov 6)
+  const doneAddr = new Set(), pending = [];
   const hdr = (m, n) => ((m.payload?.headers || []).find(h => h.name.toLowerCase() === n) || {}).value || '';
   const text = m => stripQuoted(extractMimeText(m.payload) || '');
   for (const [tid, decSender] of [...cands].slice(0, 30)) {
@@ -6213,23 +6241,30 @@ async function quoteForteRow(env, row, { dry = false } = {}) {
       || (relayMsg ? (extractMimeText(relayMsg.payload).match(/[\w.%+\-]+@[\w.\-]+\.[a-z]{2,}/gi) || []).find(a => !_FQ_RELAY.test(a)) : '') || '';
     const label = (to || tid) + ' (' + hdr(msgs[0], 'subject').slice(0, 40) + ')';
     if (!to) { skipped.push(label + ': no buyer address'); continue; }
-    if (all.some(m => (m.labelIds || []).includes('DRAFT'))) { skipped.push(label + ': draft already in thread'); continue; }
+    if (all.some(m => (m.labelIds || []).includes('DRAFT'))) { doneAddr.add(to.toLowerCase()); skipped.push(label + ': draft already in thread'); continue; }
     // Our TP request mentions "$500 minimum" — that's not a price
     let quoted = null;
     for (const m of ours) {
-      const q = text(m).replace(/\$\s*[\d,]+\s*(?:usd\s*)?(?:min|minimum)\b/gi, '').replace(/minimum[^.\n]*\$\s*[\d,]+/gi, '').match(/\$\s*\d[\d,.]*|price\s*:\s*\d[\d,.]*/i);
+      // A below-minimum reply repeats the buyer's own TP ("At your target price of $0.75 ...") — not a price we quoted (Mike, XAL4030, Nov 5)
+      const q = text(m).replace(/(?:your|their|the)?\s*(?:target(?:\s+price)?|tp)\s*(?:of|is|at|was|[:=])?\s*\$\s*[\d.,]+/gi, '').replace(/\$\s*[\d.,]+\s*(?:per\s+piece|each|ea)?,?\s*we\s+would\s+require/gi, '').replace(/\$\s*[\d,]+\s*(?:usd\s*)?(?:min|minimum)\b/gi, '').replace(/minimum[^.\n]*\$\s*[\d,]+/gi, '').match(/\$\s*\d[\d,.]*|price\s*:\s*\d[\d,.]*/i);
       if (q) quoted = q[0].replace(/\s+/g, '') + ' on ' + new Date(hdr(m, 'date')).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
     }
-    if (quoted) { skipped.push(label + ': already quoted ' + quoted); continue; }
+    if (quoted) { doneAddr.add(to.toLowerCase()); skipped.push(label + ': already quoted ' + quoted); continue; }
     // Buyer qty from their RFQ text, capped at what we have
     const bt = (buyerMsg ? hdr(buyerMsg, 'subject') + '\n' + text(buyerMsg) : '') + '\n' + (relayMsg ? text(relayMsg) : '');
     const qm = bt.match(/(?<![$\d.,])(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(k)?\s*(?:pcs?|pieces|units?|ea)\b/i) || bt.match(/\bqty\.?\s*(?:[:=]|of)?\s*(\d{1,3}(?:,\d{3})+|\d{1,7})(k)?\b/i);
     const buyerQty = qm ? parseInt(qm[1].replace(/,/g, '')) * (qm[2] ? 1000 : 1) : 0;
-    const qty = buyerQty && ourQty ? Math.min(buyerQty, ourQty) : (buyerQty || ourQty);
-    if (qty && qty * price < 500) { skipped.push(label + `: ${qty} x ${pStr} is under the $500 min`); continue; }
-    const lines = [`MPN: ${mpn}`, mfr && `Mfr: ${mfr}`, qty && `Qty: ${qty.toLocaleString('en-US')} pcs`, dc && `Date code: ${dc}`,
+    let qty = buyerQty && ourQty ? Math.min(buyerQty, ourQty) : (buyerQty || ourQty);
+    if (moq && qty && qty < moq) qty = ourQty ? Math.min(moq, ourQty) : moq;                         // quote at the MOQ, not below it
+    if (qty && qty * price < lineMin) { skipped.push(label + `: ${qty} x ${pStr} is under the $${lineMin} min`); continue; }
+    const lines = [`MPN: ${mpn}`, mfr && `Mfr: ${mfr}`, qty && `Qty: ${qty.toLocaleString('en-US')} pcs`, moq && `MOQ: ${moq.toLocaleString('en-US')} pcs`, dc && `Date code: ${dc}`,
       loc && `Stock location: ${loc}`, lt && `Lead time: ${lt}`, `Price: ${pStr}`].filter(Boolean);
     const html = `<div>Hello,<br><br>Following up on your inquiry for ${mpn}. We can offer:<br><br>${lines.join('<br>')}<br><br>Please let us know if you would like to proceed.</div>`;
+    pending.push({ label, to, tid, msgs, html, qty });
+  }
+  for (const { label, to, tid, msgs, html, qty } of pending) {
+    if (doneAddr.has(to.toLowerCase())) { skipped.push(label + ': buyer already quoted in another thread'); continue; }
+    doneAddr.add(to.toLowerCase());
     if (dry) { drafted.push(label + ` → ${qty || '?'} @ ${pStr}`); continue; }
     const last = msgs[msgs.length - 1], subj = hdr(msgs[0], 'subject');
     const msgId = hdr(last, 'message-id'), refs = hdr(last, 'references');
