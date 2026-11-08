@@ -1224,6 +1224,19 @@ async function handleEmailAgentCore(request, env) {
           const inv2 = await lookupInventory(_c);
           if (!_invEmpty(inv2)) { inv = inv2; mpn0 = _c; body.mpn = _c; }
         }
+        // Subject is the buyer's own item code ("TF2062"), real MPN only in the body ("quote 500 pcs of this item? 1500-0133")
+        // → no match, TP reply got no_action (St. Clair, Bug 174). Try MPN-like tokens from the first message.
+        if (_invEmpty(inv)) {
+          const _fm = String(thread_content || '').split(/\n-{3} Msg 2 \|/)[0].split(/\n\s*(?:Effective|Thanks|Regards|Best)/i)[0];
+          const _cands = [...new Set((_fm.match(/\b[A-Z0-9][A-Z0-9\-\/.#+]{4,24}\b/gi) || [])
+            .filter(t => /\d/.test(t) && (/[A-Z]/i.test(t) || /-/.test(t)) && !/^\d+(?:pcs?|k|units?|ea)?$/i.test(t) &&
+                         !/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(t) && !/^\d{3}-\d{3}-\d{4}$/.test(t) && !_MPN_GENERIC_WORDS.has(t.toUpperCase()) &&
+                         t.toUpperCase() !== String(mpn0).toUpperCase()))].slice(0, 3);
+          for (const _t of _cands) {
+            const inv3 = await lookupInventory(_t);
+            if (!_invEmpty(inv3)) { inv = inv3; mpn0 = _t; body.mpn = _t; break; }
+          }
+        }
         // Require valid array fields â€" a truthy error payload like {"error":"..."} must not
         // set inventoryLookupSucceeded=true with empty arrays, which would wrongly trigger
         // the listing_removed early exit for parts that ARE in stock.
@@ -1278,6 +1291,11 @@ async function handleEmailAgentCore(request, env) {
         }
       } catch(e) { /* silently skip failed extra-MPN lookups */ }
     }
+    // An extra MPN can return the same sheet rows as the main lookup (IC Source "You Show TS482IST" on a "TS48" RFQ) →
+    // every row counted twice, quote said 1,168,000 for 584,000 (Bug 173)
+    const _dedupe = (arr, tag) => { const seen = new Set(); return arr.filter(r => { if (!r || !r.row) return true; const k = tag + r.row + '|' + String(r.mpn || '').toUpperCase(); if (seen.has(k)) return false; seen.add(k); return true; }); };
+    oem_results = _dedupe(oem_results, 'o'); in_stock_results = _dedupe(in_stock_results, 'i');
+    stan_results = _dedupe(stan_results, 's'); forte_results = _dedupe(forte_results, 'f');
   }
 
   // Augment in_stock_results with price_to_quote (col F) â€" the OEM web app omits this column.
