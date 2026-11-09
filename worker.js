@@ -1192,8 +1192,11 @@ async function handleEmailAgentCore(request, env) {
              'lepaitek.cn','amperium.com.tr','stjkelectronics.com']
       );
       const PASSTHROUGH_DOMAINS = new Set(['intransittech.com','netcomponents.com','icsource.com','gmail.com']);
+      // Scan the body only for platform relays: a direct buyer (lyz@xiongxinyk.com) listing a backup
+      // lyanzhao@aliyun.com in the signature was skipped as blocked (TPS54618CQRTERQ1, Nov 9)
+      const _relay = /messagesend@netcomponents|autosend@icsource/i.test(sender || '') || /From:[^\n]*(messagesend@netcomponents|autosend@icsource)/i.test(thread_content || '');
       const cands = [sender, icBuyerEmail, body.ics_buyer_email, body.nc_buyer_email]
-        .concat((thread_content || '').match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || []);
+        .concat(_relay ? ((thread_content || '').match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || []) : []);
       for (const email of cands) {
         const domain = (email || '').replace(/.*@/, '').toLowerCase();
         if (domain && !PASSTHROUGH_DOMAINS.has(domain) && blockedSet.has(domain)) {
