@@ -6179,7 +6179,8 @@ async function handleDraftForteQuotes(env) {
 // John ticks the Sheet1 col AF checkbox on a Forte row (or on the Find tab) → next cron drafts a quote at the col H
 // price to every buyer who RFQ'd that MPN and hasn't had a price from us yet. Result goes to col AG, box unticks.
 // Never drafts into David threads, never twice (skips threads with a draft or a sent price), $500 line minimum.
-const _FQ_RELAY = /intransittech\.com|fortetechno\.com|fortecomp\.com|amorelectronics\.com|messagesend@netcomponents|autosend@icsource|partalert@netcomponents|noreply|no-reply|mailer-daemon/i;
+// Any platform address, not just the relays: an info@netcomponents.com "SQRS Ratings Reminder" naming the MPN was about to get a quote (row 4969, Nov 9)
+const _FQ_RELAY =/intransittech\.com|fortetechno\.com|fortecomp\.com|amorelectronics\.com|@netcomponents\.com|@icsource\.com|noreply|no-reply|mailer-daemon/i;
 
 async function cronForteQuoteButtons(env) {
   const token = await getGmailToken(env);
