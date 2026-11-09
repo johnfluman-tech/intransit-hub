@@ -1452,7 +1452,9 @@ async function handleEmailAgentCore(request, env) {
     const contentLC = (thread_content || '').toLowerCase();
     const isListingSite = senderLC.includes('netcomponents.com') || senderLC.includes('icsource.com') ||
                           subjectLC.includes('netcomponents') || subjectLC.includes('icsource') ||
-                          contentLC.includes('messagesend@netcomponents') || contentLC.includes('autosend@icsource');
+                          contentLC.includes('messagesend@netcomponents') || contentLC.includes('autosend@icsource') ||
+                          // Direct email naming the platform: Zoe (BFS) "I noticed ... available on the NetComponents platform" for a part removed Nov 6 got silence (Nov 9)
+                          /net\s?components|ic\s?source/.test(contentLC);
     // Bug 139: never tell a buyer the part is gone in a thread where we already replied (quoted, TP request…) —
     // "Order is gone. Paid $75" from Turning Point got a listing_removed apology on a part we had just quoted.
     const _weReplied = /An ISO 9001 Certified Company|We have the following available|would you be able to use this part number|We need a target price/i.test(thread_content || '');
