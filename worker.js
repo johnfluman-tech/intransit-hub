@@ -1971,6 +1971,8 @@ async function handleEmailAgentCore(request, env) {
     // Not (?![\d.]) — that rejected a sentence-ending period: "My best price is $1.5." → no TP → 2nd TP request (WinWin EPM240F100C5N, Bug 152)
     const m = t.match(/\$\s*(\d+(?:\.\d+)?|\.\d+)(?!\d|\.\d)(?!\s*(?:k\b|units?\b|pieces?\b)|\s+pcs?\b)/i) ||   // \.\d+ = "$.35 each" (Quest, Bug 130)
       t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\d|\.\d)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
+      // "Negotiable. Lets start at .4" — opening offer, no $ (Sierra IC 33239444 → 2nd TP request, Bug 178). Not a qty ("start at 500 pcs")
+      t.match(/\b(?:start(?:ing)?|begin|open(?:ing)?)\s+(?:at|with|from)\s+\$?(\d*\.\d+|\d+)(?!\d|\.\d)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b|%))/i) ||
       // "4.00 each John." — bare decimal + each/ea, no $ (Cross Components, Bug 124). Decimal required so "1300 each" stays a qty
       t.match(/(?:^|[^\w.$])(\d*\.\d{1,4})\s*(?:each|ea\b|\/\s*(?:ea|pc|pcs|unit))/im) ||
       // "18u" = $18 (Chinese buyer shorthand; Fuzhou Yongbo "Dear，18u", Bug 108). \b after u rejects "10uF"/"18uH"
