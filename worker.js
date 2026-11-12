@@ -6313,7 +6313,23 @@ async function quoteForteRow(env, row, { dry = false } = {}) {
     if (dry) { drafted.push(label + ` → ${qty || '?'} @ ${pStr}`); continue; }
     const last = msgs[msgs.length - 1], subj = hdr(msgs[0], 'subject');
     const msgId = hdr(last, 'message-id'), refs = hdr(last, 'references');
+    // Reply-all: Bill/other staff or buyer colleagues already on the thread stay on the quote (Molly TMP1075DSGR row 5075, Bug 180).
+    // Same filter as executeDecision: never relays, David/Forte, generic boxes, or John himself.
+    const cc = [], _seenCc = new Set([to.toLowerCase()]);
+    for (const m of msgs) {
+      if ((m.labelIds || []).includes('DRAFT')) continue;
+      for (const h of (m.payload?.headers || [])) {
+        if (!/^(from|to|cc)$/i.test(h.name)) continue;
+        for (const a of (h.value.match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g) || [])) {
+          const al = a.toLowerCase();
+          if (_seenCc.has(al) || al === 'john.fluman@intransittech.com' || /^(rfq|sales|websiterfq|info|purchasing)@intransittech\.com$/.test(al) ||
+              /fortetechno\.com|fortecomp\.com|netcomponents\.com|icsource\.com|noreply|no-reply|mailer-daemon/.test(al)) continue;
+          _seenCc.add(al); cc.push(a);
+        }
+      }
+    }
     const mime = ['From: ' + JOHN_FROM, 'To: ' + to, 'Subject: ' + encHdr(/^re:/i.test(subj) ? subj : 'Re: ' + subj), 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8'];
+    if (cc.length) mime.splice(2, 0, 'Cc: ' + cc.join(', '));
     if (msgId) { mime.push('In-Reply-To: ' + msgId); mime.push('References: ' + ((refs ? refs + ' ' : '') + msgId).trim()); }
     mime.push('', '<div dir="ltr">' + html + SIG_HTML + buildQuotedHistory(msgs) + '</div>');
     const d = await gmailPost(env, '/drafts', { message: { threadId: tid, raw: base64url(mime.join('\r\n')) } });
