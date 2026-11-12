@@ -104,7 +104,7 @@ export default {
         return json({ payload: { subject: payload.subject, sender: payload.sender, mpn: payload.mpn, last_msg_body: String(payload.last_msg_body || '').slice(0, 400) }, decision: await r.json() });
       }
       // Forte quote button, manual/test: ?row=4806&dry=1 lists who would get a quote, nothing drafted
-      if (p === '/api/forte-quote'     && m === 'GET')  return json(await quoteForteRow(env, parseInt(url.searchParams.get('row') || '0'), { dry: url.searchParams.get('dry') === '1' }));
+      if (p === '/api/forte-quote'     && m === 'GET')  return json(await quoteForteRow(env, parseInt(url.searchParams.get('row') || '0'), { dry: url.searchParams.get('dry') === '1', requote: url.searchParams.get('requote') === '1' }));
       if (p === '/api/fix-draft'       && m === 'POST') return handleFixDraft(request, env);
       if (p === '/api/chat'            && m === 'POST') return handleChat(request, env);
       if (p === '/api/learn'           && m === 'POST') return handleLearn(request, env);
@@ -6204,7 +6204,7 @@ async function cronForteQuoteButtons(env) {
   }
 }
 
-async function quoteForteRow(env, row, { dry = false } = {}) {
+async function quoteForteRow(env, row, { dry = false, requote = false } = {}) {
   const token = await getGmailToken(env);
   const auth = { headers: { Authorization: 'Bearer ' + token } };
   const r = ((await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${FORTE_SHEET_ID}/values/Sheet1!A${row}:AE${row}`, auth).then(x => x.json())).values || [[]])[0];
@@ -6281,7 +6281,8 @@ async function quoteForteRow(env, row, { dry = false } = {}) {
         .find(x => !(buyerTp > 0 && Math.abs(parseFloat((x[1] || x[2]).replace(/,/g, '').replace(/\.+$/, '')) - buyerTp) < 1e-9));
       if (qm0) quoted = qm0[0].replace(/\s+/g, '') + ' on ' + new Date(hdr(m, 'date')).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
     }
-    if (quoted) { doneAddr.add(to.toLowerCase()); skipped.push(label + ': already quoted ' + quoted); continue; }
+    // requote=1: David got a new price → send the buyer the updated col-H price anyway, unless we already quoted that same price (row 4965, Nov 12)
+    if (quoted && (!requote || quoted.startsWith(pStr + ' '))) { doneAddr.add(to.toLowerCase()); skipped.push(label + ': already quoted ' + quoted); continue; }
     // Buyer qty from their RFQ text, capped at what we have
     const bt = (buyerMsg ? hdr(buyerMsg, 'subject') + '\n' + text(buyerMsg) : '') + '\n' + (relayMsg ? text(relayMsg) : '');
     const qm = bt.match(/(?<![$\d.,])(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(k)?\s*(?:pcs?|pieces|units?|ea)\b/i) || bt.match(/\bqty\.?\s*(?:[:=]|of)?\s*(\d{1,3}(?:,\d{3})+|\d{1,7})(k)?\b/i);
@@ -6292,7 +6293,7 @@ async function quoteForteRow(env, row, { dry = false } = {}) {
       const listed = [cell(13), cell(2)].map(v => v.replace(/[^\d]/g, '')).find(v => v && glued[1].startsWith(v) && glued[1].length > v.length);
       if (listed) buyerQty = parseInt(glued[1].slice(listed.length));
     }
-    pending.push({ label, to, tid, msgs, buyerQty });
+    pending.push({ label, to, tid, msgs, buyerQty, prior: quoted });
   }
   // One quote per buyer → put it in their most recently active thread, not the oldest RFQ (Heisener row 4965, Bug 179).
   // The reply thread often lacks the RFQ text, so the buyer's qty can come from any of their threads on this part.
@@ -6300,7 +6301,7 @@ async function quoteForteRow(env, row, { dry = false } = {}) {
   pending.sort((a, b) => lastAt(b) - lastAt(a));
   const qtyByAddr = {};
   for (const p of pending) { const a = p.to.toLowerCase(); if (p.buyerQty && !qtyByAddr[a]) qtyByAddr[a] = p.buyerQty; }
-  for (const { label, to, tid, msgs } of pending) {
+  for (const { label, to, tid, msgs, prior } of pending) {
     if (doneAddr.has(to.toLowerCase())) { skipped.push(label + ': buyer already quoted in another thread'); continue; }
     const buyerQty = qtyByAddr[to.toLowerCase()] || 0;
     let qty = buyerQty && ourQty ? Math.min(buyerQty, ourQty) : (buyerQty || ourQty);
@@ -6308,9 +6309,9 @@ async function quoteForteRow(env, row, { dry = false } = {}) {
     if (qty && qty * price < lineMin) { skipped.push(label + `: ${qty} x ${pStr} is under the $${lineMin} min`); continue; }
     const lines = [`MPN: ${mpn}`, mfr && `Mfr: ${mfr}`, qty && `Qty: ${qty.toLocaleString('en-US')} pcs`, moq && `MOQ: ${moq.toLocaleString('en-US')} pcs`, dc && `Date code: ${dc}`,
       loc && `Stock location: ${loc}`, lt && `Lead time: ${lt}`, `Price: ${pStr}`].filter(Boolean);
-    const html = `<div>Hello,<br><br>Following up on your inquiry for ${mpn}. We can offer:<br><br>${lines.join('<br>')}<br><br>Please let us know if you would like to proceed.</div>`;
+    const html = `<div>Hello,<br><br>${prior ? `We have an updated offer for ${mpn}:` : `Following up on your inquiry for ${mpn}. We can offer:`}<br><br>${lines.join('<br>')}<br><br>Please let us know if you would like to proceed.</div>`;
     doneAddr.add(to.toLowerCase());
-    if (dry) { drafted.push(label + ` → ${qty || '?'} @ ${pStr}`); continue; }
+    if (dry) { drafted.push(label + ` → ${qty || '?'} @ ${pStr}` + (prior ? ` (requote, was ${prior})` : '')); continue; }
     const last = msgs[msgs.length - 1], subj = hdr(msgs[0], 'subject');
     const msgId = hdr(last, 'message-id'), refs = hdr(last, 'references');
     // Reply-all: Bill/other staff or buyer colleagues already on the thread stay on the quote (Molly TMP1075DSGR row 5075, Bug 180).
