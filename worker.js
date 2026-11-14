@@ -4924,9 +4924,19 @@ async function cronCheckDavidNoStock(env) {
       const bodyNoStk = _ownText.length > 0 && _ownText.length <= 40 && NO_STK.some(kw => _ownCompact.includes(kw.replace(/\s+/g, '')));
       // "MT41K128M16JT-107  4765 sold" — Forte row number + "sold" = gone (Bug 134)
       const rowSold = /\b#?\d{3,5}\s+sold\b/.test(checkText);
-      const isNoStk = bodyNoStk || rowSold || NO_STK.some(kw => checkText.includes(kw) || checkCompact.includes(kw.replace(/\s+/g, '')));
+      // "UCC28730QDRQ1   5121 No stl" — one-letter typo of "stk" (Bug 182)
+      const stkTypo = /\bno\s*s\s*t\s*[kljc]\b/.test(checkText);
+      const isNoStk = bodyNoStk || rowSold || stkTypo || NO_STK.some(kw => checkText.includes(kw) || checkCompact.includes(kw.replace(/\s+/g, '')));
       if (!isNoStk) {
         await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
+        continue;
+      }
+      // Retraction: "UCC28730QDRQ1 5121 Check I said No stock earlier my mistaek" + "Its available my mistake" —
+      // subject kept "No stock" so his correction re-fired the removal (2nd approval email, Bug 183). Never remove on a retraction.
+      const _retract = /\bmy\s*(?:mistake|mistaek|mistak|bad|error)\b|\b(?:it'?s|is|still|now)\s+(?:available|avail|in\s*stock|in\s*stk)\b|\bplease\s+(?:do\s+)?(?:quote|re-?add|put\s+(?:it\s+)?back|re-?list)\b|\bdo\s+quote\b|\bignore\s+(?:my\s+)?(?:last|previous|earlier)\b/;
+      if (_retract.test(checkText) || _retract.test(_ownText)) {
+        await gPost('/threads/' + tid + '/modify', { addLabelIds: addLabels });
+        await hubLog(env, 'email_automation', 'run', `cronCheckDavidNoStock: retraction ("my mistake"/"available") — no removal tid=${tid}`);
         continue;
       }
 
@@ -4949,7 +4959,7 @@ async function cronCheckDavidNoStock(env) {
       const _subjectFirstToken = _subjectCore.split(/\s+/)[0];
       const mpn = extractMpnHint(subject)
         || (_subjectFirstToken && _subjectFirstToken.length >= 4 && /[0-9]/.test(_subjectFirstToken) ? _subjectFirstToken.toUpperCase() : null);
-      const rowMatch = subject.match(/#(\d+)/) || subject.match(/\s(\d{3,5})\s+(?:sold|no\s*stk)\b/i);
+      const rowMatch = subject.match(/#(\d+)/) || subject.match(/\s(\d{3,5})\s+(?:sold|no\s*s\s*t\s*[kljc])\b/i);
       const row = rowMatch ? parseInt(rowMatch[1], 10) : null;
 
       const msgId = getHdr(lastMsg, 'Message-ID');
