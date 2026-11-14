@@ -1970,6 +1970,7 @@ async function handleEmailAgentCore(request, env) {
     // (?!\d|\.\d) stops backtracking: "Target is $12pc" was read as $1 (Pride MC68711E20CFNE2, Bug 151). "$12pc" glued = per piece.
     // Not (?![\d.]) — that rejected a sentence-ending period: "My best price is $1.5." → no TP → 2nd TP request (WinWin EPM240F100C5N, Bug 152)
     const m = t.match(/\$\s*(\d+(?:\.\d+)?|\.\d+)(?!\d|\.\d)(?!\s*(?:k\b|units?\b|pieces?\b)|\s+pcs?\b)/i) ||   // \.\d+ = "$.35 each" (Quest, Bug 130)
+      t.match(/\btp\s*(\d{1,3}(?:\.\d+)?|\.\d+)(?!\w|\.\d)/i) ||   // "TP5.5" glued, no $ (Bug 181)
       t.match(/\b(?:around|about|approx(?:imately)?|roughly|~)\s*(\d+\.\d+)(?!\d|\.\d)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b))/i) ||
       // "Negotiable. Lets start at .4" — opening offer, no $ (Sierra IC 33239444 → 2nd TP request, Bug 178). Not a qty ("start at 500 pcs")
       t.match(/\b(?:start(?:ing)?|begin|open(?:ing)?)\s+(?:at|with|from)\s+\$?(\d*\.\d+|\d+)(?!\d|\.\d)(?!\s*(?:k\b|pcs?\b|units?\b|pieces?\b|%))/i) ||
@@ -2022,6 +2023,7 @@ async function handleEmailAgentCore(request, env) {
       /\btp\s*[:=]\s*\$?\.?\d/i.test(_lc) ||
       /\b(?:tp|target(?:\s*price)?)\s+(?:at|of|is|@)\s*\$?\.?\d/i.test(_lc) ||   // "tp at 0.5" (Goldney), "Target price is .19" (B2 Micro, Bug 117)
       /\b(?:tp|target(?:\s*price)?)\s*\$\s*\.?\d/i.test(_lc) ||                 // "TP $10" (Fuzhou Yongbo)
+      /\btp\s*(?:\d{1,3}(?:\.\d+)?|\.\d+)(?!\w|\.\d)/i.test(_lc) ||             // "TP5.5" glued (Linwotian LT1170CQTRPBF → 2nd TP request, Bug 181); \d{1,3}+(?!\w) keeps TP0610K/TP2104 MPNs out
       /\$\s*(?:\d+(?:\.\d+)?|\.\d+)\s*(?:tp|target)\b/i.test(_lc) ||           // "10k pcs at $9 TP" (Source1, Bug 131)
       _TP_WOULD_BE.test(_lc) ||
       _TP_BARE.test(_lc) ||                                                     // "Target .40" (Hi-Tek, Bug 122)                                                 // "my target would be 1.50 – 1.75" (Legacy, Bug 118)
