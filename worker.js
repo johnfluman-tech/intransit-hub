@@ -4353,7 +4353,9 @@ async function cronScanInbox(env) {
       if (rfqThreads.includes(m.threadId)) continue;
       if (await env.DB.prepare("SELECT 1 FROM rules WHERE type='subj_checked' AND key=?").bind(m.id).first().catch(() => null)) continue;
       const md = await gGet('/messages/' + m.id + '?format=metadata&metadataHeaders=Subject').catch(() => null);
-      const subj = ((md?.payload?.headers || []).find(h => h.name.toLowerCase() === 'subject') || {}).value || '';
+      // Full-width "：" ("Re：ICSource：NCP1392BDR2G\t754153pcs") left no space before the MPN → never matched,
+      // Sophia's RFQ + $0.10 TP reply sat with no draft (Bug 185). NFKC turns "：" into ":".
+      const subj = (((md?.payload?.headers || []).find(h => h.name.toLowerCase() === 'subject') || {}).value || '').normalize('NFKC');
       await env.DB.prepare("INSERT INTO rules (type, key, value) VALUES ('subj_checked', ?, ?)").bind(m.id, subj.slice(0, 100)).run().catch(() => {});
       // Comma inside the MPN ("BAS16L,315\t500000PCS") never matched → Eran's RFQ sat with no draft (Bug 146)
       if (/(?:^|\s)(?=[A-Z0-9\-\/.#_:+,]*\d)(?=[A-Z0-9\-\/.#_:+,]*[A-Z])[A-Z0-9][A-Z0-9\-\/.#_:+,]{3,}\s+[\d,]+\s*(?:pcs?|units?|ea)\b/i.test(subj)) {
