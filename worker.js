@@ -5255,6 +5255,10 @@ async function cronProcessCommandQueue(env) {
         // If mpn looks like a full subject (contains spaces), extract the real MPN from it
         const mpn = _rawMpn.includes(' ') ? (extractMPNFromText(_rawMpn) || _rawMpn) : _rawMpn;
         if (!mpn) throw new Error('reverse_oem_removal: mpn required');
+        // An approved removal still sitting in fix_queue would run AFTER this restore and delete the row again
+        // (UCC28730QDRQ1: approval #137 12:55 → restore 12:56 → fix_queue oem_remove 13:00 re-deleted + NO STK, Bug 185)
+        await env.DB.prepare("UPDATE fix_queue SET status='cancelled', error='cancelled by reverse_oem_removal', updated_at=datetime('now') WHERE type='oem_remove' AND status='pending' AND UPPER(draft_body) LIKE ?")
+          .bind('%"MPN":"' + mpn.toUpperCase() + '"%').run().catch(() => {});
         // 1. Try D1 backup (saved by oem_remove handler before deletion)
         let restoredRow = data.row_data || null; // allow caller to provide explicit row_data fallback
         if (!restoredRow) {
