@@ -1107,11 +1107,27 @@ function oemExactRows(rows, mpn) {
   const ex = mpn ? (rows || []).filter(r => n(r.mpn) === n(mpn)) : [];
   return ex.length ? ex : (rows || []);
 }
-function oemLineMin(rows, mpn) {
+// Buyer qty known → only rows that can fill it set the minimum. Roy TPS74801DRCR "QTY: 110k": the 266-pc $2000 row
+// beat the 111,163-pc $500 row → TP request said $2,000 (Bug 184). No row covers → the biggest row decides.
+function oemLineMin(rows, mpn, qty) {
   rows = oemExactRows(rows, mpn);
   const nb = (rows || []).filter(r => !/BILL EXT/i.test(r.notes || ''));
-  const use = nb.length ? nb : (rows || []);
+  let use = nb.length ? nb : (rows || []);
+  const rq = r => parseInt(String(r.qty || '').replace(/[^\d]/g, '')) || 0;
+  if (qty > 0 && use.length > 1) {
+    const cover = use.filter(r => rq(r) >= qty);
+    use = cover.length ? cover : [use.reduce((a, b) => rq(b) > rq(a) ? b : a)];
+  }
   return use.length ? Math.max(...use.map(rowLineMin)) : 500;
+}
+// Buyer's requested qty for the line-min choice: "QTY: 110k", "Qty: 5,000", "10k pcs", "500 pcs"
+function _rfqQtyOf(text) {
+  const t = String(text || '').replace(/&nbsp;?/gi, ' ');
+  const m = t.match(/\bq(?:ty|uantity)\s*(?:req\w*)?\s*[:=]?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k)?(?![\w.])/i) ||
+            t.match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k)?\s*(?:pcs?|pieces|units?)\b/i);
+  if (!m) return null;
+  const n = parseFloat(m[1].replace(/,/g, '')) * (m[2] ? 1000 : 1);
+  return n >= 1 ? Math.round(n) : null;
 }
 function tpRequestBody(min) { return `We need a target price to proceed. Please note there is a $${Number(min).toLocaleString('en-US')} minimum line requirement. Once we have your target we will get back to you right away.`; }
 
@@ -1641,7 +1657,7 @@ async function handleEmailAgentCore(request, env) {
     // deterministic engine handle it as stan_quoted instead of firing TP request here.
     const _hasStanQuoted = (stan_results || []).some(r => r.status === 'QUOTED' && r.colB);
     if (!hasBuyerTp && !_hasStanQuoted) {
-      const _min0 = oemLineMin(oem_results, requestMpn), has2k = _min0 >= 2000;
+      const _min0 = oemLineMin(oem_results, requestMpn, _rfqQtyOf(thread_content)), has2k = _min0 >= 2000;
       const _tpTpl = tpRequestBody(_min0);
       await hubLog(env, 'email_automation', 'debug', `handleEmailAgent: OEM pre-check — no buyer TP, returning ${has2k ? 'request_tp_2000' : 'request_tp_500'}`, { subject, mpn: requestMpn });
       return json({ action: has2k ? 'request_tp_2000' : 'request_tp_500', reasoning: 'Deterministic: OEM EXCESS exists, buyer gave no TP', mpn: requestMpn, buyer_email: null, draft_body: _tpTpl, forte_entry: null, oem_delete_row: null });
@@ -1808,6 +1824,9 @@ async function handleEmailAgentCore(request, env) {
     // "need 10k pcs" — k-suffixed qty (Source1 MAX17498BATE, Bug 131)
     const _kQty = !_qtyM && (thread_content || '').match(/\b(\d{1,4}(?:\.\d+)?)\s*k\s*(?:pcs?|pieces|units|ea)\b/i);
     if (_kQty) _buyerQty = Math.round(parseFloat(_kQty[1]) * 1000);
+    // "QTY: 110k" — k after a qty label, no "pcs" → was read as 110 (Roy TPS74801DRCR, Bug 184)
+    const _qK = (thread_content || '').match(/\bq(?:ty|uantity)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\s*k(?![\w])/i);
+    if (_qK && _buyerQty === parseInt(_qK[1])) _buyerQty = Math.round(parseFloat(_qK[1]) * 1000);
     // Buyer's latest message restates qty → it wins over the original RFQ line, same as TP (Bug 123).
     // WWD 8655MH2511LF: RFQ for 28, reply "$10.00 each / 100 units" → Forte/min math used 28 (Bug 153)
     const _lmQty = /--- Msg 2 \|/.test(thread_content || '') &&
@@ -2296,7 +2315,7 @@ async function handleEmailAgentCore(request, env) {
   // Code-level guard: msg_checking must become below_min_line if qty Ã— TP < minimum.
   // Haiku occasionally skips this check even when the prompt instructs it explicitly.
   if (decision.action === 'msg_checking') {
-    const lineMin = oemLineMin(oem_results, decision.mpn || requestMpn);
+    const lineMin = oemLineMin(oem_results, decision.mpn || requestMpn, Number(decision.qty) || _rfqQtyOf(thread_content));
     const qty = decision.qty && decision.qty > 0 ? Number(decision.qty) : null;
     const tp  = decision.target_price && decision.target_price > 0 ? Number(decision.target_price) : null;
     if (qty && tp && (qty * tp) < lineMin) {
@@ -2318,7 +2337,7 @@ async function handleEmailAgentCore(request, env) {
   // Priority: (1) price_to_quote col from IN STOCK sheet, (2) D1 stock_prices table.
   // TP request always states the listing's real minimum ($200 / $500 / $2,000) — the templates only know $500 and $2,000 (Bug 150)
   if ((decision.action === 'request_tp_500' || decision.action === 'request_tp_2000') && (oem_results || []).length) {
-    decision.draft_body = tpRequestBody(oemLineMin(oem_results, decision.mpn || requestMpn));
+    decision.draft_body = tpRequestBody(oemLineMin(oem_results, decision.mpn || requestMpn, _rfqQtyOf(thread_content)));
   }
 
   if (decision.action === 'own_stock') {
@@ -4309,7 +4328,7 @@ async function cronScanInbox(env) {
   // URL-encoded query exceed Gmail API limits, causing silent empty results. Blocked domains
   // are caught by the code-level pre-flight check in handleEmailAgent instead.
   const rfqQ = encodeURIComponent(
-    'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR to:icsource.quotes@intransittech.com OR deliveredto:icsource.quotes@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR subject:enquiry OR subject:inquiry OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com OR to:fluman@intransittech.com OR deliveredto:fluman@intransittech.com OR to:sales@intransittech.com OR deliveredto:sales@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability" OR "your price" OR "price and quantity" OR "purchase" OR "need to buy" OR "price each" OR "usd each" OR "pcs" OR "pieces" OR "i need"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed newer_than:3d'
+    'in:inbox (to:rfq@intransittech.com OR deliveredto:rfq@intransittech.com OR to:icsource.quotes@intransittech.com OR deliveredto:icsource.quotes@intransittech.com OR subject:rfq OR from:autosend@icsource.com OR subject:"please quote" OR subject:"request for quote" OR subject:"request for quotation" OR subject:"looking for" OR subject:enquiry OR subject:inquiry OR ((to:john.fluman@intransittech.com OR deliveredto:john.fluman@intransittech.com OR to:fluman@intransittech.com OR deliveredto:fluman@intransittech.com OR to:sales@intransittech.com OR deliveredto:sales@intransittech.com) ("quotation" OR "best price" OR "netcomponents" OR "looking for" OR "quote your stock" OR "can you quote" OR "is it in stock" OR "availability" OR "your price" OR "price and quantity" OR "purchase" OR "need to buy" OR "price each" OR "usd each" OR "pcs" OR "pieces" OR "i need" OR "purchasing" OR "preferential" OR "qty" OR "quantity"))) -from:intransittech.com -from:fortetechno.com -from:fortecomp.com -from:partalert@netcomponents.com -label:oem-rfq-incoming-processed newer_than:3d'
   );
   const tpQ = encodeURIComponent(
     'in:inbox (label:oem-rfq-incoming-processed OR from:messagesend@netcomponents.com) -label:oem-tp-processed -from:partalert@netcomponents.com newer_than:60d'
