@@ -6305,6 +6305,8 @@ async function quoteForteRow(env, row, { dry = false, requote = false } = {}) {
       || (relayMsg ? (extractMimeText(relayMsg.payload).match(/[\w.%+\-]+@[\w.\-]+\.[a-z]{2,}/gi) || []).find(a => !_FQ_RELAY.test(a)) : '') || '';
     const label = (to || tid) + ' (' + hdr(msgs[0], 'subject').slice(0, 40) + ')';
     if (!to) { skipped.push(label + ': no buyer address'); continue; }
+    // Supplier stock-offer blast ("Found: The XILINX/INTEL/INFINEON Parts You Needed", Jane Unibetter row 5143, Bug 186): a seller, not an RFQ
+    if (!relayMsg && !ours.length && buyerMsg && /available for immediate delivery|currently in stock and available|(?:global|leading) independent distributor|parts you needed|we (?:have|can offer) (?:the )?(?:following|below) (?:parts|items|stock)/i.test(hdr(buyerMsg, 'subject') + ' ' + text(buyerMsg))) { skipped.push(label + ': supplier stock offer, not an RFQ'); continue; }
     if (all.some(m => (m.labelIds || []).includes('DRAFT'))) { doneAddr.add(to.toLowerCase()); skipped.push(label + ': draft already in thread'); continue; }
     // Our TP request mentions "$500 minimum" — that's not a price
     let quoted = null;
@@ -6322,7 +6324,10 @@ async function quoteForteRow(env, row, { dry = false, requote = false } = {}) {
     if (quoted && (!requote || quoted.startsWith(pStr + ' '))) { doneAddr.add(to.toLowerCase()); skipped.push(label + ': already quoted ' + quoted); continue; }
     // Buyer qty from their RFQ text, capped at what we have
     const bt = (buyerMsg ? hdr(buyerMsg, 'subject') + '\n' + text(buyerMsg) : '') + '\n' + (relayMsg ? text(relayMsg) : '');
-    const qm = bt.match(/(?<![$\d.,])(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(k)?\s*(?:pcs?|pieces|units?|ea)\b/i) || bt.match(/\bqty\.?\s*(?:[:=]|of)?\s*(\d{1,3}(?:,\d{3})+|\d{1,7})(k)?\b/i);
+    // "Quantity: 10000" / subject "BTS50055-1TMA    10000" (Ryan szhorin row 5143 → was quoted our 15000, Bug 186)
+    const subjQ = buyerMsg ? hdr(buyerMsg, 'subject').replace(/^(?:(?:re|fw|fwd|回复|答复)\s*[:：]\s*)+/i, '') : '';
+    const qm = bt.match(/(?<![$\d.,])(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(k)?\s*(?:pcs?|pieces|units?|ea)\b/i) || bt.match(/\bq(?:ty|uantity)\.?\s*(?:req\w*)?\s*(?:[:=：]|of)?\s*(\d{1,3}(?:,\d{3})+|\d{1,7})(k)?\b/i)
+      || (norm(subjQ).startsWith(key) ? subjQ.match(/^\S+\s+(\d{1,3}(?:,\d{3})+|\d{2,7})(k)?\s*$/i) : null);
     let buyerQty = qm ? parseInt(qm[1].replace(/,/g, '')) * (qm[2] ? 1000 : 1) : 0;
     // netCOMPONENTS plain text glues QtyListed+QtyReq after the description: "...TP REQUIRED66500025000" = 665,000 listed, 25,000 req (Heisener row 4965, Bug 179)
     const glued = relayMsg ? text(relayMsg).match(/(?:REQUIRED|EXCESS!?|MIN)\s*(\d{4,})/i) : null;
