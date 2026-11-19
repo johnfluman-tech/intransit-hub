@@ -1818,8 +1818,8 @@ async function handleEmailAgentCore(request, env) {
       (thread_content || '').match(/qty\s*req\w*\s*[:=]?\s*(\d{1,7})/i) ||
       (thread_content || '').match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*pcs?\b/i) ||  // "19,800 pcs" was read as 800 (1-Source, Bug 149); "$12pc" is a price, not qty 12 (Pride, Bug 151)
       (thread_content || '').match(/^\s*(\d{1,7})\s*p\s*$/im) ||  // "100p" on its own line (Aonics, Bug 142)
-      (thread_content || '').match(/qty\s*[:=]\s*(\d{1,7})/i) ||
-      (thread_content || '').match(/\bqty\s+(\d{1,7})\b/i);  // "Qty 25" — no colon (Quest AD629BR got the WH3 stock qty 70, Bug 140)
+      (thread_content || '').match(/q(?:ty|uantity)\s*[:=]\s*(\d{1,3}(?:,\d{3})+|\d{1,7})/i) ||  // "Qty: 1,300 EA" was read as 1 (Velocity FN5.5-4, Bug 187)
+      (thread_content || '').match(/\bqty\s+(\d{1,3}(?:,\d{3})+|\d{1,7})\b/i);  // "Qty 25" — no colon (Quest AD629BR got the WH3 stock qty 70, Bug 140)
     let _buyerQty = _qtyM ? parseInt(_qtyM[1].replace(/,/g, '')) : null;
     // "need 10k pcs" — k-suffixed qty (Source1 MAX17498BATE, Bug 131)
     const _kQty = !_qtyM && (thread_content || '').match(/\b(\d{1,4}(?:\.\d+)?)\s*k\s*(?:pcs?|pieces|units|ea)\b/i);
@@ -1830,7 +1830,8 @@ async function handleEmailAgentCore(request, env) {
     // Buyer's latest message restates qty → it wins over the original RFQ line, same as TP (Bug 123).
     // WWD 8655MH2511LF: RFQ for 28, reply "$10.00 each / 100 units" → Forte/min math used 28 (Bug 153)
     const _lmQty = /--- Msg 2 \|/.test(thread_content || '') &&
-      String(body.last_msg_body || '').match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units?)\b/i);
+      (String(body.last_msg_body || '').match(/(?<![$\d.,])\b(\d{1,3}(?:,\d{3})+|\d{1,7})\s*(?:pcs?|pieces|units?|ea)\b/i) ||
+       String(body.last_msg_body || '').match(/\bq(?:ty|uantity)\s*[:=]\s*(\d{1,3}(?:,\d{3})+|\d{1,7})(?![\d.]|\s*k\b)/i));  // "$0.28/EA, Qty: 1,786 EA" (Velocity FN5.5-4, Bug 187)
     if (_lmQty) _buyerQty = parseInt(_lmQty[1].replace(/,/g, ''));
     // "0.30 $ for 84K PCS" — k-suffixed qty in the latest message wins too (Rebound, Bug 158)
     const _lmK = /--- Msg 2 \|/.test(thread_content || '') && String(body.last_msg_body || '').split(/\n\s*(?:From:|-----Original|On .{5,90}wrote:)/)[0]
