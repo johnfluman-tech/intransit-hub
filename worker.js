@@ -897,8 +897,23 @@ async function extractMpnFromThread(subject, content, env) {
 const _TP_BARE = /\btarget(?:\s*price)?\s+\$?(\d*\.?\d+)(?!\d|\.\d|\s*(?:k\b|pcs?\b|units?\b|pieces?\b|%))/i;
 const _TP_WOULD_BE =/\b(?:tp|target(?:\s*price)?)\s+(?:would|will|should|could|can|may|might)\s+be\s*(?:around|about|approx(?:imately)?\.?|~)?\s*\$?(\d*\.?\d+)/i;
 
+// Two MPNs glued with no separator in one OEM cell: "DMN2008LFU-7DMN2008LFU-13" (Bug 188, Gianna szbshx Nov 20)
+// → split where the cell's first 5 alphanumerics repeat. Returns [cell] when there's no glued repeat.
+function _splitGluedMpns(cell) {
+  const s = String(cell || '').trim();
+  const head = s.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+  if (head.length < 5 || !/[A-Z]/.test(head)) return [s];
+  const u = s.toUpperCase();
+  for (let i = 5; i <= u.length - 5; i++) {
+    if (u.startsWith(head, i) && /[A-Z0-9]/.test(u[i - 1])) return [s.slice(0, i), ..._splitGluedMpns(s.slice(i))];
+  }
+  return [s];
+}
+
 function isMpnMatch(requestMpn, resultMpn) {
   if (!requestMpn || !resultMpn) return false;
+  const _glued = _splitGluedMpns(resultMpn);
+  if (_glued.length > 1) return _glued.some(seg => isMpnMatch(requestMpn, seg));
   const norm = s => s.toUpperCase().replace(/[^A-Z0-9]/g, '');
   const a = norm(requestMpn);
   const b = norm(resultMpn);
@@ -1615,7 +1630,7 @@ async function handleEmailAgentCore(request, env) {
     // "MT40A512M16LY-062E IT:E" — suffix with a colon/dash ("IT:E") was missed → own stock asked as variant (Bug 145)
     const _sfx = ((subject || '') + '\n' + (thread_content || '')).match(new RegExp(_esc(requestMpn) + '[ \\t]+([A-Z0-9](?:[A-Z0-9]|[:\\-](?=[A-Z0-9])){0,5})(?![A-Z0-9:\\-])', 'i'));
     const _reqs = _sfx ? [requestMpn, requestMpn + _sfx[1]] : [requestMpn];
-    const _exact = _inv.flatMap(m => [m, ...m.split(/\s+\/\s*|\s*\/\s+/)]).some(m => _reqs.some(q => _n(m) === _n(q) || _base(m) === _base(q)));
+    const _exact = _inv.flatMap(m => [m, ...m.split(/\s+\/\s*|\s*\/\s+/), ..._splitGluedMpns(m)]).some(m => _reqs.some(q => _n(m) === _n(q) || _base(m) === _base(q)));
     if (_sfx) { const _jm = _inv.find(m => _n(m) === _n(requestMpn + _sfx[1])); if (_jm) { requestMpn = _jm.trim(); body.mpn = requestMpn; } }
     const _similar = [...new Set(_inv.filter(m => isMpnMatch(requestMpn, m)))];
     if (!_exact && _similar.length > 0) {
